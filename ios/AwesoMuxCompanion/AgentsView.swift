@@ -9,7 +9,7 @@ struct AgentsView: View {
                 List {
                     if let record = store.record {
                         Section {
-                            HStack(spacing: 4) {
+                            VStack(alignment: .leading, spacing: 2) {
                                 Text(record.macName).font(.subheadline.weight(.semibold)).foregroundStyle(Cat.text)
                                 MacStatusLine(store: store, transport: record.transport)
                             }

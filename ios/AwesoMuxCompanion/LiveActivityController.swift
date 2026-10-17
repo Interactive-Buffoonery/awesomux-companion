@@ -17,12 +17,16 @@ final class LiveActivityController {
     /// Keeps the content's stale date moving forward while nothing else changes.
     private let heartbeat: TimeInterval = 60
     private var lastUpdate: (state: GlanceActivityAttributes.ContentState, at: Date)?
+    /// Bumped by `endAll`; a sync that suspended across it must not start a new activity.
+    private var generation = 0
 
     func sync(_ snapshot: GlanceSnapshot, connected: Bool) async {
         let state = GlanceActivityAttributes.ContentState(snapshot, connected: connected)
         let hasWork = state.needsYou + state.working > 0
-        let offlineTooLong = !connected && Date.now.timeIntervalSince(state.updatedAt) > offlineLimit
-        let running = GlanceActivity.activities.filter { $0.activityState == .active }
+        let offlineTooLong = !connected && state.updatedAt.map { Date.now.timeIntervalSince($0) > offlineLimit } ?? true
+        let startGeneration = generation
+        // Stale activities are still on screen and must be reconciled, not replaced.
+        let running = GlanceActivity.activities.filter { $0.activityState == .active || $0.activityState == .stale }
 
         for activity in running.dropFirst() { await activity.end(nil, dismissalPolicy: .immediate) }
         if let activity = running.first {
@@ -42,7 +46,7 @@ final class LiveActivityController {
             lastUpdate = nil
         }
 
-        guard hasWork, connected, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        guard generation == startGeneration, hasWork, connected, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         do {
             _ = try GlanceActivity.request(attributes: .init(hostName: snapshot.hostName), content: content(state))
             lastUpdate = (state, .now)
@@ -52,6 +56,7 @@ final class LiveActivityController {
     }
 
     func endAll() async {
+        generation += 1
         for activity in GlanceActivity.activities { await activity.end(nil, dismissalPolicy: .immediate) }
         lastUpdate = nil
     }

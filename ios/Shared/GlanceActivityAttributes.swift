@@ -14,7 +14,7 @@ struct GlanceActivityAttributes: ActivityAttributes {
         let working: Int
         let done: Int
         let top: TopItem?
-        let updatedAt: Date
+        let updatedAt: Date?
         let connected: Bool
     }
 

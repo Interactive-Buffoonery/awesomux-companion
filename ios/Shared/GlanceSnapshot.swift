@@ -46,13 +46,19 @@ struct GlanceSnapshot: Codable, Equatable, Sendable {
     let hostName: String
     let connected: Bool
     let error: String?
-    let updatedAt: Date
+    let updatedAt: Date?
     let agents: [GlanceAgent]
 
     func count(_ group: GlanceGroup) -> Int { agents.count { $0.group == group } }
     func agents(in group: GlanceGroup) -> [GlanceAgent] { agents.filter { $0.group == group } }
     /// The relay orders agents oldest-first within `needsYou`, so the first match is the longest wait.
     var topAgent: GlanceAgent? { agents.first { $0.group == .needsYou } ?? agents.first { $0.group == .working } }
+
+    /// The same agents marked offline, for when the relay can't be reached or the data has aged out.
+    func offline() -> GlanceSnapshot {
+        GlanceSnapshot(schemaVersion: schemaVersion, hostName: hostName, connected: false,
+                       error: error ?? "unreachable", updatedAt: updatedAt, agents: agents)
+    }
 
     enum DecodingFailure: Error { case unsupportedSchema }
 
@@ -79,6 +85,8 @@ struct GlanceSnapshot: Codable, Equatable, Sendable {
 /// The latest snapshot, shared with the widget extension through the App Group container.
 enum SharedSnapshot {
     static let appGroup = "group.com.interactivebuffoonery.awesomux.companion"
+    /// The widget shows a connected snapshot as offline once it is this old.
+    static let freshFor: TimeInterval = 15 * 60
 
     private static var fileURL: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)?

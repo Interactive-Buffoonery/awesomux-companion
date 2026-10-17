@@ -61,7 +61,8 @@ events, `currentStateRecoveryRequired: true`, and a fresh cursor: call
 - `connected: false` with `error` set to the helper error code (or
   `helper_failed`) when the latest read failed. `agents` then holds the last
   good list and `updatedAt` its capture time; never an empty list that hides
-  the failure.
+  the failure. Before the first good read, `agents` is empty and `updatedAt`
+  is null.
 - `group` is derived by the relay, never the app:
   - `needsYou`: an open (raised, unresolved) alert exists for the pane, or
     `attentionReason` is non-null, or `state` is `waiting`,

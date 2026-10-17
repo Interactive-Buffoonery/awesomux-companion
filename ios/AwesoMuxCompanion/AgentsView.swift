@@ -133,7 +133,7 @@ private struct AgentRow: View {
 
 private struct ConnectionIndicator: View {
     let connected: Bool
-    let updatedAt: Date
+    let updatedAt: Date?
 
     var body: some View {
         HStack(spacing: 4) {
@@ -141,8 +141,10 @@ private struct ConnectionIndicator: View {
                 .foregroundStyle(connected ? .green : .orange)
             if connected {
                 Text("Connected")
-            } else {
+            } else if let updatedAt {
                 Text("Offline · \(AgeText.text(since: updatedAt))")
+            } else {
+                Text("Offline")
             }
         }
         .font(.caption)
@@ -150,6 +152,7 @@ private struct ConnectionIndicator: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(connected
             ? String(localized: "Connected to your Mac")
-            : String(localized: "Offline, last updated \(updatedAt.formatted(.relative(presentation: .named)))"))
+            : updatedAt.map { String(localized: "Offline, last updated \($0.formatted(.relative(presentation: .named)))") }
+                ?? String(localized: "Offline"))
     }
 }

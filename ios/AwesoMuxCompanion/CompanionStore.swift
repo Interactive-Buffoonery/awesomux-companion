@@ -25,6 +25,7 @@ final class CompanionStore {
     @ObservationIgnored private var appliedSequence = 0
     @ObservationIgnored private var explicitlyDisconnected = false
     @ObservationIgnored private var requestedNotifications = false
+    @ObservationIgnored private var lastSharedWrite = Date.distantPast
     @ObservationIgnored private let credentials: any HostCredentialStorage
     @ObservationIgnored private let liveActivity = LiveActivityController()
     #if DEBUG && targetEnvironment(simulator)
@@ -92,6 +93,7 @@ final class CompanionStore {
         _ = try next.validatedURL()
         let priorHost = activeHostLabel
         invalidateConnection(); connectionState = .quarantined(priorHost)
+        clearSharedState()
         do {
             let candidate = try BridgeClient(configuration: next)
             try credentials.save(next)
@@ -157,7 +159,14 @@ final class CompanionStore {
             case BridgeFailure.invalidResponse: String(localized: "Your Mac sent an update this app can't read.")
             default: String(localized: "Can't reach your Mac.")
             }
-            if let snapshot { await liveActivity.sync(snapshot, connected: false) }
+            if let snapshot {
+                if snapshot.connected {
+                    let offline = snapshot.offline()
+                    SharedSnapshot.write(offline); WidgetCenter.shared.reloadAllTimelines()
+                    self.snapshot = offline
+                }
+                await liveActivity.sync(snapshot, connected: false)
+            }
         }
     }
 
@@ -165,8 +174,11 @@ final class CompanionStore {
         let previous = snapshot
         snapshot = next; reachable = true
         message = next.connected ? nil : String(localized: "awesoMux isn't answering on your Mac (\(next.error ?? "helper_failed")).")
-        if previous?.agents != next.agents || previous?.connected != next.connected || previous?.hostName != next.hostName {
-            SharedSnapshot.write(next)
+        if previous?.agents != next.agents || previous?.connected != next.connected || previous?.hostName != next.hostName
+            || SharedSnapshot.read()?.connected != next.connected
+            // Refresh well inside the widget's freshness window so a quiet, healthy host never ages out.
+            || Date.now.timeIntervalSince(lastSharedWrite) > SharedSnapshot.freshFor / 3 {
+            SharedSnapshot.write(next); lastSharedWrite = .now
             WidgetCenter.shared.reloadAllTimelines()
         }
         await liveActivity.sync(next, connected: next.connected)

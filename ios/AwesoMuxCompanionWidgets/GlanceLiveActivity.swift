@@ -79,7 +79,7 @@ private struct TopItemLine: View {
             if !state.connected || isStale {
                 Label("Offline", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 Spacer()
-                Text("Updated \(AgeText.text(since: state.updatedAt))")
+                if let updatedAt = state.updatedAt { Text("Updated \(AgeText.text(since: updatedAt))") }
             } else if let top = state.top {
                 // Workspace names truncate first so the reason ("Needs permission") stays readable.
                 Text(top.workspaceName).lineLimit(1).truncationMode(.middle)

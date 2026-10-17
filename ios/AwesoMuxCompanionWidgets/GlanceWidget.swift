@@ -24,7 +24,15 @@ struct GlanceTimelineProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<GlanceEntry>) -> Void) {
-        completion(Timeline(entries: [GlanceEntry(date: .now, snapshot: SharedSnapshot.read())], policy: .never))
+        // The app can't refresh while suspended, so old counts flip to offline on their own.
+        guard let snapshot = SharedSnapshot.read(), snapshot.connected, let updatedAt = snapshot.updatedAt else {
+            return completion(Timeline(entries: [GlanceEntry(date: .now, snapshot: SharedSnapshot.read())], policy: .never))
+        }
+        let goesOffline = updatedAt + SharedSnapshot.freshFor
+        let entries = goesOffline <= .now
+            ? [GlanceEntry(date: .now, snapshot: snapshot.offline())]
+            : [GlanceEntry(date: .now, snapshot: snapshot), GlanceEntry(date: goesOffline, snapshot: snapshot.offline())]
+        completion(Timeline(entries: entries, policy: .never))
     }
 }
 

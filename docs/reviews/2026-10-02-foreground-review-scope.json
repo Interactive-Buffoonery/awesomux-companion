@@ -1,5 +1,0 @@
-{
-  "plan_sha256": "c5b4bd0cce948ebb7d0a4d377427e74d390ce08ed4fb279c48a51f05e53da823",
-  "prior_report": "2026-10-02-foreground-claude-adversarial.md",
-  "actual_model": "claude-opus-5-5"
-}

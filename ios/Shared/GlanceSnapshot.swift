@@ -13,7 +13,7 @@ enum GlanceGroup: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// One agent pane, grouped by the app from `list_agents` and open alerts; see CONTRACT.md.
+/// One agent pane, grouped by the app from `list_agents` and open alerts.
 struct GlanceAgent: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let workspaceName: String

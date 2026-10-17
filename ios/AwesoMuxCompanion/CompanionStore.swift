@@ -165,7 +165,7 @@ final class CompanionStore {
         }
     }
 
-    /// Mirrors the retired relay: page alerts from the saved cursor, then read the roster. A recovery
+    /// Page alerts from the saved cursor, then read the roster. A recovery
     /// status drops open alerts and queued notifications, and the cursor only advances once the roster
     /// read that recovery requires succeeds.
     private func readFeed(_ client: MacClient, record: PairingRecord, revision started: Int) async throws -> GlanceSnapshot {
@@ -317,7 +317,7 @@ struct AttentionTracker: Codable {
 }
 
 extension GlanceSnapshot {
-    /// Groups agents the way the retired relay did; see the glance rules in CONTRACT.md.
+    /// Unavailable agents are hidden; needs-you agents sort oldest first, otherwise roster order holds.
     init(macName: String, agents roster: [APIResponse.Agent], openAlerts: [String: APIResponse.Event], capturedAt: Date) {
         var alertsByPane: [String: APIResponse.Event] = [:]
         for alert in openAlerts.values where alertsByPane[alert.paneID].map({ alert.occurredAt < $0.occurredAt }) ?? true {

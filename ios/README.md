@@ -79,3 +79,31 @@ then follows each refresh:
   minutes;
 - it ends immediately on a host change, on disconnect, or after 30 minutes
   offline.
+
+## TestFlight
+
+`./script/testflight.sh` archives a build, uploads it with the [`asc`](https://asccli.sh) CLI, and adds it to the internal "Personal Testing" group. That group's distribution is Manual, so the script adds each build to it after processing.
+
+### One-time setup
+
+1. Sign in to Xcode with an Apple account on team 7CNK4YPCQX (Xcode → Settings → Accounts). Signing uses this account.
+2. Install the tools: `brew install asc xcodegen`.
+3. Create an App Store Connect API key with the App Manager role at [Users and Access → Integrations](https://appstoreconnect.apple.com/access/integrations/api). Download the `.p8` file (Apple only lets you download it once) and note the Key ID and Issuer ID.
+4. Store the key in your Keychain:
+
+   ```sh
+   asc auth login --key-id KEY_ID --issuer-id ISSUER_ID --private-key ~/Downloads/AuthKey_KEY_ID.p8 --fix-permissions
+   ```
+
+   Then delete the downloaded `.p8`.
+5. Check it works: `asc apps list` should show awesoMux Companion.
+
+### Upload a build
+
+From `ios/`:
+
+```sh
+TEST_NOTES="What changed in this build" ./script/testflight.sh
+```
+
+The build number is the current UTC time, so it always increases. The script waits until App Store Connect finishes processing, then the build appears for the group's testers. Set `TESTFLIGHT_GROUP` to send it to a different internal group.

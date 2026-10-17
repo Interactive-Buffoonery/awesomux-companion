@@ -7,6 +7,8 @@ struct GlanceLiveActivity: Widget {
         ActivityConfiguration(for: GlanceActivityAttributes.self) { context in
             LockScreenActivityView(state: context.state, isStale: context.isStale)
                 .padding(16)
+                .activityBackgroundTint(Cat.base)
+                .activitySystemActionForegroundColor(Cat.text)
         } dynamicIsland: { context in
             let state = context.state
             return DynamicIsland {
@@ -44,9 +46,9 @@ private struct LockScreenActivityView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Image(systemName: "terminal.fill")
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Cat.peach)
                     .frame(width: 28, height: 28)
-                    .background(.tint, in: RoundedRectangle(cornerRadius: 7))
+                    .background(Cat.tile, in: RoundedRectangle(cornerRadius: 7))
                     .accessibilityHidden(true)
                 Text(headline).font(.headline)
                 Spacer(minLength: 4)
@@ -55,12 +57,13 @@ private struct LockScreenActivityView: View {
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(GlanceGroup.needsYou.tint, in: Capsule())
-                        .foregroundStyle(.black)
+                        .foregroundStyle(Cat.crust)
                 }
             }
             GroupBar(needsYou: state.needsYou, working: state.working, done: state.done)
             TopItemLine(state: state, isStale: isStale)
         }
+        .foregroundStyle(Cat.text)
     }
 
     private var headline: LocalizedStringKey {
@@ -77,7 +80,7 @@ private struct TopItemLine: View {
     var body: some View {
         HStack(spacing: 4) {
             if !state.connected || isStale {
-                Label("Offline", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Label("Offline", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Cat.needs)
                 Spacer()
                 if let updatedAt = state.updatedAt { Text("Updated \(AgeText.text(since: updatedAt))") }
             } else if let top = state.top {
@@ -91,7 +94,7 @@ private struct TopItemLine: View {
             }
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Cat.subtext0)
     }
 }
 
@@ -102,7 +105,7 @@ private struct CountLabel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("\(count)").font(.title2.weight(.semibold)).foregroundStyle(group.tint)
-            Text(group.title).font(.caption2).foregroundStyle(.secondary)
+            Text(group.title).font(.caption2).foregroundStyle(Cat.subtext0)
         }
         .accessibilityElement(children: .combine)
     }

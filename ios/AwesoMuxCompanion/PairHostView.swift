@@ -19,7 +19,7 @@ struct PairHostView: View {
                 } header: { Text("Your Mac") } footer: {
                     Text("This key lets your phone see which agents on this Mac need you, are working, or are done. It is read-only: you answer agents at your Mac. Enter the private HTTPS address and key shown on your Mac.")
                 }
-                if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
+                if let errorMessage { Section { Text(errorMessage).foregroundStyle(Cat.red) } }
                 Section {
                     Button("Connect") {
                         do {
@@ -31,7 +31,10 @@ struct PairHostView: View {
                         } catch { errorMessage = "Could not save this connection. Return to the agent list to retry the previous host." }
                     }.disabled(address.isEmpty || key.isEmpty || !store.canPair)
                 }
-            }.navigationTitle("Connect a host")
+            }
+            .scrollContentBackground(.hidden)
+            .background(Cat.page)
+            .navigationTitle("Connect a host")
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { key = ""; dismiss() } } }
                 .onDisappear { key = "" }
         }

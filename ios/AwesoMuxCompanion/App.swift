@@ -5,9 +5,17 @@ import UserNotifications
 struct GlanceApp: App {
     @UIApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        let text = Cat.uiColor(mocha: "#cdd6f4", latte: "#4c4f69", mochaHC: "#ffffff", latteHC: "#0a0a14")
+        UINavigationBar.appearance().largeTitleTextAttributes = [.foregroundColor: text]
+        UINavigationBar.appearance().titleTextAttributes = [.foregroundColor: text]
+    }
+
     var body: some Scene {
         WindowGroup {
             AgentsView(store: appDelegate.store)
+                .tint(Cat.accent)
                 .task(id: scenePhase) {
                     guard scenePhase == .active else { return }
                     appDelegate.store.activate()

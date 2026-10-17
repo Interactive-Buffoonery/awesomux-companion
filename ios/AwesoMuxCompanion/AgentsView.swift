@@ -16,6 +16,8 @@ struct AgentsView: View {
                     hostSection
                 }
                 .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(Cat.page)
                 .onChange(of: store.focusedPaneID) { _, paneID in
                     guard let paneID else { return }
                     withAnimation { proxy.scrollTo(paneID, anchor: .center) }
@@ -41,8 +43,9 @@ struct AgentsView: View {
         if let message = store.message {
             Section {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(Cat.subtext0)
             }
+            .listRowBackground(Cat.card)
         }
         if snapshot.agents.isEmpty {
             ContentUnavailableView("No agents running", systemImage: "moon.zzz",
@@ -52,12 +55,14 @@ struct AgentsView: View {
         ForEach(GlanceGroup.allCases) { group in
             let agents = snapshot.agents(in: group)
             if !agents.isEmpty {
-                Section(group.title) {
+                Section {
                     ForEach(agents) { agent in
                         AgentRow(agent: agent)
                             .id(agent.id)
-                            .listRowBackground(store.focusedPaneID == agent.id ? Color.orange.opacity(0.18) : nil)
+                            .listRowBackground(store.focusedPaneID == agent.id ? Cat.needs.opacity(0.18) : Cat.card)
                     }
+                } header: {
+                    Text(group.title).foregroundStyle(Cat.subtext0)
                 }
             }
         }
@@ -81,6 +86,7 @@ struct AgentsView: View {
 
     @ViewBuilder private var hostSection: some View {
         Section {
+            Group {
             if case .quarantined(let priorHost) = store.connectionState {
                 Button("Retry \(priorHost ?? String(localized: "saved host"))") { retryConnection() }
             } else if store.connectionState == .loadFailed {
@@ -88,10 +94,12 @@ struct AgentsView: View {
             }
             if store.canPair && store.activeHostLabel != nil { Button("Change host") { pairing = true } }
             if store.activeHostLabel != nil || store.connectionState == .loadFailed {
-                Button("Disconnect host", role: .destructive) { try? store.disconnectHost() }
+                Button("Disconnect host", role: .destructive) { try? store.disconnectHost() }.foregroundStyle(Cat.red)
             }
+            }
+            .listRowBackground(Cat.card)
         } footer: {
-            if let host = store.activeHostLabel { Text(host).textSelection(.enabled) }
+            if let host = store.activeHostLabel { Text(host).foregroundStyle(Cat.subtext0).textSelection(.enabled) }
         }
     }
 
@@ -107,14 +115,14 @@ private struct AgentRow: View {
         HStack(spacing: 12) {
             ProviderAvatar(provider: agent.provider)
             VStack(alignment: .leading, spacing: 2) {
-                Text(agent.workspaceName).font(.body.weight(.medium))
+                Text(agent.workspaceName).font(.body.weight(.medium)).foregroundStyle(Cat.text)
                 Text("\(agent.provider) · \(agent.status)")
                     .font(.subheadline)
-                    .foregroundStyle(agent.group == .needsYou ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(agent.group == .needsYou ? Cat.needs : Cat.subtext0)
             }
             Spacer(minLength: 8)
             if let since = agent.since {
-                AgeText(date: since).font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                AgeText(date: since).font(.footnote).foregroundStyle(Cat.subtext0).monospacedDigit()
             }
         }
         .padding(.vertical, 2)
@@ -138,7 +146,7 @@ private struct ConnectionIndicator: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "circle.fill").imageScale(.small)
-                .foregroundStyle(connected ? .green : .orange)
+                .foregroundStyle(connected ? Cat.output : Cat.needs)
             if connected {
                 Text("Connected")
             } else if let updatedAt {
@@ -148,7 +156,7 @@ private struct ConnectionIndicator: View {
             }
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Cat.subtext0)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(connected
             ? String(localized: "Connected to your Mac")

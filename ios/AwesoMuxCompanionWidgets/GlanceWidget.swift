@@ -40,7 +40,7 @@ struct GlanceWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "GlanceWidget", provider: GlanceTimelineProvider()) { entry in
             GlanceWidgetView(snapshot: entry.snapshot)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(Cat.base, for: .widget)
         }
         .configurationDisplayName("Agents")
         .description("See which agents need you, are working, or are done.")
@@ -57,8 +57,8 @@ struct GlanceWidgetView: View {
             switch family {
             case .accessoryCircular: circular(snapshot)
             case .accessoryRectangular: rectangular(snapshot)
-            case .systemMedium: medium(snapshot)
-            default: small(snapshot)
+            case .systemMedium: medium(snapshot).foregroundStyle(Cat.text)
+            default: small(snapshot).foregroundStyle(Cat.text)
             }
         } else {
             switch family {
@@ -76,7 +76,7 @@ struct GlanceWidgetView: View {
             Spacer(minLength: 0)
             if let top = snapshot.agents(in: .needsYou).first {
                 Text(top.workspaceName).font(.footnote.weight(.semibold)).lineLimit(1)
-                Text(top.status).font(.caption2).foregroundStyle(.orange).lineLimit(1)
+                Text(top.status).font(.caption2).foregroundStyle(Cat.needs).lineLimit(1)
             } else {
                 offlineOrHost(snapshot)
             }
@@ -99,17 +99,17 @@ struct GlanceWidgetView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(top.workspaceName).font(.subheadline.weight(.semibold)).lineLimit(1)
                             Text(top.status).font(.caption)
-                                .foregroundStyle(top.group == .needsYou ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                                .foregroundStyle(top.group == .needsYou ? Cat.needs : Cat.subtext0)
                                 .lineLimit(1)
                             HStack(spacing: 0) {
                                 Text(top.provider)
                                 if let since = top.since { Text(" · "); AgeText(date: since) }
                             }
-                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            .font(.caption2).foregroundStyle(Cat.subtext0).lineLimit(1)
                         }
                     }
                 } else {
-                    Text("All agents are done").font(.subheadline).foregroundStyle(.secondary)
+                    Text("All agents are done").font(.subheadline).foregroundStyle(Cat.subtext0)
                 }
                 Spacer(minLength: 0)
             }
@@ -149,7 +149,7 @@ struct GlanceWidgetView: View {
                 HStack(spacing: 6) {
                     Circle().fill(group.tint).frame(width: 8, height: 8)
                     Text("\(snapshot.count(group))").font(.headline.monospacedDigit())
-                    Text(group.title).font(.caption).foregroundStyle(.secondary)
+                    Text(group.title).font(.caption).foregroundStyle(Cat.subtext0)
                 }
                 .accessibilityElement(children: .combine)
             }
@@ -158,9 +158,9 @@ struct GlanceWidgetView: View {
 
     @ViewBuilder private func offlineOrHost(_ snapshot: GlanceSnapshot) -> some View {
         if snapshot.connected {
-            Text(snapshot.hostName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            Text(snapshot.hostName).font(.caption2).foregroundStyle(Cat.subtext0).lineLimit(1)
         } else {
-            Label("Offline", systemImage: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(.orange)
+            Label("Offline", systemImage: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(Cat.needs)
         }
     }
 }

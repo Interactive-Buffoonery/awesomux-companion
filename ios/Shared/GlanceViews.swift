@@ -3,9 +3,9 @@ import SwiftUI
 extension GlanceGroup {
     var tint: Color {
         switch self {
-        case .needsYou: .orange
-        case .working: .green
-        case .done: .gray
+        case .needsYou: Cat.needs
+        case .working: Cat.running
+        case .done: Cat.done
         }
     }
 }
@@ -17,9 +17,10 @@ struct ProviderAvatar: View {
     var body: some View {
         Text(Self.letter(for: provider))
             .font(.system(size: size * 0.45, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white)
+            .foregroundStyle(Self.tint(for: provider))
             .frame(width: size, height: size)
-            .background(Self.tint(for: provider).gradient, in: Circle())
+            // Same family rule as the Mac's AgentTile: one tile color, identity in the hue.
+            .background(Cat.tile, in: RoundedRectangle(cornerRadius: size * 0.22))
             .accessibilityHidden(true)
     }
 
@@ -32,12 +33,14 @@ struct ProviderAvatar: View {
 
     static func tint(for provider: String) -> Color {
         switch provider {
-        case "Claude Code": .orange
-        case "Codex": .teal
-        case "OpenCode": .blue
-        case "Pi": .purple
-        case "Grok": .pink
-        default: .gray
+        case "Claude Code": Cat.peach
+        case "Codex": Cat.lavender
+        case "OpenCode": Cat.sky
+        case "Pi": Cat.mauve
+        case "Grok": Cat.green
+        case "Hermes": Cat.yellow
+        case "Shell": Cat.text
+        default: Cat.teal
         }
     }
 }

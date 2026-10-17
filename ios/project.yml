@@ -31,7 +31,13 @@ targets:
       properties:
         CFBundleDisplayName: awesoMux
         NSSupportsLiveActivities: true
-        UIBackgroundModes: [remote-notification]
+        NSCameraUsageDescription: awesoMux uses the camera to scan the pairing code your Mac shows.
+        NSLocalNetworkUsageDescription: awesoMux connects to your Mac on this network to show your agents.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.interactivebuffoonery.awesomux.companion.pair
+            CFBundleURLSchemes: [awesomuxcompanion]
+        BGTaskSchedulerPermittedIdentifiers: [com.interactivebuffoonery.awesomux.companion.refresh]
+        UIBackgroundModes: [fetch]
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
@@ -41,7 +47,10 @@ targets:
   AwesoMuxCompanionWidgets:
     type: app-extension
     platform: iOS
-    sources: [AwesoMuxCompanionWidgets, Shared]
+    sources:
+      - AwesoMuxCompanionWidgets
+      - path: Shared
+        excludes: [companion-pairing-words.txt]
     entitlements:
       path: AwesoMuxCompanionWidgets/AwesoMuxCompanionWidgets.entitlements
       properties:

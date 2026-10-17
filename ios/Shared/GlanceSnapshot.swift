@@ -13,7 +13,7 @@ enum GlanceGroup: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// One agent pane as served by `GET /v1/glance`; see CONTRACT.md.
+/// One agent pane, grouped by the app from `list_agents` and open alerts; see CONTRACT.md.
 struct GlanceAgent: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let workspaceName: String
@@ -51,10 +51,10 @@ struct GlanceSnapshot: Codable, Equatable, Sendable {
 
     func count(_ group: GlanceGroup) -> Int { agents.count { $0.group == group } }
     func agents(in group: GlanceGroup) -> [GlanceAgent] { agents.filter { $0.group == group } }
-    /// The relay orders agents oldest-first within `needsYou`, so the first match is the longest wait.
+    /// Agents are ordered oldest-first within `needsYou`, so the first match is the longest wait.
     var topAgent: GlanceAgent? { agents.first { $0.group == .needsYou } ?? agents.first { $0.group == .working } }
 
-    /// The same agents marked offline, for when the relay can't be reached or the data has aged out.
+    /// The same agents marked offline, for when the Mac can't be reached or the data has aged out.
     func offline() -> GlanceSnapshot {
         GlanceSnapshot(schemaVersion: schemaVersion, hostName: hostName, connected: false,
                        error: error ?? "unreachable", updatedAt: updatedAt, agents: agents)

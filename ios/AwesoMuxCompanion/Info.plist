@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.interactivebuffoonery.awesomux.companion.refresh</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -18,13 +22,28 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.interactivebuffoonery.awesomux.companion.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>awesomuxcompanion</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSCameraUsageDescription</key>
+	<string>awesoMux uses the camera to scan the pairing code your Mac shows.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>awesoMux connects to your Mac on this network to show your agents.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>remote-notification</string>
+		<string>fetch</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

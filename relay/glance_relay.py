@@ -182,6 +182,8 @@ class GlanceRelay:
                     raise HelperFailure("helper_failed")
                 if page["currentStateRecoveryRequired"] or status in RECOVERY_STATUSES:
                     self.open_alerts.clear()
+                    # Alerts queued before an access change must not leak out after it.
+                    self.pending_pushes.clear()
                     # Keep the old cursor until recovery succeeds so a failed roster
                     # read retries recovery rather than skipping its required capture.
                     response = self.read_helper("list_agents")

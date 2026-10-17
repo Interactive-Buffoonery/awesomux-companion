@@ -23,6 +23,8 @@ struct PairingView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(Cat.page)
+            .navigationTitle("Pair iPhone")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if store.record != nil || store.pairingStep != .idle {
                     ToolbarItem(placement: .cancellationAction) {
@@ -100,12 +102,6 @@ struct PairingView: View {
             }
             .buttonStyle(.borderedProminent).controlSize(.large)
             .foregroundStyle(Cat.crust)
-            Button(role: .cancel) {
-                store.cancelPairing()
-            } label: {
-                Text("Cancel").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered).controlSize(.large)
         }
         .accessibilityIdentifier("link-confirm")
     }
@@ -119,13 +115,13 @@ struct PairingView: View {
 
     private func confirm(_ words: [String], macName: String, transport: CompanionTransport) -> some View {
         VStack(spacing: 16) {
-            Image(systemName: "checkmark")
-                .font(.system(size: 30, weight: .bold))
-                .foregroundStyle(Cat.green)
-                .frame(width: 64, height: 64)
-                .background(Cat.card, in: Circle())
+            Image(systemName: "laptopcomputer.and.iphone")
+                .font(.system(size: 44, weight: .regular))
+                .foregroundStyle(Cat.accent)
+                .frame(width: 120, height: 120)
+                .background(Cat.card, in: RoundedRectangle(cornerRadius: 24))
                 .accessibilityHidden(true)
-                .padding(.top, 32)
+                .padding(.top, 24)
             Text("Confirm on your Mac").font(.title2.weight(.semibold)).foregroundStyle(Cat.text)
             Text("Make sure these words match what **\(macName)** shows.")
                 .foregroundStyle(Cat.subtext0).multilineTextAlignment(.center)
@@ -141,7 +137,11 @@ struct PairingView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(words.joined(separator: ", "))
             .accessibilityIdentifier("confirmation-words")
-            Text("Connecting over \(transport.title)").font(.footnote).foregroundStyle(Cat.subtext0)
+            HStack(spacing: 8) {
+                ProgressView().accessibilityHidden(true)
+                Text("Waiting for Allow on \(macName) · \(transport.title)")
+            }
+            .font(.footnote).foregroundStyle(Cat.subtext0)
         }
     }
 }

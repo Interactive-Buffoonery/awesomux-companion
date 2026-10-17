@@ -1,0 +1,48 @@
+name: AwesoMuxCompanion
+options:
+  bundleIdPrefix: com.interactivebuffoonery
+  deploymentTarget:
+    iOS: '18.0'
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    CODE_SIGNING_ALLOWED: NO
+    GENERATE_INFOPLIST_FILE: YES
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: '0.1'
+    TARGETED_DEVICE_FAMILY: '1,2'
+targets:
+  AwesoMuxCompanion:
+    type: application
+    platform: iOS
+    sources: [AwesoMuxCompanion]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.interactivebuffoonery.awesomux.companion
+        INFOPLIST_KEY_CFBundleDisplayName: awesoMux
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+  AwesoMuxCompanionTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - AwesoMuxCompanionTests
+      - path: Fixtures
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - target: AwesoMuxCompanion
+  AwesoMuxCompanionUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [AwesoMuxCompanionUITests]
+    dependencies:
+      - target: AwesoMuxCompanion
+schemes:
+  AwesoMuxCompanion:
+    build:
+      targets:
+        AwesoMuxCompanion: all
+    test:
+      targets: [AwesoMuxCompanionTests, AwesoMuxCompanionUITests]

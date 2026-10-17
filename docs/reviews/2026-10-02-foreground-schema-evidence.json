@@ -1,0 +1,222 @@
+{
+  "cli": "0.160.0",
+  "projection": "completed text only; key turn/item; omitted nontext and deltas",
+  "schemas": {
+    "ThreadResumeResponse": {
+      "sha256": "e7751c8dba039fa5f55971307e89e8b8541f2853840650ea8968bad8c23698d6",
+      "properties": {
+        "approvalPolicy": {
+          "$ref": "#/definitions/AskForApproval"
+        },
+        "approvalsReviewer": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApprovalsReviewer"
+            }
+          ],
+          "description": "Reviewer currently used for approval requests on this thread."
+        },
+        "collaborationMode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CollaborationMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Effective collaboration mode. Absent when resuming from an older server."
+        },
+        "cwd": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        },
+        "disabledPluginIds": {
+          "default": [],
+          "description": "Saved list of disabled plugin IDs. Does not yet filter plugin capabilities.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "instructionSources": {
+          "default": [],
+          "description": "Environment-native paths to instruction source files currently loaded for this thread.",
+          "items": {
+            "$ref": "#/definitions/LegacyAppPathString"
+          },
+          "type": "array"
+        },
+        "itemsBackwardsCursor": {
+          "default": null,
+          "description": "Opaque cursor for hydrating paginated items backwards.\n\nPass this as `cursor` to `thread/items/list` with `sortDirection: \"desc\"`. The first page includes the item identified by the cursor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "modelProvider": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sandbox": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SandboxPolicy"
+            }
+          ],
+          "description": "Legacy sandbox policy retained for compatibility. Experimental clients should prefer `activePermissionProfile` for profile provenance."
+        },
+        "serviceTier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread": {
+          "$ref": "#/definitions/Thread"
+        },
+        "turnsBackwardsCursor": {
+          "default": null,
+          "description": "Opaque cursor for hydrating paginated turns backwards.\n\nPass this as `cursor` to `thread/turns/list` with `sortDirection: \"desc\"`. The first page includes the turn identified by the cursor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ItemCompletedNotification": {
+      "sha256": "d04b9153de38cd8302a2a418a44a65e8265d4c7586d46ea2cc801b594c6acf5b",
+      "properties": {
+        "completedAtMs": {
+          "description": "Unix timestamp (in milliseconds) when this item lifecycle completed.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "item": {
+          "$ref": "#/definitions/ThreadItem"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "supported_items": [
+    {
+      "properties": {
+        "clientId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "content": {
+          "items": {
+            "$ref": "#/definitions/UserInput"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "userMessage"
+          ],
+          "title": "UserMessageThreadItemType",
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "id",
+        "type"
+      ],
+      "title": "UserMessageThreadItem",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "delivery": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentMessageDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "memoryCitation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MemoryCitation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MessagePhase"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "questions": {
+          "default": null,
+          "items": {
+            "$ref": "#/definitions/AsyncUserInputQuestion"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "agentMessage"
+          ],
+          "title": "AgentMessageThreadItemType",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "type"
+      ],
+      "title": "AgentMessageThreadItem",
+      "type": "object"
+    }
+  ]
+}

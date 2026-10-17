@@ -1,0 +1,65 @@
+{
+  "unit": {
+    "result": "Passed",
+    "passedTests": 26,
+    "failedTests": 0,
+    "skippedTests": 0,
+    "totalTestCount": 26,
+    "xcresult": "/Users/edequalsawesome/Library/Developer/XcodeBuildMCP/workspaces/awesomux-ios-7eed4cb13b56/result-bundles/test_sim_2026-10-02T23-17-50-973Z_pid31315_3f840114.xcresult"
+  },
+  "ui_lifecycle_fixture": {
+    "result": "Passed",
+    "passedTests": 1,
+    "failedTests": 0,
+    "skippedTests": 0,
+    "totalTestCount": 1,
+    "xcresult": "/Users/edequalsawesome/Library/Developer/XcodeBuildMCP/workspaces/awesomux-ios-7eed4cb13b56/result-bundles/test_sim_2026-10-02T23-09-07-992Z_pid31315_47340dfd.xcresult",
+    "scope_retention": "Executed after displayed-intent fix; final later code edits affect failure-only credential branches and Python route cleanup, not successful connected Simulator lifecycle. Retained actual prior result, not a rerun claim."
+  },
+  "Release": {
+    "unsigned_phone_build_passed": true,
+    "no_ATS_exception": true,
+    "no_development_file": true,
+    "no_development_type": true,
+    "no_memory_store": true,
+    "real_keychain_store_present": true,
+    "keychain_imports_present": true,
+    "binary_hashes": {
+      "AwesoMuxCompanion": "abe4ec41bf4d61dc008f51007768026c2f948d628028f997750467c1f29c857f"
+    },
+    "no_embedded_profile": true
+  },
+  "Debug": {
+    "unsigned_phone_build_passed": true,
+    "no_ATS_exception": true,
+    "no_development_file": true,
+    "no_development_type": true,
+    "no_memory_store": true,
+    "real_keychain_store_present": true,
+    "keychain_imports_present": true,
+    "binary_hashes": {
+      "AwesoMuxCompanion": "c4175e0e962cb8e3d11392f25e7de78cf2f0efbddf8f67cb815bf9cdc3bc914d",
+      "AwesoMuxCompanion.debug.dylib": "fdf5dd6e2bc6c5417948a63421a9b1d1e0278d3bdd2b239b50a431384d6f2485"
+    },
+    "no_embedded_profile": true
+  },
+  "bridge": {
+    "passed": 34,
+    "failed": 0,
+    "scope": "local loopback tests and disposable watchdog/fake Tailscale fixtures; no live route"
+  },
+  "simulator_fixture_cleanup": {
+    "authenticated_reads": 4,
+    "temporary_configuration_removed": true,
+    "private_root_removed": true,
+    "agent_inference": false
+  },
+  "unexercised": [
+    "Apple provisioning/signing",
+    "physical install",
+    "real Keychain runtime",
+    "private Serve creation/cleanup",
+    "phone HTTPS GET/POST",
+    "APNs"
+  ]
+}

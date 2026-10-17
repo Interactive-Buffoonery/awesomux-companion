@@ -1,0 +1,18 @@
+{
+  "bundle_id": "com.interactivebuffoonery.awesomux.companion",
+  "version": "0.1",
+  "build": "1",
+  "profile_team_name": "Interactive Buffoonery",
+  "profile_team_matches_verified": true,
+  "distribution_authority_present": true,
+  "signature_valid": true,
+  "get_task_allow": false,
+  "beta_reports_active": true,
+  "profile_has_devices": false,
+  "entitlement_app_identifier_matches": true,
+  "push_entitlement_present": false,
+  "development_configuration_strings_present": false,
+  "explicit_keychain_groups_present": false,
+  "default_keychain_is_application_identifier": true,
+  "keychain_validation_basis": "https://developer.apple.com/documentation/security/ksecattraccessgroup"
+}

@@ -1,0 +1,272 @@
+{
+  "cli_version": "codex-cli 0.160.0",
+  "source_tag": "rust-v0.160.0",
+  "source_commit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "source": {
+    "codex-rs/tui/src/daemon_startup.rs": {
+      "sha256": "8fea430dc6e9278d3f1fe3a0ca93c956e903aa09cc072712eba853c34d4df2bc",
+      "excerpts": [
+        {
+          "start_line": 25,
+          "text": "pub(super) fn exclusion(\n    cli: &Cli,\n    cli_kv_overrides: &[(String, toml::Value)],\n    loader_overrides: &LoaderOverrides,\n    workload_identity_selected: bool,\n    exec_server_url: Option<&std::ffi::OsStr>,\n) -> Option<&'static str> {\n    if cli.no_daemon {\n        Some(\"--no-daemon\")\n    } else if cli.oss {\n        Some(\"--oss\")\n    } else if workload_identity_selected {\n        Some(\"workload identity\")\n    } else if exec_server_url.is_some() {\n        Some(\"executor selection (CODEX_EXEC_SERVER_URL)\")\n    } else if cli.agents_overview {\n        None\n    } else if cli.config_profile_v2.is_some() {\n        Some(\"--profile\")\n    } else {\n        config_exclusion(\n            cli_kv_overrides,\n            loader_overrides,\n            cli.strict_config,\n            cli.bypass_hook_trust,\n        )\n    }\n}\n\npub(super) fn config_exclusion(\n    cli_kv_overrides: &[(String, toml::Value)],\n    loader_overrides: &LoaderOverrides,\n    strict_config: bool,\n    bypass_hook_trust: bool,\n) -> Option<&'static str> {\n    if !cli_kv_overrides\n        .iter()\n        .all(|(key, value)| match key.as_str() {\n            \"suppress_unstable_features_warning\" | \"tui.fullscreen_transcript\" => value.is_bool(),\n            \"tui\" => value.as_table().is_some_and(|tui| {\n                tui.len() == 1\n                    && tui\n                        .get(\"fullscreen_transcript\")\n                        .is_some_and(toml::Value::is_bool)\n            }),\n            \"features\" => value.as_table().is_some_and(|features| {\n                !features.is_empty()\n                    && features\n                        .iter()\n                        .all(|(name, value)| allowed_feature(name) && value.is_bool())\n            }),\n            _ => key.strip_prefix(\"features.\").is_some_and(allowed_feature) && value.is_bool(),\n        })\n    {\n        Some(\"command-line configuration overrides (-c, --enable, --disable, or --search)\")\n    } else if !loader_overrides_are_default(loader_overrides) {\n        Some(\"custom configuration loader\")\n    } else if strict_config {\n        Some(\"--strict-config\")\n    } else if bypass_hook_trust {\n        Some(\"--dangerously-bypass-hook-trust\")\n    } else {\n        None\n    }"
+        }
+      ]
+    },
+    "codex-rs/tui/src/startup_orchestration.rs": {
+      "sha256": "d01124882d91ff8948640d2959e34baf6a6acce30d090221a76efcd34f02502a",
+      "excerpts": [
+        {
+          "start_line": 494,
+          "text": "    let auto_start_daemon = config.features.enabled(Feature::DaemonAutoStart)\n        && !cli.agents_overview\n        && !cli.no_daemon\n        && !app_server_target.uses_remote_workspace();\n    if auto_start_daemon\n        && daemon_exclusion.is_none()"
+        },
+        {
+          "start_line": 525,
+          "text": "    if auto_start_daemon && daemon_exclusion.is_none() {\n        let output = startup_draft\n            .run_until(async {\n                // Daemon startup needs no terminal input. Keep the composer visible and\n                // responsive while it checks the running server or prepares an installation.\n                let result = codex_app_server_daemon::start_with_features(&daemon_features).await;\n                daemon_telemetry::record_start(&config, &result).await;\n                match result {\n                    Ok(output) => Ok(Some(output)),\n                    #[cfg(windows)]\n                    Err(err) if err.is::<codex_app_server_daemon::DetachedLaunchRestricted>() => {\n                        Ok(None)\n                    }\n                    Err(err) => Err(std::io::Error::other(format!(\n                        \"{err:#}\\n{}\",\n                        daemon_startup::FAILURE_HINT\n                    ))),\n                }\n            })\n            .await??;\n        if let Some(output) = output {\n            managed_daemon = output.backend.is_some();\n            app_server_target = AppServerTarget::LocalDaemon {\n                endpoint: RemoteAppServerEndpoint::UnixSocket {\n                    socket_path: AbsolutePathBuf::from_absolute_path_checked(output.socket_path)?,\n                },\n                allow_embedded_fallback: false,\n            };\n        } else {\n            app_server_target = AppServerTarget::Embedded;\n            daemon_exclusion = Some(\"this Windows launcher\");\n        }\n    }"
+        }
+      ]
+    },
+    "codex-rs/tui/src/lib.rs": {
+      "sha256": "8446e55b78e1a997c72d50ee22ba45db514d2a80d5751d686f51f8e91e3a537e",
+      "excerpts": [
+        {
+          "start_line": 448,
+          "text": "pub fn resolve_remote_addr(addr: &str) -> color_eyre::Result<RemoteAppServerEndpoint> {\n    if let Some(socket_path) = addr.strip_prefix(\"unix://\") {\n        let socket_path = if socket_path.is_empty() {\n            let codex_home = find_codex_home().wrap_err(\"failed to resolve CODEX_HOME\")?;\n            codex_app_server_client::app_server_control_socket_path(&codex_home)\n                .map_err(color_eyre::Report::new)?\n        } else {\n            AbsolutePathBuf::relative_to_current_dir(socket_path)\n                .map_err(color_eyre::Report::new)?\n        };\n        return Ok(RemoteAppServerEndpoint::UnixSocket { socket_path });"
+        },
+        {
+          "start_line": 673,
+          "text": "async fn start_embedded_app_server_with<F, Fut>(\n    arg0_paths: Arg0DispatchPaths,\n    config: Config,\n    cli_kv_overrides: Vec<(String, toml::Value)>,\n    loader_overrides: LoaderOverrides,\n    strict_config: bool,\n    cloud_config_bundle: CloudConfigBundleLoader,\n    feedback: codex_feedback::CodexFeedback,\n    log_db: Option<log_db::LogDbLayer>,\n    state_db: Option<StateDbHandle>,\n    environment_manager: Arc<EnvironmentManager>,\n    embedded_network_policy: codex_app_server_client::EmbeddedNetworkPolicy,\n    start_client: F,\n) -> color_eyre::Result<InProcessAppServerClient>\nwhere\n    F: FnOnce(InProcessClientStartArgs) -> Fut,\n    Fut: Future<Output = std::io::Result<InProcessAppServerClient>>,\n{\n    let config_warnings = config\n        .startup_warnings\n        .iter()\n        .map(|warning| ConfigWarningNotification {\n            summary: warning.clone(),\n            details: None,\n            path: None,\n            range: None,\n        })\n        .collect();\n    let client = start_client(InProcessClientStartArgs {\n        arg0_paths,\n        config: Arc::new(config),\n        cli_overrides: cli_kv_overrides,\n        loader_overrides,\n        strict_config,\n        cloud_config_bundle,\n        embedded_network_policy,\n        feedback,\n        log_db,\n        state_db,\n        environment_manager,\n        config_warnings,\n        session_source: serde_json::from_value(serde_json::json!(\"cli\"))\n            .unwrap_or_else(|err| panic!(\"cli session source should deserialize: {err}\")),\n        enable_codex_api_key_env: false,\n        client_name: \"codex-tui\".to_string(),\n        client_version: env!(\"CARGO_PKG_VERSION\").to_string(),\n        experimental_api: true,\n        mcp_server_openai_form_elicitation: false,\n        opt_out_notification_methods: Vec::new(),\n        channel_capacity: DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,\n    })\n    .await\n    .wrap_err(\"failed to start embedded app server\")?;\n    Ok(client)\n}"
+        },
+        {
+          "start_line": 1013,
+          "text": "fn app_server_target_for_launch(\n    explicit_remote_endpoint: Option<RemoteAppServerEndpoint>,\n    default_daemon_socket: Option<AbsolutePathBuf>,\n    can_reuse_implicit_local_daemon: bool,\n    workload_identity_selected: bool,\n    exec_server_url: Option<&std::ffi::OsStr>,\n) -> std::io::Result<AppServerTarget> {\n    if workload_identity_selected {\n        if explicit_remote_endpoint.is_some() {\n            return Err(std::io::Error::new(\n                std::io::ErrorKind::InvalidInput,\n                \"workload identity must be configured on the remote app-server host\",\n            ));\n        }\n        return Ok(AppServerTarget::Embedded);\n    }\n    Ok(match explicit_remote_endpoint {\n        Some(endpoint) => AppServerTarget::Remote { endpoint },\n        // A shared daemon cannot adopt this invocation's executor selection.\n        None if can_reuse_implicit_local_daemon && exec_server_url.is_none() => {\n            default_daemon_socket.map_or(AppServerTarget::Embedded, |socket_path| {\n                AppServerTarget::LocalDaemon {\n                    allow_embedded_fallback: true,\n                    endpoint: RemoteAppServerEndpoint::UnixSocket { socket_path },\n                }\n            })\n        }\n        None => AppServerTarget::Embedded,\n    })"
+        }
+      ]
+    },
+    "codex-rs/app-server-transport/src/transport/mod.rs": {
+      "sha256": "3d9696a60255f90404ffd00864b426242963f1ea54fe0d54eb635574ec6e08e8",
+      "excerpts": [
+        {
+          "start_line": 53,
+          "text": "const APP_SERVER_CONTROL_SOCKET_DIR_NAME: &str = \"app-server-control\";\nconst APP_SERVER_CONTROL_SOCKET_FILE_NAME: &str = \"app-server-control.sock\";\nconst APP_SERVER_STARTUP_LOCK_FILE_NAME: &str = \"app-server-startup.lock\";\nconst DAEMON_RECOVERY_FILE_NAME: &str = \"loaded-threads.json\";\n\npub fn daemon_recovery_file_path(codex_home: &Path) -> PathBuf {\n    codex_home\n        .join(\"app-server-daemon\")\n        .join(DAEMON_RECOVERY_FILE_NAME)\n}\n\npub fn app_server_control_socket_path(codex_home: &Path) -> std::io::Result<AbsolutePathBuf> {\n    AbsolutePathBuf::from_absolute_path(\n        codex_home\n            .join(APP_SERVER_CONTROL_SOCKET_DIR_NAME)\n            .join(APP_SERVER_CONTROL_SOCKET_FILE_NAME),\n    )"
+        }
+      ]
+    },
+    "codex-rs/app-server/src/outgoing_message.rs": {
+      "sha256": "b16156e72d8a33a1087896bfd211b22094c3ef3e69a2331a7fed8c0530dd657a",
+      "excerpts": [
+        {
+          "start_line": 446,
+          "text": "    pub(crate) async fn replay_requests_to_connection_for_thread(\n        &self,\n        connection_id: ConnectionId,\n        thread_id: ThreadId,\n    ) {\n        let requests = self.pending_requests_for_thread(thread_id).await;\n        for request in requests {\n            if let Err(err) = self\n                .sender\n                .send(OutgoingEnvelope::ToConnection {\n                    connection_id,\n                    message: OutgoingMessage::Request(request),\n                    write_complete_tx: None,\n                })\n                .await\n            {\n                warn!(\"failed to resend request to client: {err:?}\");\n            }\n        }"
+        },
+        {
+          "start_line": 561,
+          "text": "    async fn take_connection_callback(\n        &self,\n        connection_id: ConnectionId,\n        id: &RequestId,\n    ) -> Option<(RequestId, PendingCallbackEntry)> {\n        let mut callbacks = self.request_id_to_callback.lock().await;\n        let entry = callbacks.get(id)?;\n        if let Some(owner) = entry.verification_owner {\n            if owner != connection_id {\n                return None;\n            }\n            if entry.verification_identity != self.verification_identity()\n                || entry.verification_auth_revision != self.verification_auth_revision()\n            {\n                callbacks.remove(id);\n                return None;\n            }\n        }\n        callbacks.remove_entry(id)\n    }\n\n    pub(crate) async fn pending_requests_for_thread(\n        &self,\n        thread_id: ThreadId,\n    ) -> Vec<ServerRequest> {\n        let request_id_to_callback = self.request_id_to_callback.lock().await;\n        let mut requests = request_id_to_callback\n            .values()\n            .filter_map(|entry| {\n                (entry.thread_id == Some(thread_id) && entry.verification_owner.is_none())\n                    .then_some(entry.request.clone())\n            })\n            .collect::<Vec<_>>();\n        requests.sort_by(|left, right| left.id().cmp(right.id()));\n        requests"
+        }
+      ]
+    },
+    "codex-rs/app-server/src/request_processors/thread_lifecycle.rs": {
+      "sha256": "204a9b470a4ee86fbc7cdbc6737291a8dea678c562220153df4ccd57f4545ea4",
+      "excerpts": [
+        {
+          "start_line": 807,
+          "text": "    outgoing\n        .replay_requests_to_connection_for_thread(connection_id, conversation_id)\n        .await;\n    // App-server owns resume response and snapshot ordering, so wait until\n    // replay completes before letting extensions react to the idle thread.\n    conversation\n        .emit_thread_idle_lifecycle_if_idle(ThreadIdleCause::Completed)\n        .await;"
+        }
+      ]
+    },
+    "codex-rs/tools/src/tool_config.rs": {
+      "sha256": "1cb8ecfd0d0721bb9b30e82492128e7fd1f2aa85faa12a607e01cfdd144c3d95",
+      "excerpts": [
+        {
+          "start_line": 17,
+          "text": "pub fn request_user_input_available_modes(features: &Features) -> Vec<ModeKind> {\n    TUI_VISIBLE_COLLABORATION_MODES\n        .into_iter()\n        .filter(|mode| {\n            mode.allows_request_user_input()\n                || (features.enabled(Feature::DefaultModeRequestUserInput)\n                    && *mode == ModeKind::Default)\n        })\n        .collect()\n}"
+        }
+      ]
+    },
+    "codex-rs/core/src/tools/spec_plan.rs": {
+      "sha256": "849ef21d4e5c83febdc31eacd7609911d43e3f69a35168fe02ae899273b5ef3e",
+      "excerpts": [
+        {
+          "start_line": 1169,
+          "text": "    if turn_context.config.experimental_request_user_input_enabled {\n        registry.add_with_exposure(\n            RequestUserInputHandler {\n                available_modes: request_user_input_available_modes(features),\n            },\n            ToolExposure::DirectModelOnly,\n        );\n    }"
+        }
+      ]
+    }
+  },
+  "schemas": {
+    "ToolRequestUserInputParams.json": {
+      "sha256": "fda15b62e7446105b59c8ed85c908abed2a47db70653e57c92c47a2f204fa77a",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ToolRequestUserInputOption": {
+            "description": "EXPERIMENTAL. Defines a single selectable option for request_user_input.",
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "description",
+              "label"
+            ],
+            "type": "object"
+          },
+          "ToolRequestUserInputQuestion": {
+            "description": "EXPERIMENTAL. Represents one request_user_input question and its required options.",
+            "properties": {
+              "header": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "isOther": {
+                "default": false,
+                "type": "boolean"
+              },
+              "isSecret": {
+                "default": false,
+                "type": "boolean"
+              },
+              "options": {
+                "items": {
+                  "$ref": "#/definitions/ToolRequestUserInputOption"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "question": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "header",
+              "id",
+              "question"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "EXPERIMENTAL. Params sent with a request_user_input event.",
+        "properties": {
+          "autoResolutionMs": {
+            "default": null,
+            "description": "@deprecated Use `isBlocking` to decide whether the request should block.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "isBlocking": {
+            "type": "boolean"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/definitions/ToolRequestUserInputQuestion"
+            },
+            "type": "array"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "isBlocking",
+          "itemId",
+          "questions",
+          "threadId",
+          "turnId"
+        ],
+        "title": "ToolRequestUserInputParams",
+        "type": "object"
+      }
+    },
+    "ToolRequestUserInputResponse.json": {
+      "sha256": "5073b245f741fa8ce62ec52e4dd1809b7831f9c4284c279a78abc9b171f8e3f2",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ToolRequestUserInputAnswer": {
+            "description": "EXPERIMENTAL. Captures a user's answer to a request_user_input question.",
+            "properties": {
+              "answers": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "answers"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "EXPERIMENTAL. Response payload mapping question ids to answers.",
+        "properties": {
+          "answers": {
+            "additionalProperties": {
+              "$ref": "#/definitions/ToolRequestUserInputAnswer"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "answers"
+        ],
+        "title": "ToolRequestUserInputResponse",
+        "type": "object"
+      }
+    },
+    "ServerRequestResolvedNotification.json": {
+      "sha256": "4f03d586a5af04edd912cad08cc97eceb658e7e06744565e6d41a93e04a55966",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "RequestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "format": "int64",
+                "type": "integer"
+              }
+            ]
+          }
+        },
+        "properties": {
+          "requestId": {
+            "$ref": "#/definitions/RequestId"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId",
+          "threadId"
+        ],
+        "title": "ServerRequestResolvedNotification",
+        "type": "object"
+      }
+    }
+  },
+  "selected_features": [
+    "daemon_auto_start                        stable             true",
+    "default_mode_request_user_input          under development  false"
+  ]
+}

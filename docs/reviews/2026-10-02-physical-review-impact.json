@@ -1,0 +1,18 @@
+{
+  "original_manifest": "2026-10-02-physical-implementation-scope.json",
+  "fixed_manifest": "2026-10-02-physical-implementation-fixed-scope.json",
+  "changed_or_added_files": [
+    "docs/physical-foreground-progress.md",
+    "ios/AwesoMuxCompanion/CompanionStore.swift",
+    "ios/AwesoMuxCompanion/QuestionCard.swift",
+    "ios/AwesoMuxCompanion/ThreadView.swift",
+    "ios/AwesoMuxCompanionTests/CompanionStoreTests.swift",
+    "ios/AwesoMuxCompanionTests/PairingStoreTests.swift",
+    "ios/README.md",
+    "ios/AwesoMuxCompanionUITests/ForegroundLifecycleTests.swift",
+    "ios/Fixtures/disconnected.json",
+    "ios/Fixtures/submitted.json",
+    "ios/Fixtures/pending.json"
+  ],
+  "impact": "iOS input intent/view identity/host presentation and regression tests changed; bridge/security process lifecycle untouched. Refresh independent reviewer on affected iOS slice and dependency callsites; run first actual Claude adversary on full final implementation because initial attempt produced no report. Historical source review remains original, not relabeled."
+}

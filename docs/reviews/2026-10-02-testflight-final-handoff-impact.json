@@ -1,0 +1,10 @@
+{
+  "review_report": "2026-10-02-testflight-adversarial-final-review.md",
+  "intervening_change": "docs/testflight-delivery.md replaces ambiguous resolve-declaration wording with user-only attestation; no source/settings/artifact change",
+  "impact": "Retain reviewed source and artifact coverage; explicit wording correction aligns existing reviewed user-only boundary",
+  "deferred_minors": [
+    "No mode fields in signing audit (actual IPA0600 parent0700 checked separately)",
+    "No Git repository; add artifact ignore before any Git initialization/publication",
+    "DefaultKeychain source-check evidence retained in previous source review rather than repeated in handoff"
+  ]
+}

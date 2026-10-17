@@ -19,8 +19,17 @@ struct AgentsView: View {
                     }
                     if let message = store.message {
                         Section {
-                            Label(message, systemImage: "exclamationmark.triangle.fill")
-                                .font(.subheadline).foregroundStyle(Cat.subtext0)
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Image(systemName: "exclamationmark.triangle.fill").accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(message)
+                                    Button("Try Again") { Task { await store.refresh() } }
+                                        .buttonStyle(.borderless)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(Cat.accent)
+                                }
+                            }
+                            .font(.subheadline).foregroundStyle(Cat.subtext0)
                         }
                         .listRowBackground(Cat.card)
                     }

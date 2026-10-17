@@ -305,7 +305,7 @@ final class CompanionStore {
         case MacClientFailure.api(let code):
             String(localized: "awesoMux isn't answering on \(macName) (\(code)).")
         default:
-            String(localized: "Can't reach \(macName).")
+            String(localized: "Can't reach \(macName). Make sure it's awake and awesoMux is open.")
         }
     }
 }

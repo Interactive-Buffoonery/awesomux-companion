@@ -6,43 +6,59 @@ options:
 settings:
   base:
     SWIFT_VERSION: '6.0'
-    CODE_SIGNING_ALLOWED: NO
     GENERATE_INFOPLIST_FILE: YES
     CURRENT_PROJECT_VERSION: 1
     MARKETING_VERSION: '0.1'
     TARGETED_DEVICE_FAMILY: '1,2'
+    # Sign to Run Locally: the Simulator only grants the App Group entitlement
+    # to a signed binary, and ad-hoc signing needs no team or profile.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: '-'
+    CODE_SIGNING_ALLOWED: YES
 targets:
   AwesoMuxCompanion:
     type: application
     platform: iOS
-    sources: [AwesoMuxCompanion]
+    sources: [AwesoMuxCompanion, Shared]
+    dependencies:
+      - target: AwesoMuxCompanionWidgets
+    entitlements:
+      path: AwesoMuxCompanion/AwesoMuxCompanion.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.interactivebuffoonery.awesomux.companion]
+    info:
+      path: AwesoMuxCompanion/Info.plist
+      properties:
+        CFBundleDisplayName: awesoMux
+        NSSupportsLiveActivities: true
+        UIBackgroundModes: [remote-notification]
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.interactivebuffoonery.awesomux.companion
-        INFOPLIST_KEY_CFBundleDisplayName: awesoMux
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
-  AwesoMuxCompanionTests:
-    type: bundle.unit-test
+  AwesoMuxCompanionWidgets:
+    type: app-extension
     platform: iOS
-    sources:
-      - AwesoMuxCompanionTests
-      - path: Fixtures
-        type: folder
-        buildPhase: resources
-    dependencies:
-      - target: AwesoMuxCompanion
-  AwesoMuxCompanionUITests:
-    type: bundle.ui-testing
-    platform: iOS
-    sources: [AwesoMuxCompanionUITests]
-    dependencies:
-      - target: AwesoMuxCompanion
+    sources: [AwesoMuxCompanionWidgets, Shared]
+    entitlements:
+      path: AwesoMuxCompanionWidgets/AwesoMuxCompanionWidgets.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.interactivebuffoonery.awesomux.companion]
+    info:
+      path: AwesoMuxCompanionWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: awesoMux
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.interactivebuffoonery.awesomux.companion.widgets
 schemes:
   AwesoMuxCompanion:
     build:
       targets:
         AwesoMuxCompanion: all
-    test:
-      targets: [AwesoMuxCompanionTests, AwesoMuxCompanionUITests]
+    run:
+      config: Debug

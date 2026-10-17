@@ -17,7 +17,7 @@ struct PairHostView: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("connection-key")
                 } header: { Text("Your Mac") } footer: {
-                    Text("This key lets you read and answer questions in the managed Codex session on this host. Enter the private HTTPS address and key shown on your Mac.")
+                    Text("This key lets your phone see which agents on this Mac need you, are working, or are done. It is read-only: you answer agents at your Mac. Enter the private HTTPS address and key shown on your Mac.")
                 }
                 if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
                 Section {
@@ -28,7 +28,7 @@ struct PairHostView: View {
                             Task { await store.refresh() }
                         } catch BridgeFailure.invalidConfiguration {
                             errorMessage = "Use the exact private HTTPS address with port 8443 or 10000, and its connection key."
-                        } catch { errorMessage = "Could not save this connection. Return to the inbox to retry the previous host." }
+                        } catch { errorMessage = "Could not save this connection. Return to the agent list to retry the previous host." }
                     }.disabled(address.isEmpty || key.isEmpty || !store.canPair)
                 }
             }.navigationTitle("Connect a host")

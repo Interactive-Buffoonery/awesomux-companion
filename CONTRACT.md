@@ -1,8 +1,8 @@
-# Glance relay contract v1
+# Companion relay contract v1
 
 The relay runs on the Mac, reads the awesoMux local agent API through the
 bundled `awesomux-agent` helper, and serves one read-only snapshot to the
-iOS app. Both sides build against this file; change it here first.
+awesoMux Companion iOS app. Both sides build against this file; change it here first.
 
 ## Source: awesoMux local agent API
 

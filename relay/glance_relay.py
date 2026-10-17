@@ -52,10 +52,10 @@ def notification_payload(event, workspace_name):
     }
 
 
-def simulator_sender(bundle_id):
+def simulator_sender(device, bundle_id):
     def send(payload):
         subprocess.run(
-            ["xcrun", "simctl", "push", "booted", bundle_id, "-"],
+            ["xcrun", "simctl", "push", device, bundle_id, "-"],
             input=json.dumps(payload), text=True, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, timeout=10, check=True,
         )
@@ -333,9 +333,13 @@ def main():
     parser.add_argument("--private-directory", required=True)
     parser.add_argument("--poll-interval", default=2.0, type=positive_interval)
     parser.add_argument("--simulator-push", metavar="BUNDLE_ID")
+    # "booted" is ambiguous once a second Simulator is running.
+    parser.add_argument("--simulator-device", metavar="UDID")
     parser.add_argument("--host-name", default=socket.gethostname().split(".")[0])
     args = parser.parse_args()
-    sender = simulator_sender(args.simulator_push) if args.simulator_push else None
+    if args.simulator_push and not args.simulator_device:
+        parser.error("--simulator-push needs --simulator-device")
+    sender = simulator_sender(args.simulator_device, args.simulator_push) if args.simulator_push else None
     relay = GlanceRelay(args.helper, args.profile, str(args.credential_handle),
                         host_name=args.host_name, poll_interval=args.poll_interval,
                         push_sender=sender)

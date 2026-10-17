@@ -6,6 +6,8 @@ import WidgetKit
 
 enum PairingStep: Equatable {
     case idle
+    /// A link from outside the app (URL or clipboard) waiting for the person to choose Pair.
+    case review(PairingLink)
     case connecting(macName: String)
     case confirm(words: [String], macName: String, transport: CompanionTransport)
     case failed(String)
@@ -66,7 +68,20 @@ final class CompanionStore {
         pairingStep = .idle
     }
 
-    func showPairingError(_ message: String) { pairingStep = .failed(message) }
+    /// Scanned links pair right away; links from a URL or the clipboard wait for the person to choose Pair,
+    /// so a tapped link can't make the phone contact a host on its own.
+    func openPairingLink(_ text: String, review: Bool) {
+        switch pairingStep {
+        case .connecting, .confirm: return
+        case .idle, .review, .failed: break
+        }
+        do throws(PairingLink.Failure) {
+            let link = try PairingLink(text)
+            if review { pairingStep = .review(link) } else { startPairing(link) }
+        } catch {
+            pairingStep = .failed(error.message)
+        }
+    }
 
     private func pair(_ link: PairingLink) async {
         var identity: PhoneIdentity?

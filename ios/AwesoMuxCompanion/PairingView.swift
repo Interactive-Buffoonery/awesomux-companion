@@ -13,6 +13,7 @@ struct PairingView: View {
                 VStack(spacing: 16) {
                     switch store.pairingStep {
                     case .idle, .failed: welcome
+                    case .review(let link): review(link)
                     case .connecting(let macName): connecting(macName)
                     case .confirm(let words, let macName, let transport): confirm(words, macName: macName, transport: transport)
                     }
@@ -32,7 +33,7 @@ struct PairingView: View {
             .sheet(isPresented: $scanning) {
                 QRScannerSheet { text in
                     scanning = false
-                    open(text)
+                    store.openPairingLink(text, review: false)
                 }
             }
         }
@@ -67,12 +68,46 @@ struct PairingView: View {
             .buttonStyle(.borderedProminent).controlSize(.large)
             .foregroundStyle(Cat.crust)
             Button {
-                open(UIPasteboard.general.string ?? "")
+                store.openPairingLink(UIPasteboard.general.string ?? "", review: true)
             } label: {
                 Label("Paste Pairing Link", systemImage: "doc.on.clipboard").frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered).controlSize(.large)
         }
+    }
+
+    private func review(_ link: PairingLink) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "laptopcomputer.and.iphone")
+                .font(.system(size: 44, weight: .regular))
+                .foregroundStyle(Cat.accent)
+                .frame(width: 120, height: 120)
+                .background(Cat.card, in: RoundedRectangle(cornerRadius: 24))
+                .accessibilityHidden(true)
+                .padding(.top, 24)
+            Text("Pair with “\(link.macName)”?")
+                .font(.title2.weight(.semibold)).foregroundStyle(Cat.text).multilineTextAlignment(.center)
+            Text("\(link.host) · \(link.transport.title)")
+                .font(.body.monospacedDigit()).foregroundStyle(Cat.subtext0)
+            if let current = store.record {
+                Text("This replaces the pairing with “\(current.macName)”.")
+                    .font(.subheadline).foregroundStyle(Cat.subtext0).multilineTextAlignment(.center)
+            }
+            Button {
+                store.startPairing(link)
+            } label: {
+                Text("Pair").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent).controlSize(.large)
+            .foregroundStyle(Cat.crust)
+            Button(role: .cancel) {
+                store.cancelPairing()
+            } label: {
+                Text("Cancel").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered).controlSize(.large)
+        }
+        .accessibilityIdentifier("link-confirm")
     }
 
     private func connecting(_ macName: String) -> some View {
@@ -107,14 +142,6 @@ struct PairingView: View {
             .accessibilityLabel(words.joined(separator: ", "))
             .accessibilityIdentifier("confirmation-words")
             Text("Connecting over \(transport.title)").font(.footnote).foregroundStyle(Cat.subtext0)
-        }
-    }
-
-    private func open(_ text: String) {
-        do throws(PairingLink.Failure) {
-            store.startPairing(try PairingLink(text))
-        } catch {
-            store.showPairingError(error.message)
         }
     }
 }

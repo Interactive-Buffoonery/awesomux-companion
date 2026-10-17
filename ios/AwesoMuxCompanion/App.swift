@@ -25,11 +25,7 @@ struct GlanceApp: App {
             }
             .tint(Cat.accent)
             .onOpenURL { url in
-                do throws(PairingLink.Failure) {
-                    store.startPairing(try PairingLink(url.absoluteString))
-                } catch {
-                    store.showPairingError(error.message)
-                }
+                store.openPairingLink(url.absoluteString, review: true)
             }
             .task(id: scenePhase) {
                 switch scenePhase {

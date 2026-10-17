@@ -69,6 +69,15 @@ struct MacClient: Sendable {
         }
     }
 
+    func unpair(connectionID: UUID) async throws {
+        let response = try await withTimeout(.seconds(3)) {
+            try await call("unpair", connectionID: connectionID)
+        }
+        guard response.profile != nil, response.appInstanceID != nil, response.capturedAt != nil else {
+            throw MacClientFailure.invalidResponse
+        }
+    }
+
     // MARK: Local agent API
 
     /// No `profile` or `credential`: the Companion listener binds requests to its own profile and the paired certificate.
@@ -133,6 +142,8 @@ struct APIResponse: Decodable, Sendable {
     let schemaVersion: Int
     let requestID: UUID?
     let error: String?
+    let profile: String?
+    let appInstanceID: UUID?
     let capturedAt: Date?
     let connectionStatus: String?
     let agents: [Agent]?

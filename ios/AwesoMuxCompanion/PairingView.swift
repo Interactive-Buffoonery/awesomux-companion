@@ -54,6 +54,11 @@ struct PairingView: View {
                 .font(.title2.weight(.semibold)).foregroundStyle(Cat.text)
             Text("Open awesoMux on your Mac, go to Settings → awesoMux Companion, and choose Pair iPhone.")
                 .font(.body).foregroundStyle(Cat.subtext0).multilineTextAlignment(.center)
+            if let message = store.unpairMessage {
+                Label(message, systemImage: "info.circle")
+                    .font(.subheadline).foregroundStyle(Cat.text)
+                    .accessibilityIdentifier("unpair-message")
+            }
             if case .failed(let message) = store.pairingStep {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .font(.subheadline).foregroundStyle(Cat.text)

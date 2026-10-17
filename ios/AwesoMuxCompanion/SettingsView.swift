@@ -22,7 +22,16 @@ struct SettingsView: View {
                     Button("Pair Again") { store.showingPairing = true; dismiss() }
                     Button("Unpair This iPhone", role: .destructive) { confirmingUnpair = true }
                         .foregroundStyle(Cat.red)
+                    if store.isUnpairing {
+                        ProgressView("Unpairing…")
+                    } else if let message = store.message {
+                        Text(message).font(.footnote).foregroundStyle(Cat.subtext0)
+                    }
+                    if let message = store.unpairMessage {
+                        Text(message).font(.footnote).foregroundStyle(Cat.subtext0)
+                    }
                 } header: { Text("Your Mac").foregroundStyle(Cat.subtext0) }
+                .disabled(store.isUnpairing)
                 .listRowBackground(Cat.card)
             }
             Section {
@@ -53,9 +62,9 @@ struct SettingsView: View {
             notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
         }
         .confirmationDialog("Unpair this iPhone?", isPresented: $confirmingUnpair, titleVisibility: .visible) {
-            Button("Unpair", role: .destructive) { store.unpair() }
+            Button("Unpair", role: .destructive) { Task { await store.unpair() } }
         } message: {
-            Text("This iPhone forgets \(store.record?.macName ?? String(localized: "your Mac")) and its pairing key. To remove it from your Mac too, choose Unpair in awesoMux Settings.")
+            Text("Unpair this iPhone from your Mac. If your Mac can’t be reached, you can finish there later.")
         }
     }
 

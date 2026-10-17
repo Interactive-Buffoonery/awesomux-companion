@@ -49,8 +49,13 @@ choose Allow on the Mac.
 The phone creates a P-256 key (in the Secure Enclave when available, otherwise
 a this-device-only Keychain key) and a self-signed certificate for it, and pins
 the Mac's SPKI fingerprint from the link. The pairing record lives in the
-Keychain. Pair Again creates a fresh key; Unpair This iPhone deletes the
-pairing and the key on the phone only, so also unpair it in awesoMux on the Mac.
+Keychain. Pair Again creates a fresh key. Unpair This iPhone first asks the Mac to revoke
+this phone's pairing, waiting up to three seconds. It then deletes the pairing
+and key on the phone even if the Mac is unreachable or runs an older version.
+If the Mac does not acknowledge the request, the welcome screen keeps a reminder
+to also choose Unpair in awesoMux Settings on the Mac, including after relaunch.
+A successful new pairing clears the reminder. If local deletion fails, Settings
+keeps the pairing available to retry and shows a short error.
 
 To pair the Simulator, open a link with
 `xcrun simctl openurl <UDID> 'awesomuxcompanion://pair?...'`.

@@ -69,12 +69,18 @@ struct AgentsView: View {
         if snapshot.agents.isEmpty {
             ContentUnavailableView {
                 Label {
-                    Text("No agents running")
+                    Text(snapshot.connected ? "No agents running" : "No agents when last checked")
                 } icon: {
                     Image(systemName: "moon.zzz").accessibilityHidden(true)
                 }
             } description: {
-                Text("Agents you start in awesoMux on \(snapshot.hostName) show up here.")
+                if snapshot.connected {
+                    Text("Agents you start in awesoMux on \(snapshot.hostName) show up here.")
+                } else if let updatedAt = snapshot.updatedAt {
+                    Text("Last update from \(snapshot.hostName) at \(lastUpdate(updatedAt)).")
+                } else {
+                    Text("\(snapshot.hostName) can't be reached right now.")
+                }
             }
             .listRowBackground(Color.clear)
         }
@@ -92,6 +98,12 @@ struct AgentsView: View {
                 }
             }
         }
+    }
+
+    private func lastUpdate(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

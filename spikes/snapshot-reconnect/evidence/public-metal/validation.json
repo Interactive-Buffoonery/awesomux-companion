@@ -1,0 +1,55 @@
+{
+  "sourceCommit": "0f61721569c1ef5598db99c2584ee1c98cab59a4",
+  "recordedAt": "2026-10-18T20:59:31.131747+00:00",
+  "focusedTests": {
+    "command": "python3 -m unittest discover -s ios/script/tests -q",
+    "passed": 23,
+    "failed": 0
+  },
+  "fixtureTests": {
+    "command": "python3 spikes/snapshot-reconnect/test_fixture_server.py /Users/sarah/Development/awesomux/vendor/zmx/zig-out/bin/zmx",
+    "queueEvictionAndConcurrentCuts": "passed",
+    "pythonOptimizationRepeat": "passed"
+  },
+  "reviews": {
+    "fullCodex": {
+      "request": "issue30-public-diagnostics-full-review-1",
+      "specialists": 8,
+      "finding": "Complete XCFramework identity missing from archive-only receipt",
+      "resolution": "0f61721"
+    },
+    "independentClaude": {
+      "request": "issue30-public-diagnostics-cross-review-1",
+      "findings": [
+        "DisplayLink dependency lock not enforced",
+        "Unfinished endpoint evidence identity"
+      ],
+      "resolutions": [
+        "3ee5655",
+        "Endpoint evidence explicitly server-only with source/executable identity"
+      ]
+    },
+    "freshFocusedCodex": {
+      "request": "issue30-public-diagnostics-focused-review-2",
+      "result": "No verified source blockers through 0f61721"
+    },
+    "freshFocusedClaude": {
+      "request": "issue30-public-diagnostics-cross-focused-2",
+      "result": "No verified source blockers through 0f61721"
+    }
+  },
+  "releaseScope": {
+    "IMECompositionCancellation": "Required before release in #36, outside #30 spike acceptance",
+    "VoiceOver": "Required before release in #36, outside #30 spike acceptance",
+    "productionWatch": "Implementation and acceptance in #10"
+  },
+  "nativeBuild": {
+    "command": "./spikes/ios-terminal-renderer/native/build.sh 1e9e14af5df14211892f5fc15fd21a49c7d94868",
+    "result": "passed from fresh source clones, fresh local compiler download and isolated caches",
+    "buildReceiptSchema": 2,
+    "frameworkFileCount": 7,
+    "sourceFileCount": 5918,
+    "nativeBuildLog": "native-build.log",
+    "receiptSHA256": "8f022e7d911eb5a00d2550c896ce52b6cdbd509c528bdef7645bd80e6318a956"
+  }
+}

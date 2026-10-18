@@ -62,6 +62,15 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.interactivebuffoonery.awesomux.companion.widgets
+  AwesoMuxCompanionTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [AwesoMuxCompanionTests]
+    dependencies:
+      - target: AwesoMuxCompanion
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.interactivebuffoonery.awesomux.companion.tests
 schemes:
   AwesoMuxCompanion:
     build:
@@ -69,3 +78,6 @@ schemes:
         AwesoMuxCompanion: all
     run:
       config: Debug
+    test:
+      targets:
+        - AwesoMuxCompanionTests

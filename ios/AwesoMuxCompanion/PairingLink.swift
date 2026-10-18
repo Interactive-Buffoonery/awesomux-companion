@@ -1,3 +1,4 @@
+import AwesoMuxCompanionProtocol
 import Foundation
 import Network
 
@@ -34,31 +35,31 @@ struct PairingLink: Equatable, Sendable {
         }
     }
 
-    static let scheme = "awesomuxcompanion"
+    static let scheme = CompanionPairingLink.scheme
 
     init(_ text: String) throws(Failure) {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.utf8.count <= 2048, let components = URLComponents(string: text),
-              components.scheme == Self.scheme, components.host == "pair" else { throw .notAPairingLink }
-        guard components.user == nil, components.password == nil, components.port == nil,
-              components.path.isEmpty, components.fragment == nil,
-              let items = components.queryItems else { throw .malformed }
-        var fields: [String: String] = [:]
-        for item in items {
-            guard let value = item.value, fields.updateValue(value, forKey: item.name) == nil else { throw .malformed }
+        let raw: CompanionPairingLink
+        do {
+            raw = try CompanionPairingLink(text)
+        } catch {
+            switch error {
+            case .notAPairingLink: throw .notAPairingLink
+            case .unsupportedVersion: throw .unsupportedVersion
+            case .malformed: throw .malformed
+            }
         }
-        guard fields["v"] == "1" else { throw fields["v"] == nil ? .malformed : .unsupportedVersion }
-        guard Set(fields.keys) == ["v", "h", "p", "fp", "s", "n", "t"],
-              let host = fields["h"], IPv4Address(host) != nil, !host.hasPrefix("0."),
-              let portText = fields["p"], portText.utf8.allSatisfy({ (48...57).contains($0) }),
-              let port = UInt16(portText), port > 0,
-              let fingerprint = fields["fp"], Data(base64URL: fingerprint)?.count == 32,
-              let secret = fields["s"], Data(base64URL: secret)?.count == 32,
-              let name = fields["n"], !name.isEmpty, name.count <= 128,
+        let host = raw.host
+        let fingerprint = raw.macFingerprint
+        let secret = raw.secret
+        let name = raw.macName
+        guard IPv4Address(host) != nil, !host.hasPrefix("0."),
+              Data(base64URL: fingerprint)?.count == 32,
+              Data(base64URL: secret)?.count == 32,
+              !name.isEmpty, name.count <= 128,
               !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
-              let transport = fields["t"].flatMap(CompanionTransport.init(rawValue:)) else { throw .malformed }
+              let transport = CompanionTransport(rawValue: raw.transport) else { throw .malformed }
         self.host = host
-        self.port = port
+        self.port = raw.port
         macFingerprint = fingerprint
         self.secret = secret
         macName = name

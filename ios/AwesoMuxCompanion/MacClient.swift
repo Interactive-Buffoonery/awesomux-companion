@@ -1,3 +1,4 @@
+import AwesoMuxCompanionProtocol
 import CryptoKit
 import Foundation
 import Network
@@ -18,17 +19,12 @@ struct MacClient: Sendable {
     let macFingerprint: String
     let identity: PhoneIdentity
 
-    static let maximumResponseBytes = 256 * 1024
+    static let maximumResponseBytes = CompanionProtocol.maximumResponseBytes
     private static let requestTimeout: Duration = .seconds(8)
 
     // MARK: Pairing
 
-    struct PairReply: Decodable {
-        let v: Int
-        let status: String
-        let connectionID: UUID?
-        let macName: String?
-    }
+    typealias PairReply = CompanionPairingReply
 
     /// An open pairing-only session: `pair` was answered with `confirm` and the Mac is asking its user.
     struct PairingSession: Sendable {
@@ -54,15 +50,14 @@ struct MacClient: Sendable {
     func beginPairing(secret: String, phoneName: String) async throws -> PairingSession {
         let connection = try await FramedConnection.open(client: self)
         do {
-            let request = try JSONSerialization.data(
-                withJSONObject: ["v": 1, "op": "pair", "secret": secret, "phoneName": phoneName], options: [.sortedKeys])
+            let request = try CompanionProtocol.encoder().encode(CompanionPairingRequest(secret: secret, phoneName: phoneName))
             try await connection.send(request)
             let reply = try await withTimeout(Self.requestTimeout) { try await connection.receiveFrame(maximum: 4096) }
             guard let decoded = try? JSONDecoder().decode(PairReply.self, from: reply), decoded.v == 1 else {
                 throw MacClientFailure.invalidResponse
             }
             guard decoded.status == "confirm", let macSPKI = connection.peerSPKI else { throw MacClientFailure.denied }
-            return PairingSession(words: try PairingWords.words(macSPKI: macSPKI, phoneSPKI: identity.spki), connection: connection)
+            return PairingSession(words: CompanionPairingWords.words(macSPKI: macSPKI, phoneSPKI: identity.spki), connection: connection)
         } catch {
             connection.cancel()
             throw error
@@ -80,25 +75,15 @@ struct MacClient: Sendable {
 
     // MARK: Local agent API
 
-    /// No `profile` or `credential`: the Companion listener binds requests to its own profile and the paired certificate.
-    struct Request: Encodable {
-        let schemaVersion = 1
-        let requestID = UUID()
-        let operation: String
-        let connectionID: UUID
-        let limit: Int?
-        let cursor: String?
-    }
-
     func call(_ operation: String, connectionID: UUID, limit: Int? = nil, cursor: String? = nil) async throws -> APIResponse {
-        let request = Request(operation: operation, connectionID: connectionID, limit: limit, cursor: cursor)
+        let request = CompanionAPIRequest(operation: operation, connectionID: connectionID, limit: limit, cursor: cursor)
         let connection = try await FramedConnection.open(client: self)
         defer { connection.cancel() }
         try await connection.send(JSONEncoder().encode(request))
         let data = try await withTimeout(Self.requestTimeout) {
             try await connection.receiveFrame(maximum: Self.maximumResponseBytes)
         }
-        guard let response = try? APIResponse.decoder.decode(APIResponse.self, from: data),
+        guard let response = try? CompanionProtocol.decoder().decode(APIResponse.self, from: data),
               response.schemaVersion == 1, response.requestID == request.requestID else {
             throw MacClientFailure.invalidResponse
         }
@@ -107,73 +92,7 @@ struct MacClient: Sendable {
     }
 }
 
-struct APIResponse: Decodable, Sendable {
-    struct Agent: Decodable, Sendable {
-        let paneID: String
-        let workspaceID: String
-        let workspaceName: String
-        let provider: String
-        let executionLocation: String
-        let availability: String
-        let state: String
-        let attentionReason: String?
-        let observedAt: Date?
-    }
-
-    struct Event: Codable, Sendable {
-        let id: String
-        let attentionID: String
-        let change: String
-        let paneID: String
-        let workspaceID: String
-        let provider: String
-        let occurredAt: Date
-        let reason: String
-    }
-
-    struct AttentionPage: Decodable, Sendable {
-        let events: [Event]
-        let nextCursor: String
-        let cursorStatus: String
-        let hasMore: Bool
-        let currentStateRecoveryRequired: Bool
-    }
-
-    let schemaVersion: Int
-    let requestID: UUID?
-    let error: String?
-    let profile: String?
-    let appInstanceID: UUID?
-    let capturedAt: Date?
-    let connectionStatus: String?
-    let agents: [Agent]?
-    let attentionEvents: AttentionPage?
-
-    static let decoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let text = try decoder.singleValueContainer().decode(String.self)
-            if let date = try? Date(text, strategy: .iso8601) { return date }
-            if let date = try? Date(text, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)) { return date }
-            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Not an ISO 8601 date"))
-        }
-        return decoder
-    }()
-}
-
-enum PairingWords {
-    private static let list: [String] = {
-        guard let url = Bundle.main.url(forResource: "companion-pairing-words", withExtension: "txt"),
-              let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        return text.split(whereSeparator: \.isNewline).map(String.init)
-    }()
-
-    /// `SHA-256(macSPKI || phoneSPKI)`, first three bytes as indexes into the shared 256-word list.
-    static func words(macSPKI: Data, phoneSPKI: Data) throws -> [String] {
-        guard list.count == 256 else { throw MacClientFailure.invalidResponse }
-        return SHA256.hash(data: macSPKI + phoneSPKI).prefix(3).map { list[Int($0)] }
-    }
-}
+typealias APIResponse = CompanionAPIResponse
 
 // MARK: - Transport
 
@@ -254,8 +173,7 @@ private final class FramedConnection: @unchecked Sendable {
     func cancel() { connection.cancel() }
 
     func send(_ payload: Data) async throws {
-        var frame = withUnsafeBytes(of: UInt32(payload.count).bigEndian) { Data($0) }
-        frame.append(payload)
+        let frame = try CompanionFrame.encode(payload, maximum: CompanionProtocol.maximumRequestBytes)
         let connection = connection
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -268,9 +186,14 @@ private final class FramedConnection: @unchecked Sendable {
 
     func receiveFrame(maximum: Int) async throws -> Data {
         let header = try await receive(exactly: 4)
-        let length = header.reduce(0) { $0 << 8 | Int($1) }
-        guard length > 0 else { throw MacClientFailure.invalidResponse }
-        guard length <= maximum else { throw MacClientFailure.oversizedResponse }
+        let length: Int
+        do {
+            length = try CompanionFrame.payloadLength(header, maximum: maximum)
+        } catch CompanionFrame.Failure.tooLarge {
+            throw MacClientFailure.oversizedResponse
+        } catch {
+            throw MacClientFailure.invalidResponse
+        }
         return try await receive(exactly: length)
     }
 

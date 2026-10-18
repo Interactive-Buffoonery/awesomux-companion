@@ -1,3 +1,4 @@
+import AwesoMuxCompanionProtocol
 import Foundation
 import Observation
 import UIKit
@@ -361,7 +362,7 @@ struct AttentionTracker: Codable {
     var readingInitialHistory = true
 
     static func load() -> AttentionTracker {
-        UserDefaults.standard.data(forKey: key).flatMap { try? APIResponse.decoder.decode(Self.self, from: $0) } ?? Self()
+        UserDefaults.standard.data(forKey: key).flatMap { try? CompanionProtocol.decoder().decode(Self.self, from: $0) } ?? Self()
     }
 
     func save() {

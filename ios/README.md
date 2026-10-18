@@ -16,6 +16,7 @@ described in the awesoMux repository's `docs/companion-pairing-protocol.md`.
 | `AwesoMuxCompanion/` | App target: pairing flow, phone identity, mutual TLS client, polling store, agent list, Live Activity lifecycle, notification handling |
 | `AwesoMuxCompanionWidgets/` | Widget extension: the `Agents` widget (small, medium, accessory rectangular and circular) and the Live Activity UI |
 | `Shared/` | Compiled into both targets: snapshot model and decoder, App Group storage, `GlanceActivityAttributes`, shared views |
+| `../Sources/AwesoMuxCompanionProtocol/` | Local Swift package used by the app for wire types, framing, links, and confirmation words |
 
 The app writes each snapshot to the App Group
 `group.com.interactivebuffoonery.awesomux.companion` and reloads widget timelines

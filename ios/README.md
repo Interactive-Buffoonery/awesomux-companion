@@ -49,7 +49,11 @@ choose Allow on the Mac.
 The phone creates a P-256 key (in the Secure Enclave when available, otherwise
 a this-device-only Keychain key) and a self-signed certificate for it, and pins
 the Mac's SPKI fingerprint from the link. The pairing record lives in the
-Keychain. Pair Again creates a fresh key. Unpair This iPhone first asks the Mac to revoke
+Keychain. Pair Again creates a fresh key; once the new pairing succeeds, the
+phone asks the previous Mac to revoke the old one and then deletes the old key.
+Revocation is best effort: if the previous Mac is unreachable, remove the old
+pairing in its settings. Quitting during cleanup can leave the old key in Keychain.
+Unpair This iPhone first asks the Mac to revoke
 this phone's pairing, waiting up to three seconds. It then deletes the pairing
 and key on the phone even if the Mac is unreachable or runs an older version.
 If the Mac does not acknowledge the request, the welcome screen keeps a reminder

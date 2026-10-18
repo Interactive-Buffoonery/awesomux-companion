@@ -112,7 +112,7 @@ final class CompanionStore {
             try PairingStore.save(next)
             let previous = record
             forgetConnection()
-            if let previous, previous.identityTag != next.identityTag { try? PhoneIdentity.delete(tag: previous.identityTag) }
+            if let previous, previous.identityTag != next.identityTag { revoke(previous) }
             record = next
             unpairMessage = nil
             UserDefaults.standard.removeObject(forKey: Keys.revokedConnectionID)
@@ -158,6 +158,20 @@ final class CompanionStore {
             message = nil
         } catch {
             message = String(localized: "This iPhone couldn’t finish unpairing. Choose Unpair This iPhone to try again.")
+        }
+    }
+
+    /// Best effort, after a new pairing replaces `previous`: if the old Mac can't be reached, its grant stays
+    /// until the person unpairs there, the same as an unacknowledged unpair.
+    // This attempt is not persisted; quitting before it finishes can leave the old key in Keychain.
+    private func revoke(_ previous: PairingRecord) {
+        Task {
+            if let identity = try? PhoneIdentity.load(tag: previous.identityTag, storage: previous.identityStorage) {
+                let client = MacClient(
+                    host: previous.host, port: previous.port, macFingerprint: previous.macFingerprint, identity: identity)
+                try? await client.unpair(connectionID: previous.connectionID)
+            }
+            try? PhoneIdentity.delete(tag: previous.identityTag)
         }
     }
 

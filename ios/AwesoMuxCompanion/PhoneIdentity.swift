@@ -34,14 +34,14 @@ struct PhoneIdentity: @unchecked Sendable {
                 return try make(tag: tag, storage: .secureEnclave)
             } catch {
                 log.error("Secure Enclave identity failed, falling back to Keychain: \(String(describing: error), privacy: .public)")
-                delete(tag: tag)
+                try? delete(tag: tag)
             }
         }
         #endif
         do {
             return try make(tag: tag, storage: .keychain)
         } catch {
-            delete(tag: tag)
+            try? delete(tag: tag)
             throw error
         }
     }
@@ -56,9 +56,13 @@ struct PhoneIdentity: @unchecked Sendable {
         return PhoneIdentity(tag: tag, storage: storage, identity: identity, spki: spki)
     }
 
-    static func delete(tag: String) {
-        SecItemDelete([kSecClass: kSecClassKey, kSecAttrApplicationTag: Data(tag.utf8)] as CFDictionary)
-        SecItemDelete([kSecClass: kSecClassCertificate, kSecAttrLabel: tag] as CFDictionary)
+    static func delete(tag: String) throws {
+        guard tag.hasPrefix(tagPrefix) else { throw Failure.identityUnavailable }
+        let keyStatus = SecItemDelete([kSecClass: kSecClassKey, kSecAttrApplicationTag: Data(tag.utf8)] as CFDictionary)
+        let certificateStatus = SecItemDelete([kSecClass: kSecClassCertificate, kSecAttrLabel: tag] as CFDictionary)
+        for status in [keyStatus, certificateStatus] where status != errSecSuccess && status != errSecItemNotFound {
+            throw Failure.keychain(status)
+        }
     }
 
     private static func make(tag: String, storage: Storage) throws -> PhoneIdentity {

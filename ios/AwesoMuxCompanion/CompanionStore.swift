@@ -20,6 +20,10 @@ final class CompanionStore {
     /// Whether the latest read reached the Mac.
     private(set) var reachable = false
     private(set) var message: String?
+    private(set) var isUnpairing = false
+    private(set) var unpairMessage: String? = UserDefaults.standard.string(forKey: Keys.unpairMessage) {
+        didSet { UserDefaults.standard.set(unpairMessage, forKey: Keys.unpairMessage) }
+    }
     private(set) var pairingStep: PairingStep = .idle
     /// Pair Again from Settings; the welcome screen also shows whenever no Mac is paired.
     var showingPairing = false
@@ -44,7 +48,11 @@ final class CompanionStore {
     @ObservationIgnored private var pendingAlerts: [APIResponse.Event] = []
     @ObservationIgnored private let liveActivity = LiveActivityController()
 
-    private enum Keys { static let liveActivity = "liveActivityEnabled" }
+    private enum Keys {
+        static let liveActivity = "liveActivityEnabled"
+        static let unpairMessage = "unpairMessage"
+        static let revokedConnectionID = "revokedConnectionID"
+    }
 
     init() {
         do {
@@ -57,6 +65,7 @@ final class CompanionStore {
     // MARK: Pairing
 
     func startPairing(_ link: PairingLink) {
+        guard !isUnpairing else { return }
         pairingTask?.cancel()
         pairingStep = .connecting(macName: link.macName)
         pairingTask = Task { await pair(link) }
@@ -71,6 +80,7 @@ final class CompanionStore {
     /// Scanned links pair right away; links from a URL or the clipboard wait for the person to choose Pair,
     /// so a tapped link can't make the phone contact a host on its own.
     func openPairingLink(_ text: String, review: Bool) {
+        guard !isUnpairing else { return }
         switch pairingStep {
         case .connecting, .confirm: return
         case .idle, .review, .failed: break
@@ -102,27 +112,53 @@ final class CompanionStore {
             try PairingStore.save(next)
             let previous = record
             forgetConnection()
-            if let previous, previous.identityTag != next.identityTag { PhoneIdentity.delete(tag: previous.identityTag) }
+            if let previous, previous.identityTag != next.identityTag { try? PhoneIdentity.delete(tag: previous.identityTag) }
             record = next
+            unpairMessage = nil
+            UserDefaults.standard.removeObject(forKey: Keys.revokedConnectionID)
             message = nil
             pairingStep = .idle
             showingPairing = false
             requestNotificationPermission()
             await refresh()
         } catch {
-            if let identity { PhoneIdentity.delete(tag: identity.tag) }
+            if let identity { try? PhoneIdentity.delete(tag: identity.tag) }
             guard !Task.isCancelled else { return }
             pairingStep = .failed(Self.pairingMessage(for: error))
         }
     }
 
-    func unpair() {
-        // ponytail: the wire has no unpair operation; the Mac drops this phone when its user unpairs there.
-        if let record { PhoneIdentity.delete(tag: record.identityTag) }
-        try? PairingStore.clear()
+    func unpair() async {
+        guard !isUnpairing, let record else { return }
+        isUnpairing = true
+        cancelPairing()
         forgetConnection()
-        record = nil
-        message = nil
+        defer { isUnpairing = false }
+        var notifiedMac = UserDefaults.standard.string(forKey: Keys.revokedConnectionID) == record.connectionID.uuidString
+        if !notifiedMac {
+            do {
+                let client = try MacClient(
+                    host: record.host, port: record.port, macFingerprint: record.macFingerprint,
+                    identity: PhoneIdentity.load(tag: record.identityTag, storage: record.identityStorage))
+                try await client.unpair(connectionID: record.connectionID)
+                notifiedMac = true
+                // Keep the acknowledgement if local deletion needs another attempt.
+                UserDefaults.standard.set(record.connectionID.uuidString, forKey: Keys.revokedConnectionID)
+            } catch {
+                // Local removal must finish even when the Mac cannot acknowledge it.
+            }
+        }
+        unpairMessage = notifiedMac ? nil : String(localized:
+            "To finish, also choose Unpair in awesoMux Settings on your Mac.")
+        do {
+            try PhoneIdentity.delete(tag: record.identityTag)
+            try PairingStore.clear()
+            UserDefaults.standard.removeObject(forKey: Keys.revokedConnectionID)
+            self.record = nil
+            message = nil
+        } catch {
+            message = String(localized: "This iPhone couldn’t finish unpairing. Choose Unpair This iPhone to try again.")
+        }
     }
 
     private func forgetConnection() {
@@ -148,7 +184,7 @@ final class CompanionStore {
     /// One read of alerts and agents; overlapping callers share the read already in flight.
     func refresh() async {
         if let refreshTask { return await refreshTask.value }
-        guard let record else { return }
+        guard !isUnpairing, let record else { return }
         let task = Task { await read(record) }
         refreshTask = task
         await task.value

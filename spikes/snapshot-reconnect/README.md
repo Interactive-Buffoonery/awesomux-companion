@@ -1,6 +1,7 @@
 # Snapshot and reconnect investigation (#17)
 
-Captured 2026-10-18. No application behavior changed; Chat view remains unbuilt.
+Captured 2026-10-18. Shipping behavior is unchanged; a separate diagnostic app
+was added after the capture. Chat view remains unbuilt.
 
 ## Result
 
@@ -95,7 +96,9 @@ Paths below are relative to `vendor/zmx` in the awesoMux repository.
 4. Still unverified: phone-to-Mac reconnect, leader/follower resize behavior in
    the eventual transport, real PTY offline output, alternate screen, wide and
    combining characters, split control sequences, long outages/eviction,
-   renderer replay and accessibility. No iOS build, UI, or hosted CI ran.
+   production renderer behavior and accessibility. This initial capture ran no
+   iOS build or UI checks; later diagnostic results are in the verification ledger.
+   No hosted CI ran.
 
 The cheap regression signal is this fixture's live-vs-snapshot comparison:
 assert semantic marks and wrap provenance explicitly before relying on them.

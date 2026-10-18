@@ -95,3 +95,8 @@ Do not use the shipping scheme or TestFlight script for this experimental app.
 A server restart creates new credentials and requires reconfiguration. Bundled
 replay works without the fixture server. See the verification ledger for tested
 behavior and remaining gaps.
+
+The manifest includes the locally generated `Package.resolved`, which is ignored
+by Git. The renderer revision is pinned in `project.yml`; compare individual
+manifest entries when reproducing on another Mac, since a local resolution file
+can change the aggregate manifest hash without changing renderer source.

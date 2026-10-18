@@ -1,14 +1,16 @@
 {
-  "baseCommit": "bafc253c95ba8c80ae03a30397637bede4dec923",
+  "baseCommit": "52d483260847fc1863601412d1965308530b9d2f",
+  "sourceCommit": "df50d91e3971e27e2f016fbd4e10204c25166d1f",
+  "note": "Only documentation, evidence and informational manifest changed after this source commit.",
   "artifacts": {
     "Simulator": {
-      "binarySHA256": "85e92718d4c5f5328c5eed47cb6b13d9e4c82407663944a6aa176852f306fe55",
-      "sourceManifestSHA256": "2bfa2c837558623203bffb8f1bdde1ae15bb250e77f0902ab0f188a4d4c3db49",
+      "binarySHA256": "d4358e41ac369b1999db84958e8f328ae34e4a546ace2f7aceaf9063aec35306",
+      "sourceManifestSHA256": "5c2fc01cf0b3670d532addf092a5e9bf27d1919afb06f2b851f3a0dc8419afc0",
       "bundleID": "com.interactivebuffoonery.awesomux.diagnostics"
     },
     "Device": {
-      "binarySHA256": "10875a8475281ad3c917931b289dc4642a1a705bb5f5f7230247614ede364d45",
-      "sourceManifestSHA256": "2bfa2c837558623203bffb8f1bdde1ae15bb250e77f0902ab0f188a4d4c3db49",
+      "binarySHA256": "1f03b455b13fea48c829654b96b4ea4adb62b945c2951875670d8a2d6ab0fd5b",
+      "sourceManifestSHA256": "5c2fc01cf0b3670d532addf092a5e9bf27d1919afb06f2b851f3a0dc8419afc0",
       "bundleID": "com.interactivebuffoonery.awesomux.diagnostics"
     }
   }

@@ -1,0 +1,15 @@
+{
+  "baseCommit": "bafc253c95ba8c80ae03a30397637bede4dec923",
+  "artifacts": {
+    "Simulator": {
+      "binarySHA256": "85e92718d4c5f5328c5eed47cb6b13d9e4c82407663944a6aa176852f306fe55",
+      "sourceManifestSHA256": "2bfa2c837558623203bffb8f1bdde1ae15bb250e77f0902ab0f188a4d4c3db49",
+      "bundleID": "com.interactivebuffoonery.awesomux.diagnostics"
+    },
+    "Device": {
+      "binarySHA256": "10875a8475281ad3c917931b289dc4642a1a705bb5f5f7230247614ede364d45",
+      "sourceManifestSHA256": "2bfa2c837558623203bffb8f1bdde1ae15bb250e77f0902ab0f188a4d4c3db49",
+      "bundleID": "com.interactivebuffoonery.awesomux.diagnostics"
+    }
+  }
+}

@@ -115,5 +115,18 @@ The final receipt records both linked app hashes, all 22 bundled notice hashes,
 the source manifest and native archive hashes. The negative integration check
 rejects an older artifact without a source build receipt.
 
-IME and VoiceOver work remains deferred. This PR supplies the renderer experiment
-and its public-API replacement; it does not add the production terminal UI.
+IME composition/cancellation and VoiceOver are required before release in
+[#36](https://github.com/Interactive-Buffoonery/awesomux-companion/issues/36),
+outside #30's spike acceptance at Sarah's request. They have not passed.
+Production Watch implementation and acceptance remain in #10.
+
+## Snapshot diagnostic migration
+
+The #35 snapshot/reconnect harness now uses the same pinned public renderer.
+Its fresh native pipeline, complete XCFramework receipt, Release Simulator and
+signed device archive, bundled notices and exact-artifact replay checks are
+recorded in the [diagnostic verification ledger](../spikes/snapshot-reconnect/verification.md).
+That run also executes the full fresh-clone native wrapper, superseding the
+unrun-wrapper limitation above for its newly identified artifacts. The historical
+#34 results and receipts above retain their original artifact identities.
+Shipping and TestFlight project generation have no renderer dependency.

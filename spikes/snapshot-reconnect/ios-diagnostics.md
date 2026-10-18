@@ -1,10 +1,12 @@
 # Companion snapshot diagnostic build
 
-Generate with `ios/script/generate-diagnostics.sh` (runs XcodeGen and refreshes the source hash manifest). Build scheme
-`AwesoMuxDiagnostics`; its bundle identifier is
-`com.interactivebuffoonery.awesomux.diagnostics`. Only this target links
-GhosttyTerminal at revision `42bacd1339f323a693ddbca779295f4f77e5a697`.
-The renderer uses private CAIOSurfaceLayer and remains experimental.
+Generate the separate `AwesoMuxDiagnostics.xcodeproj` with
+`ios/script/generate-diagnostics.sh`. Only its `AwesoMuxDiagnostics` target links
+the local source-built GhosttyTerminal wrapper at package revision
+`42bacd1339f323a693ddbca779295f4f77e5a697`, using the spike's public CAMetalLayer
+pipeline. `ios/project.yml`, the shipping companion/widgets/tests, and the
+TestFlight generation path contain no renderer package or dependency.
+The diagnostic bundle identifier is `com.interactivebuffoonery.awesomux.diagnostics`.
 
 The app root opens Watch diagnostics without pairing. Companion sources are
 compiled into the diagnostic target, but fixture requests use their own transport.
@@ -58,20 +60,49 @@ requires replayPassed/watching for rendering and watching on a physical device
 for physical reconnect. New attempts, configuration changes, and replacement
 network snapshots reset marks to unverified.
 
-The diagnostic target runs script/diagnostics-manifest.py before every build.
-It writes directly into the app bundle and includes Swift sources, fixture bytes,
-Info.plists, project.yml, generation scripts, and Package.resolved. It does not
-invoke XcodeGen recursively. The source-manifest.txt source copy is informational
-and excluded from target resources; pre-build output is authoritative.
+The diagnostic target runs `script/diagnostics-manifest.py` before every build.
+It revalidates the native integration before writing the manifest and
+`native-build.json` directly into the app bundle. The unchanged native provenance
+requires schema 2 and includes archive hashes, the complete XCFramework file
+set and hashes (including headers and Info.plist), exact source hashes, compiler
+identity, build recipe, driver, ordered patches and target configuration. The manifest hashes this receipt,
+Swift sources, fixtures, Info.plists, both project specs, integration/generation/
+validation scripts, native build scripts/patch, notices and local Package.resolved.
+`ThirdPartyNotices` is bundled only in the diagnostic app. Exported JSON identifies
+the public renderer and includes both manifest and native receipt SHA256 values.
+The generated source-manifest copy is ignored and informational; pre-build output
+is authoritative. The prior tracked private-renderer manifest is preserved as
+`evidence/historical-private-source-manifest.txt`.
+
+Generation and builds fail closed for missing native inputs/receipts, changed
+archives, sources, recipe, driver, toolchain or ordered patches, a modified staged
+wrapper/framework, or a stale generated project pointing at another integration.
+Keep the original native build inputs available for revalidation. The receipt
+is build association evidence, not a signature or runtime result. No downloaded
+renderer fallback exists.
 
 ## Build and run on another Mac or phone
 
 Requires Xcode, XcodeGen, Python 3, and a compatible zmx executable for network
-fixtures. From the repository root:
+fixtures. The diagnostic target supports arm64 devices and Apple Silicon
+Simulators only, matching the two source-built native slices. Its target-level
+`ARCHS` setting also applies to Release builds; Intel Simulators are unsupported.
+First build the exact native pipeline using
+[the native build instructions](../ios-terminal-renderer/native/README.md), or
+use a freshly source-built schema 2 artifact with its original receipt and inputs.
+Legacy schema 1 artifacts are historical only and are rejected; do not add hashes
+to an older receipt. Integration checks the complete framework file set before
+staging it and again before each app build; added/deleted/changed headers or
+metadata and framework symlinks fail closed. Integrate the fresh artifact once
+into an ignored local package; no build products belong in Git. From the repository root:
 
 ```sh
+python3 spikes/ios-terminal-renderer/integrate-native.py \
+  /absolute/path/to/native/artifacts/RUN/GhosttyKit.xcframework \
+  /absolute/path/to/native/work/RUN/libghostty-spm \
+  --output-directory ios/build/diagnostics-native
 ios/script/generate-diagnostics.sh
-xcodebuild -project ios/AwesoMuxCompanion.xcodeproj \
+xcodebuild -project ios/AwesoMuxDiagnostics.xcodeproj \
   -scheme AwesoMuxDiagnostics \
   -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath ios/build/DiagnosticsSimulator build
@@ -96,7 +127,28 @@ A server restart creates new credentials and requires reconfiguration. Bundled
 replay works without the fixture server. See the verification ledger for tested
 behavior and remaining gaps.
 
-The manifest includes the locally generated `Package.resolved`, which is ignored
-by Git. The renderer revision is pinned in `project.yml`; compare individual
-manifest entries when reproducing on another Mac, since a local resolution file
-can change the aggregate manifest hash without changing renderer source.
+Generation seeds the diagnostic project's ignored `Package.resolved` from the
+tracked `spikes/ios-terminal-renderer/Package.resolved`. Every build requires
+that lock and validates all dependency pins against the tracked lock, including
+DisplayLink 3.0.1 at `41bea2661e04bebcb1c4f15fc0b6197850100fdd`. Only the
+pre-generation bootstrap permits a missing project lock; an existing drifted
+lock fails closed. The manifest includes both locks. Project-specific originHash
+metadata may differ, but dependency identity, location, kind and state must match.
+DisplayLink is linked into the app and controls frame pacing; a future 3.x
+resolution would change the artifact and invalidate the pinned provenance and
+notices. No dependency drift is accepted as a harmless manifest change.
+
+## Scope and evidence boundary
+
+All existing evidence under `evidence/` outside `public-metal/` is historical
+private-renderer evidence, including the former main-refresh results. It is
+preserved and does not establish public-renderer replay, reconnect or release
+readiness. This migration records no new build or runtime result. Repeat Release
+Simulator and signed device archive checks, bundle provenance/notices checks,
+replay and synthetic reconnect on the exact new artifacts.
+
+Issue #30 may close its spike scope without IME composition/cancellation and
+VoiceOver checks. Those remain unverified pre-release requirements in
+[issue #36](https://github.com/Interactive-Buffoonery/awesomux-companion/issues/36).
+This scope transfer grants no readiness pass or waiver. Production Watch work
+remains outside this diagnostic migration.

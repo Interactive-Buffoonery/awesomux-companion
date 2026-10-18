@@ -5,6 +5,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from framework_identity import framework_hashes
+
 root = Path(__file__).resolve().parent
 
 
@@ -27,7 +29,7 @@ def inputs(source, package, recipe):
     assert package_revision == '42bacd1339f323a693ddbca779295f4f77e5a697'
     assert ghostty_revision == '1e9e14af5df14211892f5fc15fd21a49c7d94868'
     return {
-        'schemaVersion': 1,
+        'schemaVersion': 2,
         'packageRevision': package_revision,
         'ghosttyRevision': ghostty_revision,
         'patchSHA256': digest(root / '0022-ios-public-metal-layer.patch'),
@@ -43,6 +45,7 @@ def inputs(source, package, recipe):
         'recipe': {
             'path': str(recipe), 'sha256': digest(recipe),
             'receiptScriptSHA256': digest(Path(__file__).resolve()),
+            'frameworkIdentityScriptSHA256': digest(root / 'framework_identity.py'),
             'driverPath': str(package / 'Script/build-ghostty.sh'),
             'driverSHA256': digest(package / 'Script/build-ghostty.sh'),
             'orderedPatchHashes': {
@@ -55,28 +58,37 @@ def inputs(source, package, recipe):
     }
 
 
-mode, output_arg, source_arg, package_arg, recipe_arg = sys.argv[1:]
-out, source, package, recipe = map(lambda p: Path(p).resolve(),
-                                 [output_arg, source_arg, package_arg, recipe_arg])
-snapshot = out / 'build-inputs.json'
-receipt = out / 'build-receipt.json'
-current = inputs(source, package, recipe)
-if mode == 'begin':
-    with snapshot.open('x') as stream:
-        json.dump(current, stream, indent=2)
-        stream.write('\n')
-elif mode == 'finish':
-    recorded = json.loads(snapshot.read_text())
-    if recorded != current:
+def finish_receipt(out, current):
+    recorded = json.loads((out / 'build-inputs.json').read_text())
+    if recorded != current or recorded.get('schemaVersion') != 2:
         raise SystemExit('Build inputs changed during compilation; refusing receipt')
-    archives = sorted((out / 'GhosttyKit.xcframework').glob('*/libghostty.a'))
+    framework = out / 'GhosttyKit.xcframework'
+    archives = sorted(framework.glob('*/libghostty.a'))
     if len(archives) != 2:
         raise SystemExit('Expected two XCFramework archives')
     recorded['archiveHashes'] = {
-        str(p.relative_to(out / 'GhosttyKit.xcframework')): digest(p) for p in archives
+        str(p.relative_to(framework)): digest(p) for p in archives
     }
-    with receipt.open('x') as stream:
+    recorded['frameworkHashes'] = framework_hashes(framework)
+    with (out / 'build-receipt.json').open('x') as stream:
         json.dump(recorded, stream, indent=2)
         stream.write('\n')
-else:
-    raise SystemExit('Expected begin or finish')
+
+
+def main():
+    mode, output_arg, source_arg, package_arg, recipe_arg = sys.argv[1:]
+    out, source, package, recipe = map(lambda p: Path(p).resolve(),
+                                     [output_arg, source_arg, package_arg, recipe_arg])
+    current = inputs(source, package, recipe)
+    if mode == 'begin':
+        with (out / 'build-inputs.json').open('x') as stream:
+            json.dump(current, stream, indent=2)
+            stream.write('\n')
+    elif mode == 'finish':
+        finish_receipt(out, current)
+    else:
+        raise SystemExit('Expected begin or finish')
+
+
+if __name__ == '__main__':
+    main()

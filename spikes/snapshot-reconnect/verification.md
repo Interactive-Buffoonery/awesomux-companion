@@ -1,9 +1,66 @@
 # Verification ledger
 
-Current base: `52d4832` on `t3/snapshot-reconnect-gaps`, refreshed in `df50d91`.
+## Public renderer: 2026-10-18
+
+The diagnostic app now uses the source-built public `CAMetalLayer` renderer from
+merged PR #34. Tested application source is `0f61721569c1ef5598db99c2584ee1c98cab59a4`;
+subsequent documentation/evidence changes do not change the bundled inputs.
+Current results are in [`evidence/public-metal/`](evidence/public-metal/).
+
+- A fresh `native/build.sh` run cloned the pinned sources, downloaded the local
+  compiler and built both arm64 slices with isolated caches. Schema-2 receipts
+  bind all seven XCFramework files, including headers and metadata, and 5,918
+  native source files. Selected wrapper/Ghostty/DisplayLink revisions and Sarah's
+  update ownership remain as recorded in the [renderer spike](../../docs/ios-terminal-renderer-spike.md).
+- Release Simulator build and signed device Release archive passed. Strict
+  signature verification passed for both app bundles. All 22 bundled notices
+  match their repository sources. The public renderer is present and the private
+  `CAIOSurfaceLayer` class is absent from both linked binaries.
+- Both apps contain identical source manifests and native receipts. Full hashes,
+  app binary hashes, notice hashes and local build-log hashes are recorded in
+  [`artifact-identity.json`](evidence/public-metal/artifact-identity.json).
+  The complete integrated receipt is [`native-build.json`](evidence/public-metal/native-build.json).
+- Fresh replay passed on Renderer Spike Simulator and Shiny Blue iPhone using
+  these Release apps: both surfaces report actual 20×6, expected viewport text,
+  exact DSR `6;6` before continuation and `6;5` afterward. This exercises bytes
+  supplied by the harness and renderer output callbacks; no app-local shell or
+  PTY is started. JSON assertions establish parser/viewport/callback behavior.
+- Simulator pinned HTTPS live output and explicit disconnect/reconnect passed:
+  sequence 1064 before disconnect, fresh snapshot 1066, live sequence 1068 after
+  reconnect. iPhone explicit disconnect/reconnect also passed: sequence 1278
+  before disconnect, fresh snapshot 1288, live sequence 1291 after reconnect.
+  Saved screenshots show terminal content on Simulator and the real device.
+- Canonical shipping project generation and all four shipping regression tests
+  passed, with zero failures/skips. The generated shipping project resolves no
+  renderer package and its linked app contains neither renderer. The separate
+  diagnostics project is arm64-only; Intel Simulators are unsupported.
+- All 23 integration/receipt/dependency-lock tests passed. Endpoint authorization,
+  ordering, generation and reconnect checks passed separately; endpoint JSON is
+  explicitly server-only evidence. Queue eviction/concurrent-cut tests passed
+  normally and with Python optimization.
+- Full Codex specialist and independent Claude reviews identified the complete
+  framework receipt and dependency pin gaps; both were fixed. Fresh focused
+  reviews through the tested source found no verified source blockers.
+
+The runtime JSON's manual flags remain unverified; screenshots are separate
+visual evidence. Physical network interruption, background recovery, long suspension, full
+scrollback retention and production transport are not inferred from automated
+replay or explicit reconnect. No hosted CI, TestFlight upload or deployment is
+claimed. The earlier basic keyboard/selection checks belong to #34's separately
+identified public-renderer build and were not repeated by this read-only harness.
+
+IME composition/cancellation and VoiceOver are required before release in
+[#36](https://github.com/Interactive-Buffoonery/awesomux-companion/issues/36).
+Sarah moved them outside #30's spike acceptance; this is no test pass or waiver.
+Production Watch implementation and acceptance remain in #10.
+
+## Historical private-renderer evidence
+
+Base: `52d4832` on `t3/snapshot-reconnect-gaps`, refreshed in `df50d91`.
 PR: https://github.com/Interactive-Buffoonery/awesomux-companion/pull/35.
-No production Watch or Chat implementation, deployment service, or TestFlight
-upload is included. Results below are separated by artifact phase.
+All app results in the following sections predate this public-renderer diagnostic
+migration and describe the private renderer. They are retained as historical
+results, separate from the current `public-metal/` evidence above.
 
 ## Automated endpoint evidence
 
@@ -142,7 +199,7 @@ it does not prove process suspension, termination/relaunch, long-background
 recovery, or complete scrollback retention. Manual rendering and VoiceOver
 remain unverified.
 
-## Current main refresh: 2026-10-18
+## Historical private-renderer main refresh: 2026-10-18
 
 Rebased the diagnostic change onto current main `52d4832` as source commit
 `df50d91`. The only conflict was scheme configuration; both main's shipping test

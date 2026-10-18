@@ -119,7 +119,8 @@ The build number is the current UTC time, so it always increases. The script wai
 
 ## Snapshot diagnostic app
 
-The separate `AwesoMuxDiagnostics` scheme provides bundled renderer replay and
+The separate `AwesoMuxDiagnostics.xcodeproj` / `AwesoMuxDiagnostics` scheme uses
+the source-built public CAMetalLayer renderer for bundled replay and
 an isolated synthetic Mac-to-phone reconnect fixture, without pairing. See the
 [build and usage guide](../spikes/snapshot-reconnect/ios-diagnostics.md) and
 [verification ledger](../spikes/snapshot-reconnect/verification.md).

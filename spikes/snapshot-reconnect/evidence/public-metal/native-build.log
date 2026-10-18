@@ -1,0 +1,95 @@
+Cloning into '/Users/sarah/.t3/worktrees/awesomux-companion/ios-public-diagnostics/spikes/ios-terminal-renderer/native/work/20261018T205703Z-57471/libghostty-spm'...
+HEAD is now at 42bacd1 release: 2.2.2026101502
+Cloning into '/Users/sarah/.t3/worktrees/awesomux-companion/ios-public-diagnostics/spikes/ios-terminal-renderer/native/work/20261018T205703Z-57471/ghostty'...
+HEAD is now at 1e9e14af5 gtk: connect tab split tree signals to the window the tab is in (#14474)
+[+] applied patch: 0001-darwin-libghostty-install
+[+] applied patch: 0002-host-managed-io.patch
+[+] applied patch: 0003-prebuilt-framedata.patch
+[+] patched cf_release_thread to ignore loop errors
+[+] patched: disabled private blur API
+[+] patched: linked Metal frameworks (direct linkFramework, outside frameworks table)
+[+] patched: iOS deployment target 15.0 added to osVersionMin
+[+] patched: iOS full-build guard disabled
+[+] all ios-fixes patches applied
+[+] patched src/renderer/metal/IOSurfaceLayer.zig
+[+] patched Metal.zig: iOS first-frame trigger + sync present
+[+] patched coretext.zig: CF release thread disabled on iOS
+[+] patched iosurface.zig: 64-byte stride alignment for Metal
+[+] patched build.zig.zon: updated libxev for iOS mach port fix
+[+] all ios metal rendering patches applied
+[+] patched Config.zig
+[+] patched SharedDeps.zig
+[+] patched build_config.zig
+[+] patched global.zig
+[+] patched renderer/shadertoy.zig
+[+] all trim patches complete (LIBGHOSTTY_SPM_TRIM_PATCH)
+[+] trim patch applied
+[+] patched src/build/Config.zig
+[+] patched src/build/SharedDeps.zig
+[+] patched src/build_config.zig
+[+] replaced src/inspector/main.zig with stub module
+[+] patched src/input/key.zig
+[+] patched apprt/embedded.zig
+[+] all inspector patches complete (LIBGHOSTTY_SPM_INSPECTOR_DISABLE)
+[+] inspector disable patch applied
+[+] patched src/renderer/metal/Device.zig
+[+] patched src/renderer/Metal.zig
+[+] patched: highway libc++ availability annotations
+[+] patched: simdutf libc++ availability annotations
+[+] src/simd already builds without libc++
+[+] all libcxx-apple-availability patches applied
+[+] applied patch: 0010-fix-scroll-remainder-zeroing.patch
+[+] patched include/ghostty.h
+[+] patched src/apprt/embedded.zig
+[+] patched src/apprt/surface.zig
+[+] patched src/termio/Termio.zig
+[+] patched src/termio/message.zig
+[+] patched src/termio/stream_handler.zig
+[+] replay response suppression applied
+[+] patched: MetallibStep.zig
+[+] patched MetallibStep.zig
+[+] patched Config.zig
+[+] all visionos patches applied
+[+] patched LibtoolStep.zig: zig ar
+[+] patched build.zig: libghostty-vt.dylib not installed
+[+] all host-toolchain patches applied
+[+] patched src/terminal/Terminal.zig
+[+] patched src/terminal/stream_terminal.zig
+[+] patched src/terminal/c/terminal.zig
+[+] synchronized output preserved across resize
+[+] patched src/terminal/Screen.zig
+[+] patched src/terminal/Terminal.zig
+[+] patched src/renderer/generic.zig
+[+] prompt redraw frame hold applied
+[+] patched MetallibStep.zig: maccatalyst
+[+] patched Config.zig: maccatalyst
+[+] patched runtime switches: maccatalyst takes the iOS arm
+[+] patched native_link.zig: maccatalyst
+[+] all maccatalyst patches applied
+[+] patched libxev: maccatalyst takes the Darwin arms (libxev-0.0.0-86vtcwIRFADbH4hk-EjROXxlrKIRPQdA41XiTSytYO-F)
+[+] patched aro: TARGET_OS_IPHONE covers maccatalyst and visionos (aro-0.0.0-JSD1Qk6lNgDdcDV4Vh7Sfy-34m2TluIVOdPzMmj_0BjX)
+[+] patched src/aro/Target.zig
+[+] patched aro: TARGET_OS_IOS covers maccatalyst (aro-0.0.0-JSD1Qk6lNgDdcDV4Vh7Sfy-34m2TluIVOdPzMmj_0BjX)
+[+] all zig-pkg Apple target patches applied
+[+] patched src/apprt/embedded.zig
+[+] applied patch: 0019-cursor-timer-focus-and-blink.patch
+[+] patched include/ghostty.h
+[+] patched src/apprt/embedded.zig
+[+] patched src/build/SharedDeps.zig
+[+] libintl linked only with i18n
+[*] building Ghostty static library…
+    target: aarch64-ios
+    source: /Users/sarah/.t3/worktrees/awesomux-companion/ios-public-diagnostics/spikes/ios-terminal-renderer/native/work/20261018T205703Z-57471/ghostty
+    output: /Users/sarah/.t3/worktrees/awesomux-companion/ios-public-diagnostics/spikes/ios-terminal-renderer/native/artifacts/20261018T205703Z-57471/aarch64-ios
+[*] build inputs changed (source rev, patches, or zig) -- cleaning caches
+[*] added libc++ compatibility for older Apple OS versions
+[*] built archive: /Users/sarah/.t3/worktrees/awesomux-companion/ios-public-diagnostics/spikes/ios-terminal-renderer/native/artifacts/20261018T205703Z-57471/aarch64-ios/lib/libghostty.a
+[*] building Ghostty static library…
+    target: aarch64-ios-simulator
+    source: /Users/sarah/.t3/worktrees/awesomux-companion/ios-public-diagnostics/spikes/ios-terminal-renderer/native/work/20261018T205703Z-57471/ghostty
+    output: /Users/sarah/.t3/worktrees/awesomux-companion/ios-public-diagnostics/spikes/ios-terminal-renderer/native/artifacts/20261018T205703Z-57471/aarch64-ios-simulator
+[*] build inputs changed (source rev, patches, or zig) -- cleaning caches
+[*] added libc++ compatibility for older Apple OS versions
+[*] built archive: /Users/sarah/.t3/worktrees/awesomux-companion/ios-public-diagnostics/spikes/ios-terminal-renderer/native/artifacts/20261018T205703Z-57471/aarch64-ios-simulator/lib/libghostty.a
+xcframework successfully written out to: /Users/sarah/.t3/worktrees/awesomux-companion/ios-public-diagnostics/spikes/ios-terminal-renderer/native/artifacts/20261018T205703Z-57471/GhosttyKit.xcframework
+[+] Native artifact: /Users/sarah/.t3/worktrees/awesomux-companion/ios-public-diagnostics/spikes/ios-terminal-renderer/native/artifacts/20261018T205703Z-57471/GhosttyKit.xcframework

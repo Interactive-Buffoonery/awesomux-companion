@@ -1,0 +1,32 @@
+{
+  "sourceCommit": "0f61721569c1ef5598db99c2584ee1c98cab59a4",
+  "recordedAt": "2026-10-18T21:10:56.114291+00:00",
+  "platforms": {
+    "simulator": {
+      "replay": "passed",
+      "explicitReconnect": "passed",
+      "generationChanged": true,
+      "disconnectedSequence": "1064",
+      "freshSnapshotSequence": "1066",
+      "continuedSequence": "1068",
+      "sourceManifestSHA256": "b1bb3253c3deb298e20674788a15bde534674ce6505c5edc59e9e338071978a8",
+      "nativeBuildReceiptSHA256": "a9ffc726edae52d20bdec7b726c8bf5f62c8bb1822af193703e42f3e20b9b9ba"
+    },
+    "device": {
+      "replay": "passed",
+      "explicitReconnect": "passed",
+      "generationChanged": true,
+      "disconnectedSequence": "1278",
+      "freshSnapshotSequence": "1288",
+      "continuedSequence": "1291",
+      "sourceManifestSHA256": "b1bb3253c3deb298e20674788a15bde534674ce6505c5edc59e9e338071978a8",
+      "nativeBuildReceiptSHA256": "a9ffc726edae52d20bdec7b726c8bf5f62c8bb1822af193703e42f3e20b9b9ba"
+    }
+  },
+  "limits": [
+    "Synthetic endpoint; explicit reconnect, no physical network interruption",
+    "Manual JSON flags remain unverified; screenshots supply separate visual evidence",
+    "IME/cancellation and VoiceOver required before release in #36; production Watch in #10"
+  ],
+  "fixtureTokenAbsentFromEvidence": true
+}

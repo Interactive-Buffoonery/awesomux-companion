@@ -7,7 +7,7 @@ struct SnapshotDiagnosticsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Experimental renderer uses private CAIOSurfaceLayer. Synthetic fixture only; no Chat or shell input.")
+                    Text("Source-built public CAMetalLayer renderer. Synthetic fixture only; no Chat or shell input.")
                         .font(.caption)
                     Text(model.phase.rawValue).font(.headline)
                     Text(model.status).accessibilityIdentifier("diagnostics-status")

@@ -1,0 +1,36 @@
+{
+  "scope": "Local build command and completion excerpts; full log hashes in artifact-identity.json",
+  "logs": {
+    "native-wrapper.log": {
+      "sha256": "4c3494bc55bf50a92b5ab2d7455c432c80c38279c96461343eebc74ceb919cb9",
+      "excerpts": []
+    },
+    "simulator-final-build.log": {
+      "sha256": "d406ae8568e0d6f8ee80d760efc0a38c41d78355badcda7d4015dbd6fffd6c5c",
+      "excerpts": [
+        "Command line invocation:",
+        "    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project ios/AwesoMuxDiagnostics.xcodeproj -scheme AwesoMuxDiagnostics -configuration Release -destination \"platform=iOS Simulator,id=7B29FB07-A914-4FD4-B46C-7650B583A596\" -derivedDataPath ios/build/PublicDiagnostics/Simulator build",
+        "** BUILD SUCCEEDED **"
+      ]
+    },
+    "device-archive.log": {
+      "sha256": "666214b5ca0c94658e0111757cc0c7ab71e1e3171e61719b3e07ca71f0d47669",
+      "excerpts": [
+        "Command line invocation:",
+        "    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project ios/AwesoMuxDiagnostics.xcodeproj -scheme AwesoMuxDiagnostics -configuration Release -destination generic/platform=iOS -derivedDataPath ios/build/PublicDiagnostics/Device -archivePath ios/build/PublicDiagnostics/AwesoMuxDiagnostics.xcarchive archive",
+        "** ARCHIVE SUCCEEDED **"
+      ]
+    },
+    "shipping-test.log": {
+      "sha256": "9eb80a5be95eb09a0bf29342ab5bf34eb61fcbc99e8254b9e8cf19b241c91269",
+      "excerpts": [
+        "Command line invocation:",
+        "    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project ios/AwesoMuxCompanion.xcodeproj -scheme AwesoMuxCompanion -destination \"platform=iOS Simulator,id=7B29FB07-A914-4FD4-B46C-7650B583A596\" -derivedDataPath ios/build/PublicDiagnostics/Shipping -resultBundlePath ios/build/PublicDiagnostics/ShippingTests.xcresult test",
+        "\t Executed 4 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds",
+        "\t Executed 4 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds",
+        "\t Executed 4 tests, with 0 failures (0 unexpected) in 0.003 (0.005) seconds",
+        "** TEST SUCCEEDED **"
+      ]
+    }
+  }
+}

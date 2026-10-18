@@ -1,0 +1,20 @@
+{
+  "authorizationRejection": "passed",
+  "snapshotThenContiguousEvents": "passed",
+  "generationRejection": "passed",
+  "futureSequenceRejection": "passed",
+  "freshReconnectSnapshot": "passed",
+  "snapshotSequence": 271,
+  "resumedSequence": 274,
+  "eventCount": 3,
+  "scope": "Synthetic fixture endpoint only; not renderer or app acceptance",
+  "recordedAt": "2026-10-18T20:53:25.384539+00:00",
+  "sourceCommit": "4f8fdf8c2e8d11bb0ece1ccf55b371df35bfc38e",
+  "serverSourceSHA256": {
+    "spikes/snapshot-reconnect/fixture_server.py": "d7ed1db1b91101914819327ce2f70061132cd273d6aa2c2e5ac0071d8423523f",
+    "spikes/snapshot-reconnect/capture.py": "6539a47e99fe381a51a43722105d9d5ff693e8e811a2134058273ac1f3f44b83",
+    "spikes/snapshot-reconnect/verify_endpoint.py": "8d103080bd591d56592fc895e832638ada0e9b9cceb3808ec64b3203ecbfdd77"
+  },
+  "zmxSHA256": "6b071e3df0cd23f5cd2886f40a27f541c329d7eba9f825dfcdb24cb8d11d5992",
+  "serverRunID": "569287b6-3340-470e-83a6-0745809d179e"
+}

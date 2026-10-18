@@ -107,11 +107,17 @@ work, not part of this capture.
 
 ## Diagnostic app and fixture endpoint
 
-The `AwesoMuxDiagnostics` scheme adds a separate local test app. It shares
+The separate `AwesoMuxDiagnostics.xcodeproj` / `AwesoMuxDiagnostics` scheme shares
 companion source but has its own bundle identifier and does not require pairing
-to open the test screen. Only that target links the experimental Ghostty renderer;
-its private `CAIOSurfaceLayer` dependency remains a release blocker. This is not
-a TestFlight or production Watch implementation.
+to open the test screen. Only that target links the exact source-built public
+CAMetalLayer pipeline from the renderer spike; shipping/TestFlight targets have
+no renderer dependency. Earlier private `CAIOSurfaceLayer` app evidence remains
+historical and does not establish public-renderer runtime results. See the
+[build guide](ios-diagnostics.md) for receipt validation and fresh artifact checks.
+Issue #30 may close its spike scope without IME composition/cancellation and
+VoiceOver checks; those remain unverified pre-release requirements in
+[#36](https://github.com/Interactive-Buffoonery/awesomux-companion/issues/36), with
+no readiness pass or waiver. This is not a production Watch implementation.
 
 `Run local replay` creates two fresh renderer models. Both must report 20×6
 before any bytes are accepted. One receives `input.bin` plus `away.bin`, the

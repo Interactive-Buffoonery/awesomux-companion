@@ -334,7 +334,10 @@ final class SnapshotDiagnosticsModel: ObservableObject {
                 "sourceManifestSHA256": manifest.map(Self.hash) ?? "missing",
                 "recordedAt": ISO8601DateFormatter().string(from: Date()), "generation": generation.uuidString,
                 "dependencyRevision": "42bacd1339f323a693ddbca779295f4f77e5a697",
-                "experimentalPrivateCAIOSurfaceLayer": true, "phase": phase.rawValue, "status": status,
+                "renderer": "GhosttyPublicMetalLayer / CAMetalLayer",
+                "nativeBuildReceiptSHA256": Bundle.main.url(forResource: "native-build", withExtension: "json")
+                    .flatMap { try? Data(contentsOf: $0) }.map(Self.hash) ?? "missing",
+                "phase": phase.rawValue, "status": status,
                 "sourceDimensions": ["columns": 20, "rows": 6], "reportedDimensions": dimensions,
                 "fixtureSHA256": hashes, "automaticReplay": automatic, "syntheticNetwork": network,
                 "replayPrerequisite": replayPrerequisite, "recoveryLog": recoveryLog,

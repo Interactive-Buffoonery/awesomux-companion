@@ -73,15 +73,14 @@ bash-preexec. Review identified embedded JetBrains Mono and Symbols Nerd Font
 data; their exact upstream notice texts are bundled (JetBrains Mono OFL,
 Symbols Nerd Font artifact MIT). The package source license guard
 passed: `[+] no GPL license text; shell-integration holds only the MIT files`.
-That source check does not audit the native archive. A complete native
-dependency/embedded resource notice inventory remains a release gate.
+That check only covers shell-integration files. We still need to finish the app’s
+acknowledgments for libraries, fonts and other resources bundled with Ghostty.
 
-The [native license audit](ios-terminal-native-license-audit.md) records the
-Release artifact inventory and supporting notices. It confirms retained
-Oniguruma, Highway, simdutf and Wuffs code missing from the current app notices.
-Exact-source provenance, embedded font identity and some dependency retention
-remain unresolved; the audit does not clear this release gate. Its supporting
-notice files are evidence candidates, not a completed distribution notice set.
+The [license audit](ios-terminal-native-license-audit.md) found symbols from
+Oniguruma, Highway, simdutf and Wuffs in the Release app’s matching debug file.
+Their notices are missing from the app. Some exact sources, versions and font
+files still need checking. The audit includes working copies of license texts;
+these have not been added to the app’s acknowledgments yet.
 
 ## Evidence handling and review
 

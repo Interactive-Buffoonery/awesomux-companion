@@ -2,7 +2,9 @@
 
 Audit date: 2026-10-18. Scope: existing keyboard Release archive and pinned spike only. No builds, app edits, signing changes, commits, publishing, IME or VoiceOver work. This is a factual provenance/notice audit, not a legal opinion.
 
-**Verdict: INCOMPLETE / cannot close the native license gate.** The six bundled notices do not cover all native code proven present in the signed executable. Oniguruma, Highway, simdutf and Wuffs are retained. Missing exact-source notices/provenance must be resolved before describing this artifact as license-audited. Package MIT is not an umbrella license for these dependencies. Do not treat the candidate notices accompanying this document as a completed distribution notice set.
+**The acknowledgments are not finished.** We need to credit Ghostty and include the license notices required by libraries bundled inside it. Symbols in the Release app’s matching debug file show code from Oniguruma, Highway, simdutf and Wuffs. Those libraries are not listed in the app’s current notices.
+
+Some exact versions and source files still need checking before we can finish the acknowledgments. The license texts saved with this report are working material; they have not been added to the app.
 
 ## Artifact identity and evidence strength
 
@@ -11,7 +13,7 @@ Audit date: 2026-10-18. Scope: existing keyboard Release archive and pinned spik
 - Ghostty.ref: `1e9e14af5df14211892f5fc15fd21a49c7d94868`; Ghostty.build: `3`.
 - Binary URL: `https://github.com/Lakr233/libghostty-spm/releases/download/upstream.1e9e14af5df1-3/GhosttyKit.xcframework.zip`; Package.swift ZIP checksum `0bf7e5e13f8e42ffca040a6cef7e985fc30bcaa81ff513bd2a93eb097398c6d8`. ZIP itself was not retained/rehashed in this audit; extracted archive hash below is a separate identity.
 - `codesign --verify --deep --strict` succeeds. This establishes signature integrity, not source/license provenance.
-- App/dSYM UUIDs match: `F774E4DB-CC43-3E47-A5C8-B293999C7099` (arm64). Executable is stripped; matching dSYM supplies retained native symbols.
+- App/dSYM UUIDs match: `F774E4DB-CC43-3E47-A5C8-B293999C7099` (arm64). Executable is stripped; matching dSYM supplies symbols for code linked into the app.
 - dSYM strings include runner path `zig-aarch64-macos-0.16.0/lib/std`; pinned package CI also selects Zig 0.16.0. Exact compiler commit, runtime license inventory and release build attestation are absent.
 
 | Artifact | SHA-256 |
@@ -30,7 +32,7 @@ Audit date: 2026-10-18. Scope: existing keyboard Release archive and pinned spik
 | `spikes/ios-terminal-renderer/build/IOSRendererSpike-keyboard.xcarchive/Products/Applications/IOSRendererSpike.app/libghostty-spm.txt` | `bc8800e5af52ebfe6d615c0a25a580ce26b0a5420d48b39d2940c80a11817815` |
 | `spikes/ios-terminal-renderer/build/IOSRendererSpike-keyboard.xcarchive/Products/Applications/IOSRendererSpike.app/source-manifest.txt` | `64ea03080ece627aee30101600651ca0d5474ed593a1a691e2d8025de99b3755` |
 
-## Native payload and notice gaps
+## Libraries and missing notices
 
 The pinned Ghostty `GhosttyLib.initStatic` combines dependency archives with the Ghostty object, bundles compiler runtime, then applies its Darwin libSystem override. Package `Script/build-ghostty.sh` adds `libcxx-verbose-abort-compat.o`. It selects ReleaseFast, disables inspector/custom shaders/i18n/Sentry and uses `app-runtime=none`. These are recipe declarations, not a recorded invocation attestation; `ZIG_BUILD_EXTRA_ARGS` can override configuration.
 
@@ -39,11 +41,11 @@ The pinned Ghostty `GhosttyLib.initStatic` combines dependency archives with the
 | FreeType | `pkg/freetype/build.zig.zon`: 2.13.2; mirror filename `freetype-1220b81f6ecfb3fd222f76cf9106fecfa6554ab07ec7fdc4124b9bb063ae2adf969d.tar.gz` | `autofit.o`, `ft*.o`, `truetype.o`, etc. | Representative symbols absent; archive inclusion is not app linkage. FTL/GPL alternative; FTL candidate captured from exact version tag. Need confirm full mirror contents and exclusions before asserting binary coverage. |
 | libpng | 1.6.43; mirror `libpng-1220aa013f0c83da3fb64ea6d327f9173fa008d10e28bc9349eac3463457723b1c66.tar.gz` | `png*.o` | Representative symbols absent; PNG Reference Library License v2 candidate captured from v1.6.43. |
 | zlib | 1.3.1; mirror `zlib-1220fed0c74e1019b3ee29edae2051788b080cd96e90d56836eea857b0b966742efb.tar.gz` | `adler32.o`, `inflate.o`, `deflate.o`, `gz*.o`, etc. | Representative symbols absent; zlib notice candidate captured from v1.3.1. |
-| Oniguruma | 6.9.9; mirror `oniguruma-1220c15e72eadd0d9085a8af134904d9a0f5dfcbed5f606ad60edc60ebeccd9706bb.tar.gz` | `reg*.o`, encodings, Unicode folding objects | **Retained** `_onig_new`; BSD-style redistribution notice missing from app. Exact version-tag COPYING captured; mirror identity still unverified. dSYM contains matching ZON package hash path. |
-| Highway | wrapper 1.2.0; source commit `66486a10623fa0d72fe91260f96c892e41aceb06` | `abort.o`, `per_target.o`, `targets.o`, `libhighway_zcu.o`; Ghostty SIMD objects | **Retained** `hwy::SupportedTargets`, dispatch helpers. Apache-2.0 source LICENSE captured; missing from app. Exact source NOTICE/third-party additions still require full tree inspection. |
-| simdutf | **Vendored header says 9.0.0**, despite wrapper ZON version **5.2.8** | `simdutf.o`, plus inline code in SIMD objects | **Retained** `simdutf::count_utf8` and 94 other name matches. Upstream v9.0.0 MIT/Apache alternatives captured, but vendored file modifications/embedded third-party text require comparison. Do not report 5.2.8 as actual code version. |
-| Wuffs | commit `7411f488fe2e2c205c3d3b3d28638b7356522930`; generated `release/c/wuffs-v0.4.c` | `wuffs-v0.4.o` | **Retained**, 375 symbol-name matches. Exact mirror denied 403; GitHub commit archive and LICENSE request returned 404. Exact generated-file license text/provenance unresolved; do not infer coverage from Ghostty MIT. |
-| stb | Ghostty vendored stb_image v2.28; stb_image_resize v0.97 | `stb.o` | No representative `stbi` symbols in dSYM. Both exact pinned header license alternatives (MIT/public domain) captured. Other compiled inline/data retention requires map. |
+| Oniguruma | 6.9.9; mirror `oniguruma-1220c15e72eadd0d9085a8af134904d9a0f5dfcbed5f606ad60edc60ebeccd9706bb.tar.gz` | `reg*.o`, encodings, Unicode folding objects | **Linked into the app** `_onig_new`; BSD-style redistribution notice missing from app. Exact version-tag COPYING captured; mirror identity still unverified. dSYM contains matching ZON package hash path. |
+| Highway | wrapper 1.2.0; source commit `66486a10623fa0d72fe91260f96c892e41aceb06` | `abort.o`, `per_target.o`, `targets.o`, `libhighway_zcu.o`; Ghostty SIMD objects | **Linked into the app** `hwy::SupportedTargets`, dispatch helpers. Apache-2.0 source LICENSE captured; missing from app. Exact source NOTICE/third-party additions still require full tree inspection. |
+| simdutf | **Vendored header says 9.0.0**, despite wrapper ZON version **5.2.8** | `simdutf.o`, plus inline code in SIMD objects | **Linked into the app** `simdutf::count_utf8` and 94 other name matches. Upstream v9.0.0 MIT/Apache alternatives captured, but vendored file modifications/embedded third-party text require comparison. Do not report 5.2.8 as actual code version. |
+| Wuffs | commit `7411f488fe2e2c205c3d3b3d28638b7356522930`; generated `release/c/wuffs-v0.4.c` | `wuffs-v0.4.o` | **Linked into the app**, 375 symbol-name matches. Exact mirror denied 403; GitHub commit archive and LICENSE request returned 404. Exact generated-file license text/provenance unresolved; do not infer coverage from Ghostty MIT. |
+| stb | Ghostty vendored stb_image v2.28; stb_image_resize v0.97 | `stb.o` | No representative `stbi` symbols in dSYM. Both exact pinned header license alternatives (MIT/public domain) captured. A linker map is needed to check for other included code or data. |
 | Zig runtime / standard library | 0.16.0 supported by CI and dSYM path; exact compiler commit unproven | `compiler_rt.o`; std code may be inside `libghostty_zcu.o` | Need exact Zig distribution LICENSE and runtime/third-party provenance; upstream 0.16.0 LICENSE endpoint returned 404. Presence of object does not establish which runtime functions survived. |
 | Compatibility shim | pinned libghostty-spm `Script/support/libcxx-verbose-abort-compat.c` | `libcxx-verbose-abort-compat.o` | Package MIT candidate covers package-owned shim; do not extend it to other archive objects. |
 
@@ -55,12 +57,12 @@ These cannot be enumerated from `ar -t` alone. SharedDeps wires them into Ghostt
 
 | Dependency | Pinned revision | License / current conclusion |
 |---|---|---|
-| uucode | `9d55524551411b493cca41ca06363625d90aff1e` | MIT Jacob Sandlund 2026; source also carries Unicode License V3, Bjoern Hoehrmann UTF-8 decoder notice and wcwidth resource notices. Source archive downloaded and notice texts captured. Unicode generation outputs can be distributed data even when generator executes only at build time. Exact selected tables/code retention needs source/build manifest. |
-| libxev | `9ce8e8e6ff89e583258a7f8e7adeeeaeae8611bf` | mirror 403 and GitHub LICENSE/archive 404; unresolved exact notice, retention and transitive contents. |
-| vaxis | `1dbbe575dff4586fe51e3217aa5c3fecdcbb6089` | MIT Tim Culverhouse; exact LICENSE captured. SharedDeps imports vaxis and shared uucode. Retention unresolved. |
+| uucode | `9d55524551411b493cca41ca06363625d90aff1e` | MIT Jacob Sandlund 2026; source also carries Unicode License V3, Bjoern Hoehrmann UTF-8 decoder notice and wcwidth resource notices. Source archive downloaded and notice texts captured. Unicode generation outputs can be distributed data even when generator executes only at build time. We need build records to identify which tables and code ship. |
+| libxev | `9ce8e8e6ff89e583258a7f8e7adeeeaeae8611bf` | mirror 403 and GitHub LICENSE/archive 404; exact notice, included code and further dependencies are unresolved. |
+| vaxis | `1dbbe575dff4586fe51e3217aa5c3fecdcbb6089` | MIT Tim Culverhouse; exact LICENSE captured. SharedDeps imports vaxis and shared uucode. Whether it ships is unresolved. |
 | z2d | `7dbae85c81784dba9988320bf9543ed9a81350c8` | **MPL-2.0**, exact source LICENSE captured. Source declaration is not proof it reaches executable. Retention must be resolved before deciding distribution handling; do not classify as MIT. |
-| zig-objc | `c8de82ff80281215ad92900866dab7103a8efa8b` | MIT Mitchell Hashimoto; exact source LICENSE captured. Darwin conditional integration; retained portion unresolved. |
-| zf | `c35c421f84895193246db06c40683c1a30e616ef` | MIT Nathan Craddock; exact source LICENSE captured. Retention unresolved. |
+| zig-objc | `c8de82ff80281215ad92900866dab7103a8efa8b` | MIT Mitchell Hashimoto; exact source LICENSE captured. Darwin conditional integration; which parts ship is unresolved. |
+| zf | `c35c421f84895193246db06c40683c1a30e616ef` | MIT Nathan Craddock; exact source LICENSE captured. Whether it ships is unresolved. |
 | macos / translate-c / Apple SDK helpers | paths inside pinned Ghostty tree | Ghostty-owned wrappers versus SDK headers/generated bindings need source attribution distinction. Host translation helper is build-time; emitted bindings can contribute code/constants. Apple frameworks are OS dynamic dependencies, not copied open-source archive members. |
 
 The bundled app has no notice files for the above additional dependencies. Candidate notices are saved in `docs/ios-terminal-native-license-notices/` with primary URL headings. Some candidates come from version tags rather than the inaccessible mirror: they are **not** proof the mirrors are identical. The saved simdutf archive includes benchmark-only competitor licenses; their presence in that source archive is not proof those benchmark libraries are distributed in this app.
@@ -103,7 +105,7 @@ curl -fL https://raw.githubusercontent.com/ghostty-org/ghostty/1e9e14af5df142118
 
 To retrieve exact declarations, use the pinned raw GitHub base in source excerpts below; fetch `pkg/{freetype,libpng,zlib,oniguruma,highway,wuffs}/build.zig.zon`. Their URLs and Zig content hashes are preserved verbatim below. Do not substitute current branches. Mirror fetches with Python urllib returned HTTP 403; exact Wuffs/libxev GitHub archive fetches returned HTTP 404. These are unresolved acquisition failures, not license determinations.
 
-### Retained symbol probes (matching dSYM)
+### Library symbols in the app’s matching debug file
 
 | Dependency | Probe | Matches | First evidence |
 |---|---|---:|---|
@@ -272,12 +274,12 @@ libcxx-verbose-abort-compat.o
 - Pinned libghostty-spm and DisplayLink LICENSE texts are each contained verbatim in their archived root notices (verified).
 - Archived bash-preexec resource and root notice have different descriptive preambles; the complete MIT license starting at `The MIT License` matches verbatim (including Ryan Caloras/contributors copyright).
 
-## What closes the gate
+## What remains to finish the acknowledgments
 
-1. Obtain authenticated release build provenance/SBOM or an equivalent inspectable exact build record: compiler commit/distribution, patched Ghostty tree, resolved package cache hashes, effective options, generated data and static link map. No credentials should be placed in this report.
-2. Resolve exact Wuffs/libxev source acquisition, simdutf vendored version/content discrepancy, z2d retention, Zig/LLVM runtime attribution and Unicode/table source contributions. Matching `ar` names alone is insufficient.
-3. Match embedded font byte hashes and copied resource hashes to their exact licensed source artifacts, including Symbols Nerd glyph provenance and compiled terminfo sources.
-4. Assemble notices from confirmed retained/distributed components, preserving copyright/permission text and any required source/NOTICE material. Re-audit the actual resulting signed archive. This document does not modify app notices or provide a legal conclusion.
+1. Get the build records for this binary, including the compiler version, source revisions, build options and linker map. These should show which code and generated data ended up in the app.
+2. Find the exact Wuffs and libxev sources, explain the simdutf version mismatch, and check whether z2d ships. Check the notices for compiler runtime code and Unicode data too.
+3. Match the embedded fonts and bundled resources to their source files and licenses.
+4. Put the required credits and license texts in the app’s acknowledgments, including any required source information. Check that the final app includes them.
 
 ## Exact upstream source excerpts
 

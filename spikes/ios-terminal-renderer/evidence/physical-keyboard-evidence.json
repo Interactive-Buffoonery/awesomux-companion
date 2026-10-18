@@ -1,0 +1,82 @@
+{
+  "buildConfiguration" : "Release",
+  "callbackChunks" : [
+    {
+      "hex" : "1B 5B 35 3B 31 30 52",
+      "recordedAt" : "2026-10-18T18:23:24Z"
+    },
+    {
+      "hex" : "1B 5B 35 3B 31 30 52",
+      "recordedAt" : "2026-10-18T18:24:40Z"
+    },
+    {
+      "hex" : "1B 5B 35 3B 31 30 52",
+      "recordedAt" : "2026-10-18T18:24:43Z"
+    },
+    {
+      "hex" : "1B 5B 35 3B 31 30 52",
+      "recordedAt" : "2026-10-18T18:25:01Z"
+    },
+    {
+      "hex" : "74",
+      "recordedAt" : "2026-10-18T18:25:13Z"
+    },
+    {
+      "hex" : "65",
+      "recordedAt" : "2026-10-18T18:25:13Z"
+    },
+    {
+      "hex" : "73",
+      "recordedAt" : "2026-10-18T18:25:13Z"
+    },
+    {
+      "hex" : "74",
+      "recordedAt" : "2026-10-18T18:25:13Z"
+    },
+    {
+      "hex" : "69",
+      "recordedAt" : "2026-10-18T18:25:14Z"
+    },
+    {
+      "hex" : "6E",
+      "recordedAt" : "2026-10-18T18:25:14Z"
+    },
+    {
+      "hex" : "67",
+      "recordedAt" : "2026-10-18T18:25:14Z"
+    },
+    {
+      "hex" : "61",
+      "recordedAt" : "2026-10-18T18:26:31Z"
+    },
+    {
+      "hex" : "62",
+      "recordedAt" : "2026-10-18T18:26:31Z"
+    },
+    {
+      "hex" : "63",
+      "recordedAt" : "2026-10-18T18:26:31Z"
+    }
+  ],
+  "callbackHex" : "1B 5B 35 3B 31 30 52 1B 5B 35 3B 31 30 52 1B 5B 35 3B 31 30 52 1B 5B 35 3B 31 30 52 74 65 73 74 69 6E 67 61 62 63",
+  "cursorQuerySentAt" : "2026-10-18T18:25:01Z",
+  "cursorReportDetected" : true,
+  "dependencyRevision" : "42bacd1339f323a693ddbca779295f4f77e5a697",
+  "deviceModel" : "iPhone",
+  "expectedCursorReportHex" : "1B 5B 35 3B 31 30 52",
+  "fixtureFedAt" : "2026-10-18T18:23:24Z",
+  "manualObservations" : {
+    "keyboardIME" : "passed",
+    "rendering" : "passed",
+    "selection" : "passed",
+    "voiceOver" : "passed"
+  },
+  "recordedAt" : "2026-10-18T18:26:31Z",
+  "simulator" : false,
+  "sourceManifestSHA256" : "64ea03080ece627aee30101600651ca0d5474ed593a1a691e2d8025de99b3755",
+  "systemName" : "iOS",
+  "systemVersion" : "27.0",
+  "viewportColumns" : 38,
+  "viewportRows" : 12,
+  "viewportText" : "libghostty iOS Metal renderer\nANSI sample  color + bold\nBox: ┌──────────────┐\n     │ GhosttyTerm  │\n     └──────────────┘\nUTF-8: 👩🏽‍💻 日本語 مرحبا é\nSelect the word GhosttyTerm, then try \nkeyboard and IME input.\n\n\n\n"
+}

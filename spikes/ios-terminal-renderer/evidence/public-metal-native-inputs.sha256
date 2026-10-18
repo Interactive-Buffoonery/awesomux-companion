@@ -1,0 +1,5 @@
+763846996501ab05b07d72612b5365518e1f6545a585c72abed39b7221d4c0bf  0022-ios-public-metal-layer.patch
+e6cd688d25664983833aae272f501d4bceeae304875b8f1741209d15fd13a4ec  toolchains/zig-aarch64-macos-0.16.0/zig
+b49becce28730556598607202299cc0e15b5279b93db7800a81c641f042eb64d  work/libghostty-spm/Script/build-ghostty.sh
+8fc3d7f8b8a4a5c682d4fae7c1405ade3e51ad0ef2304a5d9c28152e0a7d36c7  rebuild-reviewed.sh
+1d8165abb96d950947ebf047b267fb6f2a514bdde5c824a05a094f946b9df037  audit-reviewed.py

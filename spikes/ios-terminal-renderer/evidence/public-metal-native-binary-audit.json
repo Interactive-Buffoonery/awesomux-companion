@@ -1,0 +1,18 @@
+[
+  {
+    "path": "/Users/sarah/.t3/worktrees/awesomux-companion/ios-renderer-spike/spikes/ios-terminal-renderer/native/artifacts/public-metal-verified/GhosttyKit.xcframework/ios-arm64/libghostty.a",
+    "sha256": "daa1ba707fa347de5fab3c6f5d1c6dcfc55303ab44bdb2b4d7f04e460c195820",
+    "bytes": 19387784,
+    "architecture": "arm64",
+    "private_class_absent": true,
+    "public_presentation_present": true
+  },
+  {
+    "path": "/Users/sarah/.t3/worktrees/awesomux-companion/ios-renderer-spike/spikes/ios-terminal-renderer/native/artifacts/public-metal-verified/GhosttyKit.xcframework/ios-arm64-simulator/libghostty.a",
+    "sha256": "ac806f2cf37c52af88d69fc2fa3f105ef898c3ba45d8ecd42639c4243f885e2b",
+    "bytes": 19206808,
+    "architecture": "arm64",
+    "private_class_absent": true,
+    "public_presentation_present": true
+  }
+]

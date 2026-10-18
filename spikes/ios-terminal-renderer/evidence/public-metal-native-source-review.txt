@@ -1,0 +1,43 @@
+Focused implementation source review: dynamic blending and build provenance
+
+Config reload is mutable: generic.zig changeConfig takes draw_mutex, assigns
+api.blending, sets reinitialize_shaders, and increments target_config_modified.
+drawFrameLocked replaces each frame target on configuration-generation mismatch.
+The earlier initialization-only pixelFormat assumption was incorrect.
+
+MetalLayer.encodePresent now compares the target's actual pixel format with
+the layer before nextDrawable. A mismatch queues a main-thread FormatBlock and
+returns false. Frame.complete preserves cells_rebuilt, queues its deferred retry,
+and still commits the rendering command buffer. Completion still returns the
+swap-chain permit. The compatible-frame path keeps the blit and presentDrawable:
+in that same buffer. No unconditional per-frame setter was reintroduced.
+
+FormatBlock captures only objc.c.id layer and scalar format, not renderer or
+Target pointers. Inspected the pinned zig-objc block.zig copy/dispose helpers:
+id fields use _Block_object_assign(..., .object) / _Block_object_dispose.
+Dispatch therefore retains the layer through execution. The main callback
+checks display_cb before updating; main-thread teardown clears that callback,
+removes the layer from its superlayer, and releases it after renderer-thread join.
+The new callback does not invoke display synchronously or acquire draw_mutex.
+
+Updates are queued only for mismatched frames, one block per attempted frame.
+They are submitted from serialized draw_mutex scopes to the serial main queue.
+Repeated same-format requests become setter no-ops; each still requests display.
+Rapid config changes can leave transient stale queued formats. Once they drain,
+the next mismatched frame schedules the current target format and retries; no
+permanent old-format rejection remains. This is not a coalesced queue or a hard
+cap on queued requests while main is stalled. Rendering requires main progress.
+The drawable texture format check remains necessary even after the layer matches,
+since a drawable can still be stale. Nil/size/format failures retain dirty retry.
+
+Receipt review: both drivers snapshot inputs BEFORE compiling both slices. The
+finish stage rechecks source, overlay, compiler, driver and recipe identity,
+then writes a new exclusive artifact-local receipt with hashes of packaged
+archives. Source keys are relative to sourceDirectory; archive keys are relative
+to GhosttyKit.xcframework. Old directories are not stamped or overwritten.
+Parent must reject missing receipts, mismatched archive hashes and overlay hash.
+
+No source blocker found in this focused implementation review. This was a
+self-review, not an independent review. Native compilation and binary audits
+are recorded separately. No runtime config-reload, teardown, layer-count,
+IME, or VoiceOver validation was performed by this task.

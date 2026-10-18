@@ -1,0 +1,279 @@
+--- a/src/renderer/Metal.zig
++++ b/src/renderer/Metal.zig
+@@ -16,7 +16,7 @@
+ const shadertoy = @import("shadertoy.zig");
+ 
+ const mtl = @import("metal/api.zig");
+-const IOSurfaceLayer = @import("metal/IOSurfaceLayer.zig");
++const IOSurfaceLayer = if (builtin.os.tag == .ios) @import("metal/MetalLayer.zig") else @import("metal/IOSurfaceLayer.zig");
+ pub const Device = @import("metal/Device.zig");
+ 
+ pub const GraphicsAPI = Metal;
+@@ -93,6 +93,11 @@
+     // the layer contents.
+     var layer = try IOSurfaceLayer.init();
+     errdefer layer.release();
++
++    if (comptime builtin.os.tag == .ios) {
++        layer.layer.setProperty("device", mtl_device);
++        layer.layer.setProperty("pixelFormat", @intFromEnum(if (opts.config.blending.isLinear()) mtl.MTLPixelFormat.bgra8unorm_srgb else mtl.MTLPixelFormat.bgra8unorm));
++    }
+ 
+     // Add our layer to the view.
+     //
+@@ -154,7 +159,9 @@
+ 
+     // iOS: sublayer bounds are already set before the callback is wired up,
+     // so no display message fires automatically. Kick the first frame.
+-    if (comptime (builtin.os.tag == .ios or builtin.os.tag == .visionos or builtin.os.tag == .maccatalyst)) {
++    if (comptime builtin.os.tag == .ios) {
++        self.layer.requestDisplay();
++    } else if (comptime (builtin.os.tag == .visionos or builtin.os.tag == .maccatalyst)) {
+         self.layer.layer.msgSend(void, objc.sel("setNeedsDisplay"), .{});
+     }
+ }
+@@ -241,9 +248,8 @@
+ 
+ /// Present the provided target.
+ pub inline fn present(self: *Metal, target: Target, sync: bool) !void {
+-    // iOS: always present synchronously — the render loop already runs on
+-    // the main thread, so the async GCD hop is unnecessary overhead.
+-    if (comptime (builtin.os.tag == .ios or builtin.os.tag == .visionos or builtin.os.tag == .maccatalyst)) {
++    if (comptime builtin.os.tag == .ios) return;
++    if (comptime (builtin.os.tag == .visionos or builtin.os.tag == .maccatalyst)) {
+         try self.layer.setSurface(target.surface);
+         return;
+     }
+--- a/src/renderer/metal/Frame.zig
++++ b/src/renderer/metal/Frame.zig
+@@ -2,6 +2,7 @@
+ const Self = @This();
+ 
+ const std = @import("std");
++const builtin = @import("builtin");
+ const Allocator = std.mem.Allocator;
+ const objc = @import("objc");
+ 
+@@ -78,15 +79,16 @@
+     };
+ 
+     // If the frame is healthy, present it.
+-    if (health == .healthy) {
+-        block.renderer.api.present(
+-            block.target.*,
+-            block.sync,
+-        ) catch |err| {
+-            log.err("Failed to present render target: err={}", .{err});
+-        };
++    if (comptime builtin.os.tag != .ios) {
++        if (health == .healthy) {
++            block.renderer.api.present(
++                block.target.*,
++                block.sync,
++            ) catch |err| {
++                log.err("Failed to present render target: err={}", .{err});
++            };
++        }
+     }
+-
+     block.renderer.frameCompleted(health);
+ }
+ 
+@@ -106,6 +108,13 @@
+ ///
+ /// If `sync` is true, this will block until the frame is presented.
+ pub inline fn complete(self: *Self, sync: bool) void {
++    if (comptime builtin.os.tag == .ios) {
++        if (!self.block.renderer.api.layer.encodePresent(self.buffer, self.block.target)) {
++            // complete runs under draw_mutex; retain dirtiness and schedule a retry.
++            self.block.renderer.cells_rebuilt = true;
++            self.block.renderer.api.layer.retryDisplay();
++        }
++    }
+     // If we don't need to complete synchronously,
+     // we add our block as a completion handler.
+     //
+--- /dev/null
++++ b/src/renderer/metal/MetalLayer.zig
+@@ -0,0 +1,181 @@
++//! Public iOS presentation; offscreen rendering remains IOSurface-backed.
++const IOSurfaceLayer = @This();
++const std = @import("std");
++const objc = @import("objc");
++const macos = @import("macos");
++const mtl = @import("api.zig");
++const Target = @import("Target.zig");
++var Subclass: ?objc.Class = null;
++layer: objc.Object,
++
++pub fn init() !IOSurfaceLayer {
++    std.debug.assert(objc.getClass("NSThread").?.msgSend(bool, "isMainThread", .{}));
++    const layer = (try getSubclass()).msgSend(objc.Object, "layer", .{}).retain();
++    layer.setProperty("framebufferOnly", false);
++    layer.setProperty("opaque", true);
++    layer.setProperty("contentsGravity", macos.animation.kCAGravityTopLeft);
++    layer.setProperty("presentsWithTransaction", false);
++    layer.setInstanceVariable("display_cb", .{ .value = null });
++    layer.setInstanceVariable("display_ctx", .{ .value = null });
++    errdefer layer.release();
++    const colorspace = try macos.graphics.ColorSpace.createNamed(.displayP3);
++    defer colorspace.release();
++    layer.setProperty("colorspace", colorspace);
++    return .{ .layer = layer };
++}
++
++pub fn release(self: *IOSurfaceLayer) void {
++    std.debug.assert(objc.getClass("NSThread").?.msgSend(bool, "isMainThread", .{}));
++    self.setDisplayCallback(null, null);
++    self.layer.msgSend(void, "removeFromSuperlayer", .{});
++    self.layer.release();
++}
++
++const DisplayBlock = objc.Block(struct { layer: objc.c.id }, .{}, void);
++
++pub fn requestDisplay(self: *IOSurfaceLayer) void {
++    var block = DisplayBlock.init(.{ .layer = self.layer.value }, &requestDisplayCallback);
++    if (objc.getClass("NSThread").?.msgSend(bool, "isMainThread", .{})) {
++        requestDisplayCallback(&block);
++    } else {
++        macos.dispatch.dispatch_async(@ptrCast(macos.dispatch.queue.getMain()), @ptrCast(&block));
++    }
++}
++
++pub fn retryDisplay(self: *IOSurfaceLayer) void {
++    var block = DisplayBlock.init(.{ .layer = self.layer.value }, &requestDisplayCallback);
++    // Never reenter display while draw_mutex is held. A retained layer is
++    // safe after teardown: the callback is cleared before renderer release.
++    dispatch_after(dispatch_time(0, 16_000_000), @ptrCast(macos.dispatch.queue.getMain()), @ptrCast(&block));
++}
++
++extern "c" fn dispatch_time(when: u64, delta: i64) u64;
++extern "c" fn dispatch_after(when: u64, queue: *anyopaque, block: *anyopaque) void;
++
++fn requestDisplayCallback(block: *const DisplayBlock.Context) callconv(.c) void {
++    const layer = objc.Object.fromId(block.layer);
++    if (layer.getInstanceVariable("display_cb").value != null) {
++        layer.msgSend(void, "setNeedsDisplay", .{});
++    }
++}
++
++fn updateDrawableSize(layer: objc.Object) void {
++    std.debug.assert(objc.getClass("NSThread").?.msgSend(bool, "isMainThread", .{}));
++    const bounds = layer.getProperty(macos.graphics.Rect, "bounds");
++    const scale = layer.getProperty(f64, "contentsScale");
++    layer.setProperty("drawableSize", macos.graphics.Size{
++        .width = @floor(@max(0, bounds.size.width * scale)),
++        .height = @floor(@max(0, bounds.size.height * scale)),
++    });
++}
++
++const FormatBlock = objc.Block(struct { layer: objc.c.id, format: c_ulong }, .{}, void);
++
++fn updatePixelFormat(block: *const FormatBlock.Context) callconv(.c) void {
++    std.debug.assert(objc.getClass("NSThread").?.msgSend(bool, "isMainThread", .{}));
++    const layer = objc.Object.fromId(block.layer);
++    if (layer.getInstanceVariable("display_cb").value == null) return;
++    if (layer.getProperty(c_ulong, "pixelFormat") != block.format) {
++        layer.setProperty("pixelFormat", block.format);
++    }
++    layer.msgSend(void, "setNeedsDisplay", .{});
++}
++
++pub fn encodePresent(self: *IOSurfaceLayer, buffer: objc.Object, target: *Target) bool {
++    const format = target.texture.getProperty(c_ulong, "pixelFormat");
++    if (self.layer.getProperty(c_ulong, "pixelFormat") != format) {
++        // Config reload can replace targets with a different blending format.
++        // Dispatch copies the block and retains its id-typed layer. Always
++        // defer, even on main: draw_mutex is held and display must not reenter.
++        var block = FormatBlock.init(.{ .layer = self.layer.value, .format = format }, &updatePixelFormat);
++        macos.dispatch.dispatch_async(@ptrCast(macos.dispatch.queue.getMain()), @ptrCast(&block));
++        return false;
++    }
++    const drawable_id = self.layer.msgSend(?*anyopaque, "nextDrawable", .{}) orelse return false;
++    const drawable = objc.Object.fromId(drawable_id);
++    const texture = drawable.getProperty(objc.Object, "texture");
++    if (texture.getProperty(c_ulong, "width") != target.width or
++        texture.getProperty(c_ulong, "height") != target.height or
++        texture.getProperty(c_ulong, "pixelFormat") != target.texture.getProperty(c_ulong, "pixelFormat")) return false;
++    const encoder_id = buffer.msgSend(?*anyopaque, "blitCommandEncoder", .{}) orelse return false;
++    const encoder = objc.Object.fromId(encoder_id);
++    encoder.msgSend(void, "copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:", .{
++        target.texture,                          @as(c_ulong, 0),                                                           @as(c_ulong, 0),
++        mtl.MTLOrigin{ .x = 0, .y = 0, .z = 0 }, mtl.MTLSize{ .width = target.width, .height = target.height, .depth = 1 }, texture,
++        @as(c_ulong, 0),                         @as(c_ulong, 0),                                                           mtl.MTLOrigin{ .x = 0, .y = 0, .z = 0 },
++    });
++    encoder.msgSend(void, "endEncoding", .{});
++    buffer.msgSend(void, "presentDrawable:", .{drawable});
++    return true;
++}
++
++pub const DisplayCallback = ?*align(8) const fn (?*anyopaque) void;
++
++pub fn setDisplayCallback(
++    self: *IOSurfaceLayer,
++    display_cb: DisplayCallback,
++    display_ctx: ?*anyopaque,
++) void {
++    if (display_cb == null) {
++        self.layer.setInstanceVariable("display_cb", .{ .value = null });
++        self.layer.setInstanceVariable("display_ctx", .{ .value = null });
++    } else {
++        self.layer.setInstanceVariable("display_ctx", objc.Object.fromId(display_ctx));
++        self.layer.setInstanceVariable("display_cb", objc.Object.fromId(@constCast(display_cb)));
++    }
++}
++
++fn getSubclass() error{ObjCFailed}!objc.Class {
++    if (Subclass) |c| return c;
++
++    const parent_cls = objc.getClass("CAMetalLayer") orelse return error.ObjCFailed;
++
++    var subclass =
++        objc.allocateClassPair(parent_cls, "GhosttyPublicMetalLayer") orelse return error.ObjCFailed;
++    errdefer objc.disposeClassPair(subclass);
++
++    if (!subclass.addIvar("display_cb")) return error.ObjCFailed;
++    if (!subclass.addIvar("display_ctx")) return error.ObjCFailed;
++
++    subclass.replaceMethod("display", struct {
++        fn display(target: objc.c.id, sel: objc.c.SEL) callconv(.c) void {
++            _ = sel;
++            const self = objc.Object.fromId(target);
++            updateDrawableSize(self);
++            const display_cb: DisplayCallback = @ptrFromInt(@intFromPtr(
++                self.getInstanceVariable("display_cb").value,
++            ));
++            const display_ctx = self.getInstanceVariable("display_ctx").value;
++            if (display_cb) |cb| {
++                if (display_ctx) |ctx| cb(@ptrCast(ctx));
++            }
++        }
++    }.display);
++
++    subclass.replaceMethod("layoutSublayers", struct {
++        fn layout(target: objc.c.id, sel: objc.c.SEL) callconv(.c) void {
++            _ = sel;
++            updateDrawableSize(objc.Object.fromId(target));
++        }
++    }.layout);
++
++    // Disable all animations for this layer by returning null for all actions.
++    subclass.replaceMethod("actionForKey:", struct {
++        fn actionForKey(
++            target: objc.c.id,
++            sel: objc.c.SEL,
++            key: objc.c.id,
++        ) callconv(.c) objc.c.id {
++            _ = target;
++            _ = sel;
++            _ = key;
++            return objc.getClass("NSNull").?.msgSend(objc.c.id, "null", .{});
++        }
++    }.actionForKey);
++
++    objc.registerClassPair(subclass);
++
++    Subclass = subclass;
++
++    return subclass;
++}

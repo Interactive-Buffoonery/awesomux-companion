@@ -1,0 +1,45 @@
+name: IOSRendererSpike
+options:
+  bundleIdPrefix: com.interactivebuffoonery.awesomux
+  deploymentTarget:
+    iOS: '18.0'
+packages:
+  libghostty-spm:
+    path: ${GHOSTTY_LOCAL_PACKAGE}
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    DEVELOPMENT_TEAM: 7CNK4YPCQX
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: '1,2'
+targets:
+  IOSRendererSpike:
+    type: application
+    platform: iOS
+    sources: [IOSRendererSpike]
+    dependencies:
+      - package: libghostty-spm
+        product: GhosttyTerminal
+    info:
+      path: IOSRendererSpike/Info.plist
+      properties:
+        CFBundleDisplayName: Renderer Spike
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.interactivebuffoonery.awesomux.renderer-spike
+        GENERATE_INFOPLIST_FILE: NO
+schemes:
+  IOSRendererSpike:
+    build:
+      targets:
+        IOSRendererSpike: all
+    run:
+      config: Debug
+    archive:
+      config: Release

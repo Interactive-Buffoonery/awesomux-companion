@@ -1,0 +1,2 @@
+PASS: altered pre-build overlay hash is rejected before receipt creation.
+Build inputs changed during compilation; refusing receipt

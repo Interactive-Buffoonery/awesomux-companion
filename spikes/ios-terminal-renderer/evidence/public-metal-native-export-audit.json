@@ -1,0 +1,18 @@
+{
+  "artifacts/public-metal-verified/GhosttyKit.xcframework/ios-arm64/libghostty.a": {
+    "required_exported_symbols": [
+      "_ghostty_app_new",
+      "_ghostty_surface_new",
+      "_ghostty_surface_refresh",
+      "_ghostty_surface_free"
+    ]
+  },
+  "artifacts/public-metal-verified/GhosttyKit.xcframework/ios-arm64-simulator/libghostty.a": {
+    "required_exported_symbols": [
+      "_ghostty_app_new",
+      "_ghostty_surface_new",
+      "_ghostty_surface_refresh",
+      "_ghostty_surface_free"
+    ]
+  }
+}

@@ -67,22 +67,20 @@ struct AgentsView: View {
 
     @ViewBuilder private func agentSections(_ snapshot: GlanceSnapshot) -> some View {
         if snapshot.agents.isEmpty {
-            ContentUnavailableView {
-                Label {
-                    Text(snapshot.connected ? "No agents running" : "No agents when last checked")
-                } icon: {
-                    Image(systemName: "moon.zzz").accessibilityHidden(true)
-                }
-            } description: {
-                if snapshot.connected {
-                    Text("Agents you start in awesoMux on \(snapshot.hostName) show up here.")
-                } else if let updatedAt = snapshot.updatedAt {
-                    Text("Last update from \(snapshot.hostName) at \(lastUpdate(updatedAt)).")
-                } else {
-                    Text("\(snapshot.hostName) can't be reached right now.")
-                }
+            let title = snapshot.connected
+                ? String(localized: "No agents running") : String(localized: "No agents when last checked")
+            let detail = if snapshot.connected {
+                String(localized: "Agents you start in awesoMux on \(snapshot.hostName) show up here.")
+            } else if let updatedAt = snapshot.updatedAt {
+                String(localized: "Last update from \(snapshot.hostName) at \(lastUpdate(updatedAt)).")
+            } else {
+                String(localized: "\(snapshot.hostName) can't be reached right now.")
             }
-            .listRowBackground(Color.clear)
+            ContentUnavailableView(title, systemImage: "moon.zzz", description: Text(detail))
+                // ContentUnavailableView ignores accessibilityHidden on its icon, which reads as "Snooze".
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(title). \(detail)")
+                .listRowBackground(Color.clear)
         }
         ForEach(GlanceGroup.allCases) { group in
             let agents = snapshot.agents(in: group)

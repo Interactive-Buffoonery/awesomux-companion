@@ -35,7 +35,7 @@ No check is a pass until its evidence is recorded.
 | --- | --- | --- |
 | Render ANSI and UTF-8 bytes supplied by host | Observed in retained screenshot | Observed in retained screenshot, iPhone 16 Plus |
 | Terminal protocol response through output callback | PASS: exact `ESC[5;10R` response | PASS: exact `ESC[5;10R` response |
-| Keyboard input through output callback | Pending | Pending |
+| Keyboard input through output callback | Pending | PASS: Sarah confirmed `abc`; callback chunks contain `61`, `62`, `63` |
 | IME composition and committed text | Pending | Pending |
 | Selection and copy | Pending | Selection handles and Copy menu confirmed by Sarah and screenshot; copied text pending |
 | VoiceOver navigation and spoken terminal content | Pending | Pending |
@@ -158,3 +158,18 @@ resigns the UIKit responder. The simulator and signed Release archive were
 rebuilt, reinstalled/relaunched, and their evidence refreshed after that change.
 A fresh focused source review found no blocker in the dismissal action.
 Hands-on dismissal confirmation remains pending.
+
+## Follow-up keyboard confirmation
+
+Sarah confirmed typing `abc` reached the output callback. The extracted
+`evidence/physical-keyboard-evidence.json` contains timestamped `61`, `62`, and
+`63` chunks from the same Release artifact and source manifest. Lack of visible
+echo is expected: this app has no shell and deliberately does not loop callback
+bytes back into the renderer.
+
+The app's four manual observation controls were also set to passed. Those are
+retained as tester-entered results. Specific IME composition/cancellation and
+VoiceOver spoken-content observations were not described, so the detailed
+acceptance gates above remain pending rather than inferred from the combined
+controls. Clipboard contents and keyboard dismissal still lack a specific
+recorded confirmation.

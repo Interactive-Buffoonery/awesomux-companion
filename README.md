@@ -10,3 +10,7 @@ The phone pairs directly with awesoMux on the Mac (Settings → awesoMux
 Companion → Pair iPhone) and reads its agents over mutual TLS. The wire
 contract lives in the awesoMux repository at
 `docs/companion-pairing-protocol.md`.
+
+The shared package's home and version-pinning policy are decided in
+[ADR-0001](docs/adr/0001-shared-companion-protocol-package.md). Extraction and
+migration to that package are follow-up work.

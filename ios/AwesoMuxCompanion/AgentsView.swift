@@ -67,9 +67,16 @@ struct AgentsView: View {
 
     @ViewBuilder private func agentSections(_ snapshot: GlanceSnapshot) -> some View {
         if snapshot.agents.isEmpty {
-            ContentUnavailableView("No agents running", systemImage: "moon.zzz",
-                description: Text("Agents you start in awesoMux on \(snapshot.hostName) show up here."))
-                .listRowBackground(Color.clear)
+            ContentUnavailableView {
+                Label {
+                    Text("No agents running")
+                } icon: {
+                    Image(systemName: "moon.zzz").accessibilityHidden(true)
+                }
+            } description: {
+                Text("Agents you start in awesoMux on \(snapshot.hostName) show up here.")
+            }
+            .listRowBackground(Color.clear)
         }
         ForEach(GlanceGroup.allCases) { group in
             let agents = snapshot.agents(in: group)

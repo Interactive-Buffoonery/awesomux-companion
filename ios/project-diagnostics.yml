@@ -37,6 +37,7 @@ targets:
         UILaunchScreen: {}
     settings:
       base:
+        ARCHS: arm64
         DIAGNOSTICS_NATIVE_PACKAGE: ${GHOSTTY_LOCAL_PACKAGE}
         PRODUCT_BUNDLE_IDENTIFIER: com.interactivebuffoonery.awesomux.diagnostics
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SNAPSHOT_DIAGNOSTICS

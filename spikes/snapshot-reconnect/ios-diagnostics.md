@@ -83,7 +83,9 @@ renderer fallback exists.
 ## Build and run on another Mac or phone
 
 Requires Xcode, XcodeGen, Python 3, and a compatible zmx executable for network
-fixtures. First build the exact native pipeline using
+fixtures. The diagnostic target supports arm64 devices and Apple Silicon
+Simulators only, matching the two source-built native slices. Its target-level
+`ARCHS` setting also applies to Release builds; Intel Simulators are unsupported. First build the exact native pipeline using
 [the native build instructions](../ios-terminal-renderer/native/README.md), or
 reuse a verified artifact with its original receipt and inputs. Integrate it once
 into an ignored local package; no build products belong in Git. From the repository root:

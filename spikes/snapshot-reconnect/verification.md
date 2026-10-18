@@ -1,7 +1,15 @@
 # Verification ledger
 
-Current base: `52d4832` on `t3/snapshot-reconnect-gaps`, refreshed in `df50d91`.
+Historical private-renderer base: `52d4832` on `t3/snapshot-reconnect-gaps`, refreshed in `df50d91`.
 PR: https://github.com/Interactive-Buffoonery/awesomux-companion/pull/35.
+All app results below predate the public CAMetalLayer diagnostic migration and
+are historical private-renderer evidence. No new public-renderer build/runtime
+result is claimed by the migration. Fresh artifact evidence belongs in
+`evidence/public-metal/` and must identify the exact source and bundled native
+receipt. IME composition/cancellation and VoiceOver remain unverified pre-release
+requirements in [#36](https://github.com/Interactive-Buffoonery/awesomux-companion/issues/36);
+#30 can close its spike scope without them, with no readiness pass or waiver.
+
 No production Watch or Chat implementation, deployment service, or TestFlight
 upload is included. Results below are separated by artifact phase.
 
@@ -142,7 +150,7 @@ it does not prove process suspension, termination/relaunch, long-background
 recovery, or complete scrollback retention. Manual rendering and VoiceOver
 remain unverified.
 
-## Current main refresh: 2026-10-18
+## Historical private-renderer main refresh: 2026-10-18
 
 Rebased the diagnostic change onto current main `52d4832` as source commit
 `df50d91`. The only conflict was scheme configuration; both main's shipping test

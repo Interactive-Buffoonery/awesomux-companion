@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate a local Swift package that uses the rebuilt native library."""
 
+import argparse
 import hashlib
 import io
 import json
@@ -12,8 +13,15 @@ import sys
 import tarfile
 
 root = Path(__file__).resolve().parent
-artifact = Path(sys.argv[1]).resolve()
-package_source = Path(sys.argv[2]).resolve()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("artifact", type=Path)
+parser.add_argument("package_source", type=Path)
+parser.add_argument("--output-directory", type=Path, default=root / "build")
+parser.add_argument("--validate-only", action="store_true")
+args = parser.parse_args()
+artifact = args.artifact.resolve()
+package_source = args.package_source.resolve()
+output = args.output_directory.resolve()
 revision = "42bacd1339f323a693ddbca779295f4f77e5a697"
 if not (artifact / "Info.plist").is_file():
     raise SystemExit("Pass the finished GhosttyKit.xcframework and pinned package checkout")
@@ -32,6 +40,31 @@ archive_hashes = {
 }
 if len(archive_hashes) != 2 or provenance["archiveHashes"] != archive_hashes:
     raise SystemExit("Native archive hashes do not match their build receipt")
+snapshot = json.loads((artifact.parent / "build-inputs.json").read_text())
+if snapshot != {k: v for k, v in provenance.items() if k != "archiveHashes"}:
+    raise SystemExit("Native receipt does not match its pre-build input snapshot")
+if provenance["schemaVersion"] != 1 or not provenance["sourceHashes"]:
+    raise SystemExit("Unsupported or empty native build receipt")
+recipe = provenance["recipe"]
+recipe_path = root / "native" / Path(recipe["path"]).name
+if recipe_path.name not in {"build.sh", "rebuild-reviewed.sh"}:
+    raise SystemExit("Unsupported native build recipe")
+for path, expected in [
+    (recipe_path, recipe["sha256"]),
+    (root / "native/build-receipt.py", recipe["receiptScriptSHA256"]),
+    (package_source / "Script/build-ghostty.sh", recipe["driverSHA256"]),
+    (Path(provenance["compiler"]["path"]), provenance["compiler"]["sha256"]),
+]:
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+        raise SystemExit(f"Native build input no longer matches receipt: {path}")
+patches = {str(p.relative_to(package_source)): hashlib.sha256(p.read_bytes()).hexdigest()
+           for p in sorted((package_source / "Patches/ghostty").glob("*")) if p.is_file()}
+if patches != recipe["orderedPatchHashes"] or not patches:
+    raise SystemExit("Ordered native patch stack no longer matches receipt")
+if (recipe["targets"] != ["aarch64-ios", "aarch64-ios-simulator"]
+        or recipe["simulatorCPU"] != "apple_a17"
+        or provenance["compiler"]["version"] != "0.16.0"):
+    raise SystemExit("Native compiler or targets differ from supported build")
 source_directory = Path(provenance["sourceDirectory"])
 for relative, expected in provenance["sourceHashes"].items():
     source = source_directory / relative
@@ -40,23 +73,47 @@ for relative, expected in provenance["sourceHashes"].items():
 subprocess.run([sys.executable, str(root / "native/verify-artifacts.py"), str(artifact)], check=True)
 archive = subprocess.check_output(["git", "-C", str(package_source), "archive", revision])
 digest = hashlib.sha256(archive + receipt_path.read_bytes()).hexdigest()[:16]
-destination = root / "build" / f"LocalGhostty-{digest}"
-destination.mkdir(parents=True, exist_ok=True)
+destination = output / f"LocalGhostty-{digest}"
+expected_files = {}
+expected_symlinks = {}
 with tarfile.open(fileobj=io.BytesIO(archive)) as source:
-    source.extractall(destination, filter="data")
-shutil.copytree(artifact, destination / "GhosttyKit.xcframework", dirs_exist_ok=True)
-for relative, expected in archive_hashes.items():
-    if hashlib.sha256((destination / "GhosttyKit.xcframework" / relative).read_bytes()).hexdigest() != expected:
-        raise SystemExit(f"Copied native archive differs from its build receipt: {relative}")
-manifest = destination / "Package.swift"
-text, count = re.subn(
+    for member in source.getmembers():
+        if member.isfile():
+            expected_files[member.name] = source.extractfile(member).read()
+        elif member.issym():
+            expected_symlinks[member.name] = member.linkname
+manifest_text, count = re.subn(
     r'url: "https://github.com/Lakr233/libghostty-spm/releases/download/[^"\n]+",\s*checksum: "[a-f0-9]+"',
     lambda _: 'path: "GhosttyKit.xcframework"',
-    manifest.read_text(),
+    expected_files["Package.swift"].decode(),
 )
 if count != 1:
     raise SystemExit("Expected exactly one downloaded binary target")
-manifest.write_text(text)
+expected_files["Package.swift"] = manifest_text.encode()
+framework_files = {str(p.relative_to(artifact)): p for p in artifact.rglob("*") if p.is_file()}
+if not destination.exists() and not args.validate_only:
+    destination.mkdir(parents=True)
+    with tarfile.open(fileobj=io.BytesIO(archive)) as source:
+        source.extractall(destination, filter="data")
+    (destination / "Package.swift").write_bytes(expected_files["Package.swift"])
+    shutil.copytree(artifact, destination / "GhosttyKit.xcframework")
+for relative, expected in expected_files.items():
+    staged = destination / relative
+    if staged.is_symlink() or not staged.is_file() or staged.read_bytes() != expected:
+        raise SystemExit(f"Local package differs from pinned wrapper: {relative}")
+for relative, target in expected_symlinks.items():
+    staged = destination / relative
+    if not staged.is_symlink() or str(staged.readlink()) != target:
+        raise SystemExit(f"Local package symlink differs from pinned wrapper: {relative}")
+for relative, original in framework_files.items():
+    staged = destination / "GhosttyKit.xcframework" / relative
+    if not staged.is_file() or hashlib.sha256(staged.read_bytes()).digest() != hashlib.sha256(original.read_bytes()).digest():
+        raise SystemExit(f"Local framework differs from native build: {relative}")
+expected_paths = set(expected_files) | set(expected_symlinks) | {"GhosttyKit.xcframework/" + p for p in framework_files}
+actual_paths = {str(p.relative_to(destination)) for p in destination.rglob("*")
+                if (p.is_file() or p.is_symlink()) and p.relative_to(destination).parts[0] != ".build"}
+if actual_paths != expected_paths:
+    raise SystemExit("Unexpected files in local native package")
 receipt = {
     "packageRevision": revision,
     "renderer": "GhosttyPublicMetalLayer / CAMetalLayer",
@@ -64,6 +121,18 @@ receipt = {
     "archives": archive_hashes,
     "provenance": provenance,
 }
-(root / "IOSRendererSpike/native-build.json").write_text(json.dumps(receipt, indent=2) + "\n")
-(root / "build/local-package-path.txt").write_text(str(destination) + "\n")
+receipt_destination = (root / "IOSRendererSpike/native-build.json" if output == root / "build"
+                       else output / "native-build.json")
+receipt_bytes = json.dumps(receipt, indent=2) + "\n"
+if args.validate_only:
+    if receipt_destination.read_text() != receipt_bytes:
+        raise SystemExit("Integrated native receipt differs from build provenance")
+    if (output / "local-package-path.txt").read_text().strip() != str(destination):
+        raise SystemExit("Local package pointer differs from validated native build")
+else:
+    receipt_destination.write_text(receipt_bytes)
+    (output / "local-package-path.txt").write_text(str(destination) + "\n")
+    (output / "native-input-paths.json").write_text(json.dumps({
+        "artifact": str(artifact), "packageSource": str(package_source),
+    }, indent=2) + "\n")
 print(destination)

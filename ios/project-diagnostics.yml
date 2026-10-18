@@ -1,0 +1,49 @@
+include: [project.yml]
+name: AwesoMuxDiagnostics
+packages:
+  libghostty-spm:
+    path: ${GHOSTTY_LOCAL_PACKAGE}
+targets:
+  AwesoMuxDiagnostics:
+    type: application
+    platform: iOS
+    sources:
+      - path: AwesoMuxCompanion
+        excludes: [Info.plist, AwesoMuxCompanion.entitlements]
+      - Shared
+      - path: AwesoMuxDiagnostics
+        excludes: [Info.plist, source-manifest.txt]
+      - path: ../spikes/ios-terminal-renderer/IOSRendererSpike/ThirdPartyNotices
+        type: folder
+        buildPhase: resources
+    preBuildScripts:
+      - name: Refresh diagnostic source manifest
+        script: python3 "$SRCROOT/script/diagnostics-manifest.py" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/source-manifest.txt"
+        basedOnDependencyAnalysis: false
+    dependencies:
+      - package: libghostty-spm
+        product: GhosttyTerminal
+    info:
+      path: AwesoMuxDiagnostics/Info.plist
+      properties:
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleDisplayName: awesoMux Diagnostics
+        ITSAppUsesNonExemptEncryption: false
+        NSLocalNetworkUsageDescription: Connect to the synthetic snapshot fixture server.
+        CFBundleURLTypes:
+          - CFBundleURLName: awesomuxdiagnostics.fixture
+            CFBundleURLSchemes: [awesomuxdiagnostics]
+        UILaunchScreen: {}
+    settings:
+      base:
+        DIAGNOSTICS_NATIVE_PACKAGE: ${GHOSTTY_LOCAL_PACKAGE}
+        PRODUCT_BUNDLE_IDENTIFIER: com.interactivebuffoonery.awesomux.diagnostics
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SNAPSHOT_DIAGNOSTICS
+schemes:
+  AwesoMuxDiagnostics:
+    build:
+      targets:
+        AwesoMuxDiagnostics: all
+    run:
+      config: Debug

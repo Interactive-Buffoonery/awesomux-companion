@@ -19,8 +19,17 @@ struct AgentsView: View {
                     }
                     if let message = store.message {
                         Section {
-                            Label(message, systemImage: "exclamationmark.triangle.fill")
-                                .font(.subheadline).foregroundStyle(Cat.subtext0)
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Image(systemName: "exclamationmark.triangle.fill").accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(message)
+                                    Button("Try Again") { Task { await store.refresh() } }
+                                        .buttonStyle(.borderless)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(Cat.accent)
+                                }
+                            }
+                            .font(.subheadline).foregroundStyle(Cat.subtext0)
                         }
                         .listRowBackground(Cat.card)
                     }
@@ -58,8 +67,19 @@ struct AgentsView: View {
 
     @ViewBuilder private func agentSections(_ snapshot: GlanceSnapshot) -> some View {
         if snapshot.agents.isEmpty {
-            ContentUnavailableView("No agents running", systemImage: "moon.zzz",
-                description: Text("Agents you start in awesoMux on \(snapshot.hostName) show up here."))
+            let title = snapshot.connected
+                ? String(localized: "No agents running") : String(localized: "No agents when last checked")
+            let detail = if snapshot.connected {
+                String(localized: "Agents you start in awesoMux on \(snapshot.hostName) show up here.")
+            } else if let updatedAt = snapshot.updatedAt {
+                String(localized: "Last update from \(snapshot.hostName) at \(lastUpdate(updatedAt)).")
+            } else {
+                String(localized: "\(snapshot.hostName) can't be reached right now.")
+            }
+            ContentUnavailableView(title, systemImage: "moon.zzz", description: Text(detail))
+                // ContentUnavailableView ignores accessibilityHidden on its icon, which reads as "Snooze".
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(title). \(detail)")
                 .listRowBackground(Color.clear)
         }
         ForEach(GlanceGroup.allCases) { group in
@@ -76,6 +96,12 @@ struct AgentsView: View {
                 }
             }
         }
+    }
+
+    private func lastUpdate(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

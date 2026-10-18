@@ -1,181 +1,119 @@
-# iOS libghostty feasibility spike (issue #30)
+# iOS terminal renderer spike — issue 30
 
-Result: NO-GO for this candidate as a release dependency. Physical-device acceptance
-is incomplete. Do not start M1 terminal UI on the strength of this experiment.
+The source-built renderer draws through public `CAMetalLayer` APIs. It works in
+the test app on Simulator and Shiny Blue (iPhone 16 Plus, iOS 27.0). The original
+private-API blocker has been removed from this build. Companion’s production
+terminal UI is unchanged.
 
-The isolated app lives in `spikes/ios-terminal-renderer`. It feeds terminal bytes
-into a host-managed libghostty surface without a local process or network session.
-It is an experiment, not the Companion terminal UI.
+## What changed
 
-## Dependency decision
+The original downloaded library looked up Apple’s private `CAIOSurfaceLayer`
+class. We replaced its iOS presentation code with a `CAMetalLayer` subclass,
+`GhosttyPublicMetalLayer`. Ghostty still renders into its offscreen textures;
+a blit copies the final image to a drawable and presents it in the same command
+buffer. The existing frame permit is released after that GPU work completes.
+Unavailable or wrong-sized drawables schedule another draw. Layer callbacks are
+cleared before teardown, and old layers are removed from their parent.
+Blending changes update the layer’s pixel format on the main thread and retry
+the frame.
 
-Candidate Swift package: https://github.com/Lakr233/libghostty-spm
+The app now uses a locally rebuilt XCFramework rather than the downloaded
+binary. Its bundled `native-build.json` records the patch and library hashes.
+Both native slices and linked apps were checked for the new renderer and the
+absence of `CAIOSurfaceLayer`. IOSurface remains in use for offscreen textures;
+IOSurface itself is a public API.
 
-Exact package revision under test: `42bacd1339f323a693ddbca779295f4f77e5a697`.
-Underlying Ghostty revision: `1e9e14af5df14211892f5fc15fd21a49c7d94868`,
-patch/build revision `3`. DisplayLink resolved to
-`41bea2661e04bebcb1c4f15fc0b6197850100fdd`.
+## Dependency and build record
 
-Its manifest pins the binary asset `upstream.1e9e14af5df1-3` with SHA-256
-`0bf7e5e13f8e42ffca040a6cef7e985fc30bcaa81ff513bd2a93eb097398c6d8`.
+| Input | Pin |
+|---|---|
+| Swift wrapper | `Lakr233/libghostty-spm` at `42bacd1339f323a693ddbca779295f4f77e5a697` |
+| Ghostty | `1e9e14af5df14211892f5fc15fd21a49c7d94868`, package build 3 |
+| DisplayLink | 3.0.1 at `41bea2661e04bebcb1c4f15fc0b6197850100fdd` |
+| Compiler | Local Zig 0.16.0; system Zig unchanged |
+| Targets | iOS arm64 and iOS Simulator arm64 |
+| Native patch | `spikes/ios-terminal-renderer/native/0022-ios-public-metal-layer.patch` |
+| Dependency updates | Sarah |
 
-The package adds host-managed I/O and iOS rendering/platform fixes to Ghostty.
-The experiment uses that maintained distribution; it does not create a new fork.
-A final dependency choice depends on the checks below and license verification.
+The package’s ordered patches are applied before our renderer patch. The native
+build runs in isolated source/cache/output folders. Build stages were executed
+and both slices compiled; the full fresh-clone wrapper was not separately rerun.
+`native/build.sh` documents that reproducible pipeline. Build logs, source hashes
+and native review notes remain under its ignored `artifacts/public-metal-verified/`
+folder; selected receipts are saved in the spike’s evidence folder.
 
-Sarah owns dependency updates (confirmed in this session). Updates should review
-the upstream revision, patch stack, wrapper changes, binary checksum, and notices,
-then repeat the device checks before accepting a new pin.
+## Verification
 
-## Acceptance record
+| Check | Result |
+|---|---|
+| Simulator build | Passed |
+| Signed device Release archive | Passed; signature verified |
+| iPhone install and launch | Passed |
+| ANSI color, box drawing, emoji, Japanese, Arabic and combining marks | Visible in Simulator and iPhone screenshots |
+| Exact parser response | Both return `ESC[5;10R` (`1B 5B 35 3B 31 30 52`) |
+| Basic keyboard | Simulator callback contains `61 62 63`; Sarah confirmed the phone check |
+| Show and hide keyboard | Simulator exercised; Sarah confirmed the phone check |
+| Select and copy `GhosttyTerm` | Sarah confirmed on the phone |
+| Rotation / resize | Simulator portrait and landscape render; Sarah confirmed the phone check |
+| Switch away and back | Simulator exercised; Sarah confirmed the phone check |
+| Rebuild regression | Five rebuilds on Simulator and phone; one Metal layer and a fresh cursor reply after each |
+| Live blending changes | Both platforms report pixel formats 80 → 81 → 80; Simulator repeat also passes |
+| Acknowledgments | All 22 source notice files match the signed app’s bundled copies |
+| Private presentation class | Absent from both rebuilt archives and linked app binaries |
+| IME composition and cancellation | Deferred at Sarah’s request |
+| VoiceOver terminal content | Deferred at Sarah’s request |
 
-No check is a pass until its evidence is recorded.
+Sarah tested the first public renderer build, before the teardown and blending
+fixes. Its identity is saved in `public-metal-user-check-native-build.json`.
+Final Simulator and phone builds have separate rebuild, format and screenshot
+results tied to their source manifest in `public-metal-release-receipt.json`.
 
-| Check | Simulator | Physical device |
-| --- | --- | --- |
-| Render ANSI and UTF-8 bytes supplied by host | Observed in retained screenshot | Observed in retained screenshot, iPhone 16 Plus |
-| Terminal protocol response through output callback | PASS: exact `ESC[5;10R` response | PASS: exact `ESC[5;10R` response |
-| Keyboard input through output callback | Pending | PASS: Sarah confirmed `abc`; callback chunks contain `61`, `62`, `63` |
-| IME composition and committed text | Pending | Pending |
-| Selection and copy | Pending | Selection handles and Copy menu confirmed by Sarah and screenshot; copied text pending |
-| VoiceOver navigation and spoken terminal content | Pending | Pending |
-| Release build/archive and bundled resources | Debug build passed | Signed Release archive, installation, and launch passed; release adoption blocked |
+Sarah answered “yes it does” to the explicit phone checklist: show keyboard,
+type `abc`, hide keyboard, select/copy `GhosttyTerm`, rotate, and switch away/back
+while confirming the terminal still draws correctly. That is a tester report;
+the JSON’s manual flags are not substituted for it. No IME or VoiceOver result is
+inferred from that answer.
 
-## Device availability
+The cursor query proves parser/callback integration, not visual rendering.
+Screenshots and the separate phone observations supply the visual checks. The
+spike starts no shell or PTY and has no network transport. It does not prove a
+production remote terminal, memory-pressure recovery, GPU starvation recovery,
+or exhaustive create/destroy stress testing.
 
-Apple's `devicectl` found a paired iPhone 16 Plus running iOS 27.0 with Developer
-Mode enabled. T3 `device_list` listed simulators only; `device_open` rejected the
-physical phone ID with `No device ... on host local`. Apple device tooling is the
-fallback for installation and launch. Device interaction results remain separate
-from build results.
+## Acknowledgments
 
-## Source findings
+The app preserves the original six notices and adds 16 files for libraries and
+data bundled with Ghostty. Exact sources, file comparisons, font byte matches
+and license texts are recorded in the [license audit](ios-terminal-native-license-audit.md).
+z2d’s notice includes MPL-2.0 and links to the exact unmodified source revision.
+The added files are bundled in the built app, not merely stored in the repo.
 
-The existing awesoMux upstream Ghostty pin `6301810a48aaa3426887a4316668f18833a40138`
-has iOS platform/Metal code, but its termio backend supports only `exec`. It cannot
-provide the required host-fed byte surface unchanged. `libghostty-vt` provides
-terminal state for custom renderers, not the existing Metal terminal view.
+The old downloaded binary’s complete build records remain unavailable. That
+limitation describes the earlier artifact, which this app no longer links.
+The current source build records its compiler, patch stack and native inputs.
 
-The candidate package provides host-managed I/O, UIKit `UITextInput`, and selection
-wrappers. However, its exact pinned [iOS rendering patch](https://github.com/Lakr233/libghostty-spm/blob/42bacd1339f323a693ddbca779295f4f77e5a697/Patches/ghostty/0005-ios-metal-rendering.sh#L97)
-explicitly looks up and subclasses private `CAIOSurfaceLayer`. This is a release
-blocker for selecting this pin, independent of build or rendering success.
+## Evidence and review
 
-Alternative source candidate: [madeye/ghostty at 7fb9e90363a431d15a67a22ff661e33c1be59060](https://github.com/madeye/ghostty/tree/7fb9e90363a431d15a67a22ff661e33c1be59060),
-with passthrough I/O. It was not built in this experiment. Its example uses
-`UIKeyInput`, so complete IME and VoiceOver support still need implementation and
-device evidence. No alternative has passed the acceptance gate.
+Files prefixed `public-metal` in `spikes/ios-terminal-renderer/evidence/` describe
+the replacement. Earlier files describe the original downloaded binary and are
+kept as historical results, including its private-API failure. They must not be
+used as proof of the new build.
 
-## License and packaging
+Fresh native source review found and then checked fixes for redraw retry and
+callback/context publication ordering. A subsequent full independent review
+covered repository standards, edge cases, security, accessibility, performance,
+QA, Swift/iOS and the agreed scope, with no verified source blockers. A separate
+cross-provider review found a layer left attached after a rebuild. The regression
+check reproduced two layers before the fix and one layer after each of five
+rebuilds after it. Later focused reviews checked blending reload, fresh callback
+matching and build receipt validation. The last review found a repeat-run test
+bug; it was fixed and the check passed twice on Simulator. No verified source
+blockers remain. Astra implemented the native fixes; Codex and Claude supplied
+independent review.
 
-The app bundles notices for Ghostty, libghostty-spm, DisplayLink, and
-bash-preexec. Review identified embedded JetBrains Mono and Symbols Nerd Font
-data; their exact upstream notice texts are bundled (JetBrains Mono OFL,
-Symbols Nerd Font artifact MIT). The package source license guard
-passed: `[+] no GPL license text; shell-integration holds only the MIT files`.
-That check only covers shell-integration files. We still need to finish the app’s
-acknowledgments for libraries, fonts and other resources bundled with Ghostty.
+The final receipt records both linked app hashes, all 22 bundled notice hashes,
+the source manifest and native archive hashes. The negative integration check
+rejects an older artifact without a source build receipt.
 
-The [license audit](ios-terminal-native-license-audit.md) found symbols from
-Oniguruma, Highway, simdutf and Wuffs in the Release app’s matching debug file.
-Their notices are missing from the app. Some exact sources, versions and font
-files still need checking. The audit includes working copies of license texts;
-these have not been added to the app’s acknowledgments yet.
-
-## Evidence handling and review
-
-The app writes `latest-evidence.json` in its application-support directory.
-Observations reset on launch. Copy that file to a separate platform-specific
-artifact before each relaunch; do not combine simulator and phone results.
-Retain the app commit, build configuration, device/OS, timestamp, callback bytes,
-viewport text, and screenshots alongside each result.
-
-Fresh focused source review checked callback lifetime and the test contract.
-The reviewer found repeated viewport reads after the first cursor response;
-implementation now guards the first transition. Cross-provider review initially
-hit a rate limit, then resumed and completed. It confirmed callback lifetime and
-pins, and requested deterministic cursor-response validation, matching
-screenshot/JSON artifacts, and embedded font notices. Those fixes are implemented and simulator evidence was refreshed from one run.
-The source manifest binds that run to the actual app inputs; its hash is
-`64ea03080ece627aee30101600651ca0d5474ed593a1a691e2d8025de99b3755`.
-
-The pinned UIKit wrapper has no identified terminal-content accessibility
-implementation. The spike's fixed surface label is not terminal reading support.
-VoiceOver remains unverified unless real device behavior supplies evidence.
-
-## Build and phone receipt (2026-10-18)
-
-Toolchain: Xcode 27.1 (`27A9275`), XcodeGen 2.46.0, iPhoneOS and Simulator SDK
-27.1. Simulator runtime iOS 26.5; physical iPhone 16 Plus iOS 27.0.
-
-A signed arm64 Release archive completed with `** ARCHIVE SUCCEEDED **`;
-`codesign --verify --deep --strict` passed. The resource bundle
-`GhosttyKit_GhosttyTerminal.bundle` and all six retained notice files are present.
-`strings` on the Release executable also confirms `CAIOSurfaceLayer`, so the
-private-API finding is not limited to the Debug simulator binary.
-
-Initial phone installation failed with CoreDeviceError 3002 /
-`IXRemoteErrorDomain 6: Connection invalid`. A single retry succeeded. Launch
-failed with CoreDeviceError 10002 / FBSOpenApplicationErrorDomain 7:
-`Locked: Unable to launch ... because the device was not, or could not be, unlocked`.
-Sarah then unlocked the phone. The final Release build installed and launched
-successfully, rendered the fixture, and returned exactly `ESC[5;10R`. Its
-retained screenshot and JSON are in the spike's `evidence/physical-device*` files.
-Keyboard/IME, selection, and VoiceOver remain pending hands-on observations.
-Installing a signed archive is not an App Store acceptance check. Nothing was
-uploaded to App Store Connect or TestFlight.
-
-Local build logs and archives live under the spike's ignored `build/` directory.
-The committed evidence includes sanitized receipts, simulator artifacts, and
-physical rendering/selection screenshots and JSON.
-
-## Remaining work before terminal UI
-
-- Exercise native keyboard input, Japanese/Chinese marked-text composition,
-  cancellation/replacement, touch selection/copy, and VoiceOver speech.
-- Select or implement a public-API iOS rendering path; repeat the proof against
-  its exact dependency pin. The alternative fork has not been validated.
-- Finish the native library/font/resource notice inventory and release audit.
-
-Issue #30 remains open. This experiment records feasibility evidence and
-blockers; it does not meet the real-device acceptance gate.
-
-The final simulator probe drains the fixture queue, explicitly moves the cursor
-to row 5, column 10, then requests `CSI 6 n`. The retained callback is exactly
-`1B 5B 35 3B 31 30 52` (`ESC[5;10R`). A two-second response deadline reports
-failure if no matching callback arrives. Callback chunks are timestamped and
-bounded to the latest 100 entries for later input/IME examination.
-
-The final Release executable SHA-256 is
-`5ae9a17f1158411b4f5ac9e50e61f6c6fa68a69c105c9fab6b82a9717c9b736b`.
-`evidence/release-receipt.txt` records the exact archive command, signing check,
-resource inspection, install/launch result, and the remaining release blockers.
-The source manifest was verified against all tracked app inputs after building.
-
-Sarah confirmed selection handles over terminal text and a Copy menu.
-`evidence/physical-selection.png` shows `GhosttyTerm` selected with the native
-Copy menu and keyboard. This proves selection affordances, not pasted clipboard
-contents or IME behavior. The blinking terminal cursor is parked at 5;10 by the
-probe and is independent of selection handles.
-
-During the phone check Sarah found that the test view had no explicit keyboard
-dismissal control. An always-visible navigation-bar Hide keyboard button now
-resigns the UIKit responder. The simulator and signed Release archive were
-rebuilt, reinstalled/relaunched, and their evidence refreshed after that change.
-A fresh focused source review found no blocker in the dismissal action.
-Hands-on dismissal confirmation remains pending.
-
-## Follow-up keyboard confirmation
-
-Sarah confirmed typing `abc` reached the output callback. The extracted
-`evidence/physical-keyboard-evidence.json` contains timestamped `61`, `62`, and
-`63` chunks from the same Release artifact and source manifest. Lack of visible
-echo is expected: this app has no shell and deliberately does not loop callback
-bytes back into the renderer.
-
-The app's four manual observation controls were also set to passed. Those are
-retained as tester-entered results. Specific IME composition/cancellation and
-VoiceOver spoken-content observations were not described, so the detailed
-acceptance gates above remain pending rather than inferred from the combined
-controls. Clipboard contents and keyboard dismissal still lack a specific
-recorded confirmation.
+IME and VoiceOver work remains deferred. This PR supplies the renderer experiment
+and its public-API replacement; it does not add the production terminal UI.

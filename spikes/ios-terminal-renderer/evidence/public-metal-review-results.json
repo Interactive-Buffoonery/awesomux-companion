@@ -1,0 +1,54 @@
+{
+  "reviews": [
+    {
+      "lane": "Codex full independent review",
+      "coverage": [
+        "standards",
+        "edge cases",
+        "security",
+        "accessibility",
+        "performance",
+        "QA",
+        "Swift/iOS",
+        "spec compliance"
+      ],
+      "result": "No initial verified source blockers; runtime and deferred accessibility checks separate"
+    },
+    {
+      "lane": "Claude cross-provider review",
+      "findings": [
+        "Old Metal layer remained attached after surface rebuild",
+        "Redundant pixel-format setter",
+        "Set top-left gravity",
+        "Guard callback context"
+      ],
+      "resolution": "Native teardown removes old layer; format changes scheduled on main only when needed; gravity and context guard added"
+    },
+    {
+      "lane": "Codex focused review 2",
+      "findings": [
+        "Dynamic blending reload needs format updates",
+        "Lifecycle probe could match an old response",
+        "Artifact identity must be bound to build inputs"
+      ],
+      "resolution": "Main-thread format update and dirty retry; unique bounded per-cycle probes; before/after source snapshots and artifact-local receipts"
+    },
+    {
+      "lane": "Codex focused review 3",
+      "findings": [
+        "Rerunning check rejects unchanged native configuration"
+      ],
+      "resolution": "Accept already-applied configuration; final Simulator check passed twice"
+    }
+  ],
+  "implementation": "Astra native implementation and fixes",
+  "finalRuntime": [
+    "Five rebuilds with one Metal layer each on Simulator and physical iPhone",
+    "Blending formats 80,81,80 on both",
+    "Repeat run on Simulator passes"
+  ],
+  "deferred": [
+    "IME composition and cancellation",
+    "VoiceOver terminal content"
+  ]
+}

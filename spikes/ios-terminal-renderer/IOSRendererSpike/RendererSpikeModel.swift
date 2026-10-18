@@ -1,6 +1,8 @@
 import CryptoKit
 import Foundation
 import GhosttyTerminal
+import Metal
+import QuartzCore
 import SwiftUI
 import UIKit
 
@@ -60,6 +62,13 @@ final class RendererSpikeModel: ObservableObject {
     @Published private(set) var selfCheckSummary = "Waiting for terminal surface"
     @Published private(set) var viewportSummary = "Viewport not reported"
     @Published private(set) var evidencePath = "Not written yet"
+    @Published private(set) var lifecycleCheckSummary = "Surface rebuild check not run"
+    @Published private(set) var lifecycleCheckRunning = false
+    private var lifecycleLayerCounts: [Int] = []
+    private var blendingPixelFormats: [UInt] = []
+    private var lifecycleExpectedReport: Data?
+    private var lifecycleReportBytes = Data()
+    private var lifecycleReportReceived = false
     @Published private var observations: [ManualCheck: Observation] = Dictionary(
         uniqueKeysWithValues: ManualCheck.allCases.map { ($0, .pending) }
     )
@@ -101,6 +110,19 @@ final class RendererSpikeModel: ObservableObject {
         started = true
         writeEvidence()
         print("RENDERER_SPIKE dependency_revision=\(Self.dependencyRevision)")
+        if ProcessInfo.processInfo.arguments.contains("--check-surface-rebuilds") {
+            Task { @MainActor in
+                for _ in 0..<60 {
+                    if selfCheckPassed {
+                        checkSurfaceRebuilds()
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+                lifecycleCheckSummary = "FAIL: initial surface did not answer the cursor query"
+                writeEvidence()
+            }
+        }
     }
 
     func feedFixture() {
@@ -137,6 +159,85 @@ final class RendererSpikeModel: ObservableObject {
         terminal.requestFocus()
     }
 
+    func checkSurfaceRebuilds() {
+        guard !lifecycleCheckRunning else { return }
+        lifecycleCheckRunning = true
+        lifecycleLayerCounts = []
+        blendingPixelFormats = []
+        Task { @MainActor in
+            defer {
+                lifecycleExpectedReport = nil
+                lifecycleCheckRunning = false
+                writeEvidence()
+            }
+            for cycle in 1...5 {
+                lifecycleCheckSummary = "Rebuilding surface \(cycle)/5"
+                let fontSize: Float = terminal.configuration.fontSize == 13 ? 14 : 13
+                terminal.configuration.fontSize = fontSize
+                var ready = false
+                for _ in 0..<60 {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    if terminal.fontSize == fontSize {
+                        ready = true
+                        break
+                    }
+                }
+                guard ready, let view = terminal.attachedPlatformView else {
+                    lifecycleCheckSummary = "FAIL: surface did not rebuild with the new font"
+                    return
+                }
+                feedFixture()
+                let column = 11 + cycle
+                lifecycleExpectedReport = Data("\u{1B}[2;\(column)R".utf8)
+                lifecycleReportBytes = Data()
+                lifecycleReportReceived = false
+                session.receive("\u{1B}[2;\(column)H\u{1B}[6n")
+                guard session.waitForPendingOutput() else {
+                    lifecycleCheckSummary = "FAIL: rebuilt surface did not receive its cursor query"
+                    return
+                }
+                for _ in 0..<60 {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    if lifecycleReportReceived { break }
+                }
+                guard lifecycleReportReceived else {
+                    lifecycleCheckSummary = "FAIL: rebuilt surface did not answer its cursor query"
+                    return
+                }
+                let count = view.layer.sublayers?.filter { $0 is CAMetalLayer }.count ?? 0
+                lifecycleLayerCounts.append(count)
+                guard count == 1 else {
+                    lifecycleCheckSummary = "FAIL: \(count) Metal layers after rebuild \(cycle)"
+                    return
+                }
+            }
+            guard let layer = terminal.attachedPlatformView?.layer.sublayers?.compactMap({ $0 as? CAMetalLayer }).first else {
+                lifecycleCheckSummary = "FAIL: no Metal layer for blending check"
+                return
+            }
+            for (mode, format) in [("native", MTLPixelFormat.bgra8Unorm), ("linear", .bgra8Unorm_srgb), ("native", .bgra8Unorm)] {
+                lifecycleCheckSummary = "Checking color blending: \(mode)"
+                let config = TerminalConfiguration { $0.withCustom("alpha-blending", mode) }
+                guard terminal.controller.terminalConfiguration == config || terminal.controller.setTerminalConfiguration(config) else {
+                    lifecycleCheckSummary = "FAIL: blending configuration was rejected"
+                    return
+                }
+                session.receive("\u{1B}[8;1HBlend mode: \(mode)\u{1B}[K")
+                for _ in 0..<60 {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    if layer.pixelFormat == format { break }
+                }
+                blendingPixelFormats.append(layer.pixelFormat.rawValue)
+                guard layer.pixelFormat == format, layer.superlayer != nil else {
+                    lifecycleCheckSummary = "FAIL: Metal pixel format did not follow \(mode) blending"
+                    return
+                }
+            }
+            captureViewport()
+            lifecycleCheckSummary = "PASS: 5 surface rebuilds, one Metal layer each"
+        }
+    }
+
     func captureViewport() {
         viewportText = session.readViewportText() ?? ""
         writeEvidence()
@@ -155,6 +256,13 @@ final class RendererSpikeModel: ObservableObject {
     }
 
     fileprivate func receivedOutput(_ data: Data) {
+        if let expected = lifecycleExpectedReport {
+            lifecycleReportBytes.append(data)
+            if lifecycleReportBytes.count > 512 {
+                lifecycleReportBytes.removeFirst(lifecycleReportBytes.count - 512)
+            }
+            lifecycleReportReceived = lifecycleReportBytes.range(of: expected) != nil
+        }
         callbackChunks.append(CallbackChunk(
             recordedAt: ISO8601DateFormatter().string(from: Date()),
             hex: data.hexString
@@ -226,6 +334,9 @@ final class RendererSpikeModel: ObservableObject {
                 expectedCursorReportHex: Self.expectedCursorReportHex,
                 cursorReportDetected: selfCheckPassed,
                 viewportText: viewportText,
+                lifecycleCheckSummary: lifecycleCheckSummary,
+                lifecycleLayerCounts: lifecycleLayerCounts,
+                blendingPixelFormats: blendingPixelFormats,
                 manualObservations: encodedObservations
             )
             let encoder = JSONEncoder()
@@ -288,6 +399,9 @@ private struct Evidence: Codable {
     let expectedCursorReportHex: String
     let cursorReportDetected: Bool
     let viewportText: String
+    let lifecycleCheckSummary: String
+    let lifecycleLayerCounts: [Int]
+    let blendingPixelFormats: [UInt]
     let manualObservations: [String: String]
 }
 

@@ -1,63 +1,63 @@
 # iOS terminal renderer spike
 
-This throwaway app embeds `GhosttyTerminal` at exact revision
-`42bacd1339f323a693ddbca779295f4f77e5a697` and exercises its real Metal-backed
-iOS view with an in-memory session. It does not start a shell, create a PTY, or
-use the network.
+This small app tests Ghostty’s iOS renderer with an in-memory byte stream. It
+starts no shell or PTY and uses no network transport. Companion’s production UI
+is unchanged.
 
-The automatic launch check feeds an ANSI and UTF-8 fixture, waits for the
-in-memory parser queue to drain, moves the cursor to row 5, column 10, and sends
-a Device Status Report cursor query (`CSI 6 n`). It passes only when libghostty
-sends the exact `CSI 5;10 R` response through the session's output callback.
-This proves that the native surface attached and the terminal parser completed
-a deterministic round trip. It does not prove what appeared on screen or that
-accessibility works.
+The Swift wrapper is pinned to `Lakr233/libghostty-spm` revision
+`42bacd1339f323a693ddbca779295f4f77e5a697`. The native library is rebuilt from
+Ghostty `1e9e14af5df14211892f5fc15fd21a49c7d94868`, the package’s ordered patches,
+and our public `CAMetalLayer` patch. It replaces the original private
+`CAIOSurfaceLayer` presentation path. See `native/README.md` for build details.
 
-The app writes its latest evidence to
-`Library/Application Support/IOSRendererSpike/latest-evidence.json` inside its
-container. Physical-device rendering, selection, keyboard/IME, and VoiceOver
-results remain `pending` until a tester records pass or fail in the app.
-Evidence includes the Debug or Release configuration, a SHA-256 hash of the
-bundled source manifest, and up to 100 timestamped callback chunks so a keyboard
-or IME observation can be tied to the emitted bytes.
-
-## Release gate
-
-This pinned candidate is suitable for the experiment only. Its iOS rendering
-patch explicitly looks up the private `CAIOSurfaceLayer` class, and that class
-name remains in the linked app binary. Treat the release gate as failed even
-when the app builds and renders: the terminal UI must not ship with this
-dependency unless the private API use is removed. See
-`evidence/private-api-scan.txt` for the source and linked-artifact checks.
-
-## Simulator build
+## Build the library and app
 
 ```sh
 cd spikes/ios-terminal-renderer
+./native/build.sh 1e9e14af5df14211892f5fc15fd21a49c7d94868
+# Use the output paths printed by that build:
+python3 integrate-native.py /path/to/GhosttyKit.xcframework /path/to/libghostty-spm
 ./generate.sh
 xcodebuild -project IOSRendererSpike.xcodeproj -scheme IOSRendererSpike \
-  -destination 'platform=iOS Simulator,name=iPhone 17' build
+  -destination 'platform=iOS Simulator,id=YOUR_SIMULATOR_UDID' build
 ```
 
-## Physical device
+Integration copies the exact pinned Swift package into the ignored build folder
+and changes its binary target to the local XCFramework. It checks both native
+slices against the source build receipt, records their hashes in the app’s `native-build.json`, and never falls
+back to downloading the original binary. `generate.sh` requires that integration
+step and includes all files under `ThirdPartyNotices/` as app resources.
 
-Open `IOSRendererSpike.xcodeproj`, select the connected iPhone, and run the
-`IOSRendererSpike` scheme. Automatic signing uses team `7CNK4YPCQX` and bundle
-identifier `com.interactivebuffoonery.awesomux.renderer-spike`.
-
-Record each observation in the app. A parser self-check pass must not be
-reported as a visual, selection, keyboard/IME, VoiceOver, or release-acceptance
-pass.
-
-## Local release archive
-
-This produces a signed local archive only. The spike has no upload or
-TestFlight path.
+For a signed local device archive:
 
 ```sh
-cd spikes/ios-terminal-renderer
-./generate.sh
 xcodebuild -project IOSRendererSpike.xcodeproj -scheme IOSRendererSpike \
   -configuration Release -destination 'generic/platform=iOS' \
   -archivePath "$PWD/build/IOSRendererSpike.xcarchive" archive
 ```
+
+Signing uses team `7CNK4YPCQX` and bundle identifier
+`com.interactivebuffoonery.awesomux.renderer-spike`. There is no upload path.
+
+## Checks
+
+Launch feeds ANSI and Unicode, moves the cursor to row 5, column 10, and queries
+its position. The check passes only for the exact callback `ESC[5;10R`.
+Screenshots and device observations establish visual behavior separately.
+
+Use Show keyboard, type `abc`, then Hide keyboard. Input is sent to the output
+callback; it is not echoed into the terminal. Select and copy `GhosttyTerm`,
+rotate the device, and switch away and back to check drawing after layout and
+app changes. The “Check surface rebuilds” button changes the font configuration
+five times and requires a fresh cursor reply and exactly one Metal layer after
+each rebuild. It also switches blending from native to linear and back, checking
+the Metal pixel format after each change. The check can be run repeatedly.
+Launch with `--check-surface-rebuilds` to run that check
+automatically. IME and VoiceOver checks are deferred.
+
+The app writes JSON to
+`Library/Application Support/IOSRendererSpike/latest-evidence.json`. It includes
+the build configuration, source-manifest hash and timestamped callback chunks.
+The report and saved results are in `../../docs/ios-terminal-renderer-spike.md`
+and `evidence/`. Earlier evidence files describe the original downloaded binary;
+files prefixed `public-metal` describe the replacement.

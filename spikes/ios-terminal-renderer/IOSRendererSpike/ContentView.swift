@@ -68,6 +68,11 @@ struct ContentView: View {
                 Button("Read viewport") { model.captureViewport() }
                     .buttonStyle(.bordered)
             }
+            Button("Check surface rebuilds") { model.checkSurfaceRebuilds() }
+                .buttonStyle(.bordered)
+                .disabled(model.lifecycleCheckRunning)
+            Text(model.lifecycleCheckSummary)
+                .font(.caption)
             Text("The fixture contains ANSI color, bold text, box drawing, emoji, Japanese, Arabic, and combining marks. Type with the native keyboard or an IME; emitted bytes appear below.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

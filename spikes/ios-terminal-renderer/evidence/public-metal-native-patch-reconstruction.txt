@@ -1,0 +1,1 @@
+PASS: overlay applies to saved pre-overlay baseline; all three renderer files match built source byte-for-byte.

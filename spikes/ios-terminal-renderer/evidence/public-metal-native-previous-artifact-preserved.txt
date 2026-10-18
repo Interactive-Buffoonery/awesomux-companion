@@ -1,0 +1,2 @@
+PASS: both public-metal-final archives retain their original SHA-256 hashes.
+PASS: both public-metal-reviewed archives retain their original SHA-256 hashes.

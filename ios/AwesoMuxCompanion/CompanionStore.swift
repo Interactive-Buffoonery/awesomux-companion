@@ -263,17 +263,7 @@ final class CompanionStore {
                 return snapshot
             }
             var next = tracker
-            for event in page.events {
-                switch event.change {
-                case "raised":
-                    next.openAlerts[event.attentionID] = event
-                    if page.cursorStatus != "initial" && !next.readingInitialHistory { pendingAlerts.append(event) }
-                case "resolved":
-                    next.openAlerts.removeValue(forKey: event.attentionID)
-                default:
-                    throw MacClientFailure.invalidResponse
-                }
-            }
+            try next.apply(page.events, cursorStatus: page.cursorStatus, pendingAlerts: &pendingAlerts)
             if page.hasMore && page.nextCursor == tracker.cursor { throw MacClientFailure.invalidResponse }
             next.cursor = page.nextCursor
             if !page.hasMore { next.readingInitialHistory = false }
@@ -378,6 +368,22 @@ struct AttentionTracker: Codable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         UserDefaults.standard.set(try? encoder.encode(self), forKey: Self.key)
+    }
+
+    mutating func apply(_ events: [APIResponse.Event], cursorStatus: String,
+                        pendingAlerts: inout [APIResponse.Event]) throws {
+        for event in events {
+            switch event.change {
+            case "raised":
+                openAlerts[event.attentionID] = event
+                if cursorStatus != "initial" && !readingInitialHistory { pendingAlerts.append(event) }
+            case "resolved":
+                openAlerts.removeValue(forKey: event.attentionID)
+                pendingAlerts.removeAll { $0.attentionID == event.attentionID }
+            default:
+                throw MacClientFailure.invalidResponse
+            }
+        }
     }
 }
 

@@ -1,0 +1,18 @@
+{
+  "paneID": "01234567-89ab-cdef-0123-456789abcdef",
+  "workspaceID": "01234567-89ab-cdef-0123-456789abcdef",
+  "workspaceName": "Project",
+  "provider": "Codex",
+  "executionLocation": "local",
+  "availability": "attached",
+  "state": "needsAttention",
+  "attentionReason": "userInputRequired",
+  "unreadCount": 1,
+  "stateProvenance": "native_projection_with_provider_hooks",
+  "observedAt": "2026-10-17T18:19:58Z",
+  "capturedAt": "2026-10-17T18:20:00Z",
+  "targetVersion": "01234567-89ab-cdef-0123-456789abcdef",
+  "identityEvidence": "local_process_incarnation",
+  "providerSessionID": "provider-defined-session-id",
+  "capabilities": ["status"]
+}

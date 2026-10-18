@@ -1,10 +1,54 @@
 # iOS terminal native license audit — issue 30
 
-Audit date: 2026-10-18. Scope: existing keyboard Release archive and pinned spike only. No builds, app edits, signing changes, commits, publishing, IME or VoiceOver work. This is a factual provenance/notice audit, not a legal opinion.
+Updated 2026-10-18 from audit commit `907064c`. This records source checks and the acknowledgment files prepared for the renderer spike. It is not a legal opinion. No app build, signing, commit, push, IME or VoiceOver work was performed for this update.
 
-**The acknowledgments are not finished.** We need to credit Ghostty and include the license notices required by libraries bundled inside it. Symbols in the Release app’s matching debug file show code from Oniguruma, Highway, simdutf and Wuffs. Those libraries are not listed in the app’s current notices.
+**The missing acknowledgment texts are now in the app’s source notice folder.** All six original notices are unchanged. Sixteen additional files credit Ghostty’s dependencies, including Oniguruma, Highway, simdutf and Wuffs, which the earlier Release app’s matching debug file identifies as linked code.
 
-Some exact versions and source files still need checking before we can finish the acknowledgments. The license texts saved with this report are working material; they have not been added to the app.
+**App integration verified.** The regenerated Xcode project includes all 22 notice files. Their bytes match the copies bundled in the new public-Metal Simulator app and signed device Release archive. The earlier keyboard archive predates these additions and remains unchanged.
+
+## What was verified and added
+
+Primary source URLs, selected file/excerpt SHA-256 values, downloaded archive SHA-256 values and all 22 app notice hashes are saved in [`verified-provenance.json`](ios-terminal-native-license-notices/verified-provenance.json). New assembled notice files also appear in this document’s supporting notice directory. Earlier source captures remain unchanged.
+
+The earlier mirror 403 failures were resolved by requesting the same URLs with `User-Agent: curl/8.0`. The previous GitHub Wuffs 404 is still a historical acquisition failure; the exact Ghostty mirror now supplies the package and its generated-file license. No current branch was substituted.
+
+| Component | Verified source and acknowledgment |
+|---|---|
+| Oniguruma 6.9.9 | Exact Ghostty mirror downloaded; its bytes equal the upstream v6.9.9 archive. `Oniguruma.txt` preserves COPYING and distinct notices from the C/header files, including generated Unicode tables. This also preserves source copyright years/holders beyond the root COPYING. |
+| Highway `66486a10623fa0d72fe91260f96c892e41aceb06` | Exact mirror bytes equal the commit archive. All 252 regular files match the hash-named local cache archive after ignoring the root directory name. The tree contains LICENSE and LICENSE-BSD3, and no NOTICE file. Both licenses are in `Highway.txt`; this is not covered by Ghostty’s MIT notice. |
+| simdutf **9.0.0** | Both vendored files fetched from the exact Ghostty commit. The wrapper version remains 5.2.8; the header identifies actual code as 9.0.0. `simdutf.txt` contains v9.0.0 MIT/Apache texts and the complete BSD notice embedded in the vendored ISA-detection header (Facebook, DeepMind, NYU, NEC and Idiap). Benchmark-only licenses from the upstream source archive were not treated as bundled code. Vendored file hashes are recorded, without claiming byte identity to a newly generated upstream amalgamation. |
+| Wuffs package `7411f488fe2e2c205c3d3b3d28638b7356522930` | Exact mirror downloaded and byte-matched to the hash-named local cache archive. `release/c/wuffs-v0.4.c` SHA-256 is `1f8039ef82911604c063f6ac2ed57254bdb17d742aebdeae06356530d4a0fde7`. Its own header explicitly offers Apache-2.0 OR MIT. `Wuffs.txt` includes that header and the complete LICENSE, LICENSE-MIT and LICENSE-APACHE files. The generated file identifies itself as 0.4.0-alpha.10+3966.20260623 and cites generator revision `f3de3336423f041ee251c3cf7f50a19b7eebb939`; this metadata is preserved separately from the package’s source declaration. |
+| FreeType 2.13.2 | Exact mirror inspected. `FreeType.txt` selects the FreeType License, includes its credit, and preserves the additional BDF, PCF, hash, gzip/zlib and HarfBuzz-derived module notices identified by LICENSE.TXT. Added conservatively because FreeType archive members were present; the earlier symbol probe did not establish which functions ship. |
+| libpng 1.6.43 / zlib 1.3.1 | Exact Ghostty mirrors inspected; LICENSE files added as `libpng.txt` and `zlib.txt`. Included conservatively for archive code. |
+| stb_image 2.28 / stb_image_resize 0.97 | Exact pinned Ghostty header license excerpts already saved by the earlier audit; their MIT/public-domain alternatives are now in `stb.txt`. Included conservatively for archive code. |
+| uucode `9d55524551411b493cca41ca06363625d90aff1e` | Exact source archive downloaded again; SHA-256 matches the original capture (`68d23543cb2c6c5dfdbdf38b38375e0c6d412a5c5fb72ce06bd139f7a4d25132`). `uucode.txt` preserves MIT, Unicode License V3, Bjoern Hoehrmann and the wcwidth resource notices from the existing capture. Unicode/width tables may be distributed data even when their generator runs only during the build. The extra resource credits are conservative; they do not assert that every upstream implementation ships. |
+| libxev `9ce8e8e6ff89e583258a7f8e7adeeeaeae8611bf` | Exact mirror acquired, resolving the original acquisition blocker. Its MIT LICENSE and the embedded kprotty ThreadPool MIT notice are in `libxev.txt`. The native build changes `src/backend.zig`, `src/backend/kqueue.zig` and `src/posix.zig`; the notices match upstream. |
+| vaxis / zig-objc / zf | Previously captured exact-revision MIT notices copied into `vaxis.txt`, `zig-objc.txt` and `zf.txt`. Included conservatively for Ghostty integration. This does not turn their build declarations into proof of executable inclusion. |
+| z2d `7dbae85c81784dba9988320bf9543ed9a81350c8` | Exact commit archive inspected. `z2d.txt` includes full LICENSE and COPYING, including MPL-2.0 and Cairo/Pixman/tiny-skia/W3C credits. Upstream test font/license notices are preserved with explicit test-resource context. Distribution handling is described below. |
+| Fonts | Exact JetBrains Mono 2.304 and NerdFontsSymbolsOnly 3.4.0 mirrors downloaded. Nerd mirror LICENSE matches the existing MIT credit; both font name tables also say Copyright (c) 2016, Ryan McIntyre. JetBrains font name tables identify the 2020 project authors and OFL 1.1; v2.304 OFL text was fetched separately because the Ghostty font archive has no license file. `FontProvenance.txt` adds these credits and exact sources while preserving both original font notices. Complete font bytes for JetBrains Mono variable regular, variable italic and SymbolsNerdFont-Regular match contiguous ranges of the earlier keyboard executable. Their offsets, lengths and SHA-256 values are saved in the provenance manifest. This directly identifies those three embedded files; no extra font is inferred from a source declaration. |
+| Zig runtime | Native worker’s `native/toolchains/zig-aarch64-macos-0.16.0/zig version` returns 0.16.0. `ZigRuntime.txt` preserves that distribution’s MIT LICENSE, musl COPYRIGHT and LLVM/exception texts from libc++, libc++abi and libunwind. The latter are conservative runtime credits, not a claim that complete copies of those libraries ship. Compiler-rt math source files explicitly say they were ported from musl. The earlier prebuilt binary still lacks an exact compiler commit and a per-function runtime source inventory. |
+
+## z2d source availability
+
+The exact source is available at [revision 7dbae85c81784dba9988320bf9543ed9a81350c8](https://github.com/vancluever/z2d/tree/7dbae85c81784dba9988320bf9543ed9a81350c8), with a [downloadable source archive](https://github.com/vancluever/z2d/archive/7dbae85c81784dba9988320bf9543ed9a81350c8.tar.gz). Both links are included in the app notice, along with MPL-2.0. This supplies a source location for the unmodified revision rather than only naming its license.
+
+[MPL-2.0 sections 3.1–3.3](https://www.mozilla.org/en-US/MPL/2.0/) describe source availability for covered files distributed in executable form and allow those files to be part of a larger work. For a build that includes unmodified z2d code, preserve its notices/license and make that revision’s source available to recipients. If the native build changes any MPL-covered files, make those changed files available too and update the notice’s source location. The upstream archive alone would not describe local modifications. The native build’s resolved z2d package contains 56 regular files. Every file matches the exact upstream archive, including every file under `src/` and both build files; the source archive additionally contains documentation/test resources omitted by its package `.paths`. The source link therefore covers that resolved native package with no local z2d changes observed. This update did not establish whether the old prebuilt app contains z2d or whether its vendor modified it; the notice remains conservative for that artifact. Source merely used by an unshipped build tool is distinct from code or generated data copied into the app.
+
+## Native source comparison
+
+Read-only checks against the native worker’s isolated `native/work/ghostty/zig-pkg` confirm all resolved regular files match the downloaded sources for Oniguruma (178 files), Highway (252), Wuffs (14), JetBrains Mono (52), Nerd Fonts (5), z2d (56) and pinned uucode (42). z2d and uucode omit upstream resources according to their package `.paths`; no resolved file differs. Both native vendored simdutf files match the exact pinned Ghostty raw files. libxev has the three native platform changes recorded above; its license and ThreadPool header remain unchanged. These comparisons do not mutate the package cache or the Mac vendor tree.
+
+## What remains to check
+
+- All 22 notices were verified in the new app by the integration owner. The notice worker itself did not build the app.
+- Preserve the verified z2d source location when distributing the native build. If later edits change its covered files, distribute those changed sources and update that location. The current resolved z2d package is unchanged from the linked upstream source.
+- For the old prebuilt release, exact compiler commit, vendor modifications and a complete runtime source inventory remain unavailable. Three embedded font files are now byte-matched as described above. The added notices are a concrete improvement, not a claim that the vendor supplied an exhaustive build attestation.
+- The earlier package resource checks found compiled Ghostty terminfo and shell integration; the existing Ghostty and bash-preexec notices remain. A generator such as `tic` is not itself a shipped ncurses library. Exact compiled terminfo source matching was not performed in this update.
+- IME and VoiceOver remain deferred and are unrelated to these source/notice changes.
+
+## Earlier archive evidence
+
+The following identity and symbol/archive evidence describes the keyboard Release archive inspected before these notice additions. It does not describe a rebuilt app.
 
 ## Artifact identity and evidence strength
 
@@ -32,52 +76,6 @@ Some exact versions and source files still need checking before we can finish th
 | `spikes/ios-terminal-renderer/build/IOSRendererSpike-keyboard.xcarchive/Products/Applications/IOSRendererSpike.app/libghostty-spm.txt` | `bc8800e5af52ebfe6d615c0a25a580ce26b0a5420d48b39d2940c80a11817815` |
 | `spikes/ios-terminal-renderer/build/IOSRendererSpike-keyboard.xcarchive/Products/Applications/IOSRendererSpike.app/source-manifest.txt` | `64ea03080ece627aee30101600651ca0d5474ed593a1a691e2d8025de99b3755` |
 
-## Libraries and missing notices
-
-The pinned Ghostty `GhosttyLib.initStatic` combines dependency archives with the Ghostty object, bundles compiler runtime, then applies its Darwin libSystem override. Package `Script/build-ghostty.sh` adds `libcxx-verbose-abort-compat.o`. It selects ReleaseFast, disables inspector/custom shaders/i18n/Sentry and uses `app-runtime=none`. These are recipe declarations, not a recorded invocation attestation; `ZIG_BUILD_EXTRA_ARGS` can override configuration.
-
-| Dependency | Exact source declaration / version | Packed evidence | Release / notice assessment |
-|---|---|---|---|
-| FreeType | `pkg/freetype/build.zig.zon`: 2.13.2; mirror filename `freetype-1220b81f6ecfb3fd222f76cf9106fecfa6554ab07ec7fdc4124b9bb063ae2adf969d.tar.gz` | `autofit.o`, `ft*.o`, `truetype.o`, etc. | Representative symbols absent; archive inclusion is not app linkage. FTL/GPL alternative; FTL candidate captured from exact version tag. Need confirm full mirror contents and exclusions before asserting binary coverage. |
-| libpng | 1.6.43; mirror `libpng-1220aa013f0c83da3fb64ea6d327f9173fa008d10e28bc9349eac3463457723b1c66.tar.gz` | `png*.o` | Representative symbols absent; PNG Reference Library License v2 candidate captured from v1.6.43. |
-| zlib | 1.3.1; mirror `zlib-1220fed0c74e1019b3ee29edae2051788b080cd96e90d56836eea857b0b966742efb.tar.gz` | `adler32.o`, `inflate.o`, `deflate.o`, `gz*.o`, etc. | Representative symbols absent; zlib notice candidate captured from v1.3.1. |
-| Oniguruma | 6.9.9; mirror `oniguruma-1220c15e72eadd0d9085a8af134904d9a0f5dfcbed5f606ad60edc60ebeccd9706bb.tar.gz` | `reg*.o`, encodings, Unicode folding objects | **Linked into the app** `_onig_new`; BSD-style redistribution notice missing from app. Exact version-tag COPYING captured; mirror identity still unverified. dSYM contains matching ZON package hash path. |
-| Highway | wrapper 1.2.0; source commit `66486a10623fa0d72fe91260f96c892e41aceb06` | `abort.o`, `per_target.o`, `targets.o`, `libhighway_zcu.o`; Ghostty SIMD objects | **Linked into the app** `hwy::SupportedTargets`, dispatch helpers. Apache-2.0 source LICENSE captured; missing from app. Exact source NOTICE/third-party additions still require full tree inspection. |
-| simdutf | **Vendored header says 9.0.0**, despite wrapper ZON version **5.2.8** | `simdutf.o`, plus inline code in SIMD objects | **Linked into the app** `simdutf::count_utf8` and 94 other name matches. Upstream v9.0.0 MIT/Apache alternatives captured, but vendored file modifications/embedded third-party text require comparison. Do not report 5.2.8 as actual code version. |
-| Wuffs | commit `7411f488fe2e2c205c3d3b3d28638b7356522930`; generated `release/c/wuffs-v0.4.c` | `wuffs-v0.4.o` | **Linked into the app**, 375 symbol-name matches. Exact mirror denied 403; GitHub commit archive and LICENSE request returned 404. Exact generated-file license text/provenance unresolved; do not infer coverage from Ghostty MIT. |
-| stb | Ghostty vendored stb_image v2.28; stb_image_resize v0.97 | `stb.o` | No representative `stbi` symbols in dSYM. Both exact pinned header license alternatives (MIT/public domain) captured. A linker map is needed to check for other included code or data. |
-| Zig runtime / standard library | 0.16.0 supported by CI and dSYM path; exact compiler commit unproven | `compiler_rt.o`; std code may be inside `libghostty_zcu.o` | Need exact Zig distribution LICENSE and runtime/third-party provenance; upstream 0.16.0 LICENSE endpoint returned 404. Presence of object does not establish which runtime functions survived. |
-| Compatibility shim | pinned libghostty-spm `Script/support/libcxx-verbose-abort-compat.c` | `libcxx-verbose-abort-compat.o` | Package MIT candidate covers package-owned shim; do not extend it to other archive objects. |
-
-Primary declarations: [Ghostty pinned build.zig.zon](https://github.com/ghostty-org/ghostty/blob/1e9e14af5df14211892f5fc15fd21a49c7d94868/build.zig.zon), [SharedDeps](https://github.com/ghostty-org/ghostty/blob/1e9e14af5df14211892f5fc15fd21a49c7d94868/src/build/SharedDeps.zig), [static library composition](https://github.com/ghostty-org/ghostty/blob/1e9e14af5df14211892f5fc15fd21a49c7d94868/src/build/GhosttyLib.zig). The saved ZON texts below preserve complete content hashes and exact mirror URLs.
-
-### Zig dependencies folded into the main object
-
-These cannot be enumerated from `ar -t` alone. SharedDeps wires them into Ghostty. No per-module symbols were found in matching dSYM; optimization/name stripping means that is not proof of exclusion.
-
-| Dependency | Pinned revision | License / current conclusion |
-|---|---|---|
-| uucode | `9d55524551411b493cca41ca06363625d90aff1e` | MIT Jacob Sandlund 2026; source also carries Unicode License V3, Bjoern Hoehrmann UTF-8 decoder notice and wcwidth resource notices. Source archive downloaded and notice texts captured. Unicode generation outputs can be distributed data even when generator executes only at build time. We need build records to identify which tables and code ship. |
-| libxev | `9ce8e8e6ff89e583258a7f8e7adeeeaeae8611bf` | mirror 403 and GitHub LICENSE/archive 404; exact notice, included code and further dependencies are unresolved. |
-| vaxis | `1dbbe575dff4586fe51e3217aa5c3fecdcbb6089` | MIT Tim Culverhouse; exact LICENSE captured. SharedDeps imports vaxis and shared uucode. Whether it ships is unresolved. |
-| z2d | `7dbae85c81784dba9988320bf9543ed9a81350c8` | **MPL-2.0**, exact source LICENSE captured. Source declaration is not proof it reaches executable. Retention must be resolved before deciding distribution handling; do not classify as MIT. |
-| zig-objc | `c8de82ff80281215ad92900866dab7103a8efa8b` | MIT Mitchell Hashimoto; exact source LICENSE captured. Darwin conditional integration; which parts ship is unresolved. |
-| zf | `c35c421f84895193246db06c40683c1a30e616ef` | MIT Nathan Craddock; exact source LICENSE captured. Whether it ships is unresolved. |
-| macos / translate-c / Apple SDK helpers | paths inside pinned Ghostty tree | Ghostty-owned wrappers versus SDK headers/generated bindings need source attribution distinction. Host translation helper is build-time; emitted bindings can contribute code/constants. Apple frameworks are OS dynamic dependencies, not copied open-source archive members. |
-
-The bundled app has no notice files for the above additional dependencies. Candidate notices are saved in `docs/ios-terminal-native-license-notices/` with primary URL headings. Some candidates come from version tags rather than the inaccessible mirror: they are **not** proof the mirrors are identical. The saved simdutf archive includes benchmark-only competitor licenses; their presence in that source archive is not proof those benchmark libraries are distributed in this app.
-
-## Fonts and other resources
-
-- App bundles exactly the six existing notices: Ghostty, libghostty-spm, DisplayLink, bash-preexec, JetBrainsMono OFL, NerdFontsSymbolsOnly MIT. Their hashes appear above. Package fonts are embedded into native binary, so searching only `.ttf` files in the app would miss them.
-- Executable byte search finds UTF-16BE `JetBrains` and `Symbols Nerd`; no `Noto`, `Kawkab`, `Cozette`, `Spleen`, `Inconsolata`, `Geist`, `JuliaMono` or `Code New Roman` in UTF-8/UTF-16BE. This supports two families but is not a full SFNT extraction/hash proof. Existing font version claims remain pinned manifest declarations (2.304 and 3.4.0), not independently matched extracted font hashes.
-- `src/font/embedded.zig` declares many test fonts, explicitly says fonts embed only if referenced. Do not label every declaration as shipped. SharedDeps adds the six JetBrains Mono faces/variable files and Symbols Nerd font as anonymous imports. Need exact font bytes extracted/matched to close provenance; mirror requests for both font archives returned 403.
-- Existing NerdFontsSymbolsOnly notice says MIT / Ryan L McIntyre 2014; **do not replace this with the license of an arbitrary other Nerd Fonts release or individual source glyph project**. Exact 3.4.0 artifact contents/glyph licensing remains unverified here because its pinned mirror was inaccessible. JetBrains existing OFL text is present, but that alone does not prove embedded file identity.
-- `GhosttyKit_GhosttyTerminal.bundle` contains localized strings, compiled `terminfo/67/ghostty` and `terminfo/78/xterm-ghostty`, bash/zsh integration and bundled `LICENSE-bash-preexec.md`. These are distributed even if unused by the spike. Existing bash-preexec root notice is duplicated by its resource license. Need verify generated terminfo source provenance; presence of compiled terminfo does not imply ncurses library code is linked. `tic` as a generator would be distinct from copied terminfo data.
-- GhosttyTheme/iTerm2 scheme generation exists in the package but spike dependency is GhosttyTerminal. No theme resource bundle or theme files found in app. No evidence here of distribution of the full theme dataset; repository presence is not linkage.
-- No bundled third-party dynamic framework/dylib found. `otool -L` contains Apple system frameworks/libraries and Swift runtime references only; this does not detect static dependencies.
-- No HarfBuzz/fontconfig/glslang/SPIRV-Cross/libintl/Sentry object families found in device archive. Script explicitly disables custom shaders/inspector/i18n/Sentry. Build graph declaration alone must not turn these into a shipped inventory; header-only/inlined/transitive absence still needs an attested build manifest if exhaustive closure is required.
-
 ## Reproducible read-only verification
 
 Run from the worktree; none of these commands build, sign or modify source:
@@ -103,7 +101,7 @@ find spikes/ios-terminal-renderer/build -iname '*linkmap*' -o -iname '*.map'
 curl -fL https://raw.githubusercontent.com/ghostty-org/ghostty/1e9e14af5df14211892f5fc15fd21a49c7d94868/pkg/simdutf/vendor/simdutf.h | rg 'SIMDUTF_VERSION'
 ```
 
-To retrieve exact declarations, use the pinned raw GitHub base in source excerpts below; fetch `pkg/{freetype,libpng,zlib,oniguruma,highway,wuffs}/build.zig.zon`. Their URLs and Zig content hashes are preserved verbatim below. Do not substitute current branches. Mirror fetches with Python urllib returned HTTP 403; exact Wuffs/libxev GitHub archive fetches returned HTTP 404. These are unresolved acquisition failures, not license determinations.
+To retrieve exact declarations, use the pinned raw GitHub base in source excerpts below; fetch `pkg/{freetype,libpng,zlib,oniguruma,highway,wuffs}/build.zig.zon`. Their URLs and Zig content hashes are preserved verbatim below. Do not substitute current branches. Those earlier urllib requests returned HTTP 403, and Wuffs/libxev GitHub requests returned HTTP 404. The mirror acquisition failures were resolved in this update with a curl User-Agent; see the current inventory and provenance manifest above.
 
 ### Library symbols in the app’s matching debug file
 

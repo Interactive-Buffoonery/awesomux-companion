@@ -3,6 +3,10 @@ options:
   bundleIdPrefix: com.interactivebuffoonery
   deploymentTarget:
     iOS: '18.0'
+packages:
+  libghostty-spm:
+    url: https://github.com/Lakr233/libghostty-spm.git
+    revision: 42bacd1339f323a693ddbca779295f4f77e5a697
 settings:
   base:
     SWIFT_VERSION: '6.0'
@@ -42,6 +46,38 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.interactivebuffoonery.awesomux.companion
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  AwesoMuxDiagnostics:
+    type: application
+    platform: iOS
+    sources:
+      - path: AwesoMuxCompanion
+        excludes: [Info.plist, AwesoMuxCompanion.entitlements]
+      - Shared
+      - path: AwesoMuxDiagnostics
+        excludes: [Info.plist, source-manifest.txt]
+    preBuildScripts:
+      - name: Refresh diagnostic source manifest
+        script: python3 "$SRCROOT/script/diagnostics-manifest.py" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/source-manifest.txt"
+        basedOnDependencyAnalysis: false
+    dependencies:
+      - package: libghostty-spm
+        product: GhosttyTerminal
+    info:
+      path: AwesoMuxDiagnostics/Info.plist
+      properties:
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleDisplayName: awesoMux Diagnostics
+        ITSAppUsesNonExemptEncryption: false
+        NSLocalNetworkUsageDescription: Connect to the synthetic snapshot fixture server.
+        CFBundleURLTypes:
+          - CFBundleURLName: awesomuxdiagnostics.fixture
+            CFBundleURLSchemes: [awesomuxdiagnostics]
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.interactivebuffoonery.awesomux.diagnostics
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SNAPSHOT_DIAGNOSTICS
   AwesoMuxCompanionWidgets:
     type: app-extension
     platform: iOS
@@ -81,3 +117,9 @@ schemes:
     test:
       targets:
         - AwesoMuxCompanionTests
+  AwesoMuxDiagnostics:
+    build:
+      targets:
+        AwesoMuxDiagnostics: all
+    run:
+      config: Debug

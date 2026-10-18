@@ -15,6 +15,9 @@ struct GlanceApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if SNAPSHOT_DIAGNOSTICS
+            SnapshotDiagnosticsView()
+            #else
             let store = appDelegate.store
             Group {
                 if store.record == nil || store.showingPairing || store.pairingStep != .idle {
@@ -34,6 +37,7 @@ struct GlanceApp: App {
                 default: break
                 }
             }
+            #endif
         }
     }
 }
@@ -44,6 +48,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     let store = CompanionStore()
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        #if SNAPSHOT_DIAGNOSTICS
+        return true
+        #else
         UNUserNotificationCenter.current().delegate = self
         let store = store
         BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.refreshTaskID, using: .main) { task in
@@ -55,6 +62,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             task.expirationHandler = { work.cancel() }
         }
         return true
+        #endif
     }
 
     static func scheduleRefresh() {

@@ -85,7 +85,8 @@ renderer fallback exists.
 Requires Xcode, XcodeGen, Python 3, and a compatible zmx executable for network
 fixtures. The diagnostic target supports arm64 devices and Apple Silicon
 Simulators only, matching the two source-built native slices. Its target-level
-`ARCHS` setting also applies to Release builds; Intel Simulators are unsupported. First build the exact native pipeline using
+`ARCHS` setting also applies to Release builds; Intel Simulators are unsupported.
+First build the exact native pipeline using
 [the native build instructions](../ios-terminal-renderer/native/README.md), or
 reuse a verified artifact with its original receipt and inputs. Integrate it once
 into an ignored local package; no build products belong in Git. From the repository root:
@@ -121,10 +122,16 @@ A server restart creates new credentials and requires reconfiguration. Bundled
 replay works without the fixture server. See the verification ledger for tested
 behavior and remaining gaps.
 
-The manifest includes the locally generated `Package.resolved`, which is ignored
-by Git. The shared native integration validator enforces renderer revisions and
-build inputs; compare individual manifest entries when reproducing on another Mac, since a local resolution file
-can change the aggregate manifest hash without changing renderer source.
+Generation seeds the diagnostic project's ignored `Package.resolved` from the
+tracked `spikes/ios-terminal-renderer/Package.resolved`. Every build requires
+that lock and validates all dependency pins against the tracked lock, including
+DisplayLink 3.0.1 at `41bea2661e04bebcb1c4f15fc0b6197850100fdd`. Only the
+pre-generation bootstrap permits a missing project lock; an existing drifted
+lock fails closed. The manifest includes both locks. Project-specific originHash
+metadata may differ, but dependency identity, location, kind and state must match.
+DisplayLink is linked into the app and controls frame pacing; a future 3.x
+resolution would change the artifact and invalidate the pinned provenance and
+notices. No dependency drift is accepted as a harmless manifest change.
 
 ## Scope and evidence boundary
 

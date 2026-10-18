@@ -14,6 +14,7 @@ native_receipt = root / 'build/diagnostics-native/native-build.json'
 paths = {root / 'project.yml', root / 'project-diagnostics.yml', native_receipt}
 paths.update((root / 'script').glob('*diagnostics*'))
 paths.add(spike / 'integrate-native.py')
+paths.add(spike / 'Package.resolved')
 paths.update(path for path in (spike / 'native').iterdir()
              if path.is_file() and path.suffix in {'.py', '.sh', '.patch'})
 paths.update(path for path in (spike / 'IOSRendererSpike/ThirdPartyNotices').iterdir()

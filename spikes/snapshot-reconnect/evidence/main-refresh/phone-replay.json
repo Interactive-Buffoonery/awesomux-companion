@@ -1,0 +1,91 @@
+{
+  "applicationBuild" : "2",
+  "applicationVersion" : "0.2",
+  "automaticReplay" : {
+    "continuationExpectedCursor" : "\u001b[6;5R",
+    "continuationExpectedTextRetained" : "passed",
+    "continuationLiveCursor" : "\u001b[6;5R",
+    "continuationLiveText" : "line-09\nAWAY\n$ next\nFINAL\nLIVE-CONTINUE\nDONE",
+    "continuationReattachCursor" : "\u001b[6;5R",
+    "continuationReattachText" : "line-09\nAWAY\n$ next\nFINAL\nLIVE-CONTINUE\nDONE",
+    "continuationResult" : "passed",
+    "snapshotExpectedCursor" : "\u001b[6;6R",
+    "snapshotExpectedTextRetained" : "passed",
+    "snapshotLiveCursor" : "\u001b[6;6R",
+    "snapshotLiveText" : "line-07\nline-08\nline-09\nAWAY\n$ next\nFINAL",
+    "snapshotReattachCursor" : "\u001b[6;6R",
+    "snapshotReattachText" : "line-07\nline-08\nline-09\nAWAY\n$ next\nFINAL",
+    "snapshotResult" : "passed"
+  },
+  "buildConfiguration" : "Debug",
+  "bundleIdentifier" : "com.interactivebuffoonery.awesomux.diagnostics",
+  "dependencyRevision" : "42bacd1339f323a693ddbca779295f4f77e5a697",
+  "deviceModel" : "iPhone",
+  "experimentalPrivateCAIOSurfaceLayer" : true,
+  "fixtureSHA256" : {
+    "away" : "3c3df30505222d9981a70ec19965f42e16500aebf940d95e65173f4c94b64b73",
+    "continuation" : "5bf610a25408c7bc78ada7a6631173c7f2afd17179868a2caa6d29c1aeef5fcd",
+    "input" : "d016b1fa87cd9a708d19460bede81def9442b6325a1bd5f3090f8be25afcaec2",
+    "reattach" : "f8beea8bd3a6dd1369aac779ec507aa6b4a94716022dba836cbee82ff4e249d8"
+  },
+  "generation" : "33BAAE37-30DD-4AD4-BC97-BF0A203F7254",
+  "manualAttestations" : {
+
+  },
+  "manualResults" : {
+    "generation" : "33BAAE37-30DD-4AD4-BC97-BF0A203F7254",
+    "physicalNetworkReconnect" : "unverified",
+    "rendering" : "unverified"
+  },
+  "phase" : "replayPassed",
+  "recordedAt" : "2026-10-18T19:10:25Z",
+  "recoveryLog" : [
+    {
+      "event" : "disconnect",
+      "generation" : "3B5C4904-35C4-48D0-B4F8-50796A314448",
+      "recordedAt" : "2026-10-18T19:10:25Z",
+      "runID" : "none",
+      "sequence" : "none"
+    }
+  ],
+  "replayPrerequisite" : {
+    "fixtureSetSHA256" : "639604eb73bd499210d0dfe90be1f6a9b8e31aacd962bb3497dd528ad990d625",
+    "originatingReplayGeneration" : "33BAAE37-30DD-4AD4-BC97-BF0A203F7254",
+    "sourceManifestSHA256" : "5c2fc01cf0b3670d532addf092a5e9bf27d1919afb06f2b851f3a0dc8419afc0"
+  },
+  "reportedDimensions" : [
+    {
+      "cellHeightPixels" : 0,
+      "cellWidthPixels" : 0,
+      "columns" : 20,
+      "heightPixels" : 443,
+      "requestedHeightPoints" : 152,
+      "requestedWidthPoints" : 216,
+      "rows" : 6,
+      "widthPixels" : 635
+    },
+    {
+      "cellHeightPixels" : 0,
+      "cellWidthPixels" : 0,
+      "columns" : 20,
+      "heightPixels" : 443,
+      "requestedHeightPoints" : 152,
+      "requestedWidthPoints" : 216,
+      "rows" : 6,
+      "widthPixels" : 635
+    }
+  ],
+  "resultGeneration" : "33BAAE37-30DD-4AD4-BC97-BF0A203F7254",
+  "simulator" : false,
+  "sourceDimensions" : {
+    "columns" : 20,
+    "rows" : 6
+  },
+  "sourceManifestSHA256" : "5c2fc01cf0b3670d532addf092a5e9bf27d1919afb06f2b851f3a0dc8419afc0",
+  "status" : "PASS: viewport text and cursor agree before and after continuation",
+  "syntheticNetwork" : {
+
+  },
+  "systemName" : "iOS",
+  "systemVersion" : "27.0"
+}

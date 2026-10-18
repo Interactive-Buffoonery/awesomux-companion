@@ -1,0 +1,14 @@
+{
+  "ios/AwesoMuxCompanion/App.swift": "c3068aaabb8806d7dfdd8f0132134128defba0ae5ce08af8425922bee78a53ff",
+  "ios/AwesoMuxDiagnostics/DiagnosticTerminal.swift": "c196312681e60a014d8373648248ce9a744bd6a7de07ff58a6dbb25958f37272",
+  "ios/AwesoMuxDiagnostics/FixtureTransport.swift": "29f9888ca760dcdaeb5d017efbe079c5dde4fc038706378f959317e1664bb626",
+  "ios/AwesoMuxDiagnostics/SnapshotDiagnosticsModel.swift": "068b95399909434b2438c7e5444be4cea73760dc1ed9ac68ad5ec3f67ed6082a",
+  "ios/AwesoMuxDiagnostics/SnapshotDiagnosticsView.swift": "f8f9cefd349bb687eca4309b9583c2fb32a4efe9f3775920169c386bc1b33215",
+  "ios/project.yml": "61bcad76a0dc93a9991ad0012d9557ebf95dfd25e6e3777740ef4d9b7ec5fff9",
+  "ios/script/diagnostics-manifest.py": "5eab1b4fec7ddb34c57bfaea00fd4fc6257d5081bc4a3eb6db9a6afd63139ff1",
+  "ios/script/generate-diagnostics.sh": "d3678ed786e66bbdcc4e120b9f5dddf2967e70d4ef1f670cfabc4d9a4541f311",
+  "spikes/snapshot-reconnect/capture.py": "6539a47e99fe381a51a43722105d9d5ff693e8e811a2134058273ac1f3f44b83",
+  "spikes/snapshot-reconnect/fixture_server.py": "d7ed1db1b91101914819327ce2f70061132cd273d6aa2c2e5ac0071d8423523f",
+  "spikes/snapshot-reconnect/test_fixture_server.py": "6becc61ff75fb02b28a9fe7b08974a72d8fc4c9f26a802b04e951bf4b341fab9",
+  "spikes/snapshot-reconnect/verify_endpoint.py": "8d103080bd591d56592fc895e832638ada0e9b9cceb3808ec64b3203ecbfdd77"
+}

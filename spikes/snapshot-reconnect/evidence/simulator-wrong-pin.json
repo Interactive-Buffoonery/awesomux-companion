@@ -1,0 +1,165 @@
+{
+  "applicationBuild" : "2",
+  "applicationVersion" : "0.2",
+  "automaticReplay" : {
+
+  },
+  "buildConfiguration" : "Debug",
+  "bundleIdentifier" : "com.interactivebuffoonery.awesomux.diagnostics",
+  "dependencyRevision" : "42bacd1339f323a693ddbca779295f4f77e5a697",
+  "deviceModel" : "iPhone",
+  "experimentalPrivateCAIOSurfaceLayer" : true,
+  "fixtureSHA256" : {
+
+  },
+  "generation" : "7C76CC13-B56F-454F-B58A-6BD0C4A8E0A9",
+  "manualAttestations" : {
+
+  },
+  "manualResults" : {
+    "generation" : "7C76CC13-B56F-454F-B58A-6BD0C4A8E0A9",
+    "physicalNetworkReconnect" : "unverified",
+    "rendering" : "unverified"
+  },
+  "phase" : "failed",
+  "recordedAt" : "2026-10-18T18:49:10Z",
+  "recoveryLog" : [
+    {
+      "event" : "disconnect",
+      "generation" : "A6FB6310-9EC8-4C0C-B8E9-9B451A2F7799",
+      "recordedAt" : "2026-10-18T18:48:00Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "028CC806-EAE2-4A0B-AF4D-D5BB63FF093E",
+      "recordedAt" : "2026-10-18T18:48:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "CF9B61A8-9DB3-42B7-A200-04B89B1F58DE",
+      "recordedAt" : "2026-10-18T18:48:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "AABCB665-2EDA-49D1-A10A-362ED517FCCC",
+      "recordedAt" : "2026-10-18T18:48:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "66846762-D92A-4B9A-8DD9-A32E20E959B1",
+      "recordedAt" : "2026-10-18T18:48:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "93FBEE0B-A2CA-4F5A-B08F-051F50CDE50B",
+      "recordedAt" : "2026-10-18T18:48:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "connect",
+      "generation" : "8516D57E-2E97-4124-8A98-1CE80417A1C7",
+      "recordedAt" : "2026-10-18T18:48:10Z"
+    },
+    {
+      "event" : "snapshotApplied",
+      "generation" : "8516D57E-2E97-4124-8A98-1CE80417A1C7",
+      "outcome" : "fresh model applied",
+      "recordedAt" : "2026-10-18T18:48:11Z",
+      "runID" : "a8675049-45e5-4651-85de-30922376b2a6",
+      "sequence" : "288"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "8516D57E-2E97-4124-8A98-1CE80417A1C7",
+      "recordedAt" : "2026-10-18T18:48:28Z",
+      "runID" : "a8675049-45e5-4651-85de-30922376b2a6",
+      "sequence" : "305"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "E15555C6-FD78-4E1E-880A-DCCD92386260",
+      "recordedAt" : "2026-10-18T18:48:42Z",
+      "runID" : "a8675049-45e5-4651-85de-30922376b2a6",
+      "sequence" : "305"
+    },
+    {
+      "event" : "connect",
+      "generation" : "9F5A8DB1-65EE-484E-B74A-87A5ABCCF83B",
+      "recordedAt" : "2026-10-18T18:48:42Z"
+    },
+    {
+      "event" : "snapshotApplied",
+      "generation" : "9F5A8DB1-65EE-484E-B74A-87A5ABCCF83B",
+      "outcome" : "fresh model applied",
+      "recordedAt" : "2026-10-18T18:48:42Z",
+      "runID" : "a8675049-45e5-4651-85de-30922376b2a6",
+      "sequence" : "320"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "9F5A8DB1-65EE-484E-B74A-87A5ABCCF83B",
+      "recordedAt" : "2026-10-18T18:49:09Z",
+      "runID" : "a8675049-45e5-4651-85de-30922376b2a6",
+      "sequence" : "344"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "B3049258-F54B-49E3-82BC-32F18B643EB1",
+      "recordedAt" : "2026-10-18T18:49:09Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "2E919B94-5986-422D-A51C-CABF46B1D64C",
+      "recordedAt" : "2026-10-18T18:49:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "connect",
+      "generation" : "7C76CC13-B56F-454F-B58A-6BD0C4A8E0A9",
+      "recordedAt" : "2026-10-18T18:49:10Z"
+    },
+    {
+      "event" : "failure",
+      "generation" : "7C76CC13-B56F-454F-B58A-6BD0C4A8E0A9",
+      "outcome" : "transport failed",
+      "recordedAt" : "2026-10-18T18:49:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    }
+  ],
+  "replayPrerequisite" : {
+    "fixtureSetSHA256" : "639604eb73bd499210d0dfe90be1f6a9b8e31aacd962bb3497dd528ad990d625",
+    "originatingReplayGeneration" : "028CC806-EAE2-4A0B-AF4D-D5BB63FF093E",
+    "sourceManifestSHA256" : "2bfa2c837558623203bffb8f1bdde1ae15bb250e77f0902ab0f188a4d4c3db49"
+  },
+  "reportedDimensions" : [
+
+  ],
+  "resultGeneration" : "7C76CC13-B56F-454F-B58A-6BD0C4A8E0A9",
+  "simulator" : true,
+  "sourceDimensions" : {
+    "columns" : 20,
+    "rows" : 6
+  },
+  "sourceManifestSHA256" : "2bfa2c837558623203bffb8f1bdde1ae15bb250e77f0902ab0f188a4d4c3db49",
+  "status" : "Fixture transport failed; verify endpoint and exact certificate pin",
+  "syntheticNetwork" : {
+
+  },
+  "systemName" : "iOS",
+  "systemVersion" : "26.5"
+}

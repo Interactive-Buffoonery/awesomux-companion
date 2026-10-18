@@ -116,3 +116,10 @@ TEST_NOTES="What changed in this build" ./script/testflight.sh
 ```
 
 The build number is the current UTC time, so it always increases. The script waits until App Store Connect finishes processing, then the build appears for the group's testers. Set `TESTFLIGHT_GROUP` to send it to a different internal group.
+
+## Snapshot diagnostic app
+
+The separate `AwesoMuxDiagnostics` scheme provides bundled renderer replay and
+an isolated synthetic Mac-to-phone reconnect fixture, without pairing. See the
+[build and usage guide](../spikes/snapshot-reconnect/ios-diagnostics.md) and
+[verification ledger](../spikes/snapshot-reconnect/verification.md).

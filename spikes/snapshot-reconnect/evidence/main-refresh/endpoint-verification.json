@@ -1,0 +1,11 @@
+{
+  "endpoint": "https://10.0.0.61:8769",
+  "authorizationRejection": "passed",
+  "snapshotThenContiguousEvents": "passed",
+  "generationRejection": "passed",
+  "futureSequenceRejection": "passed",
+  "freshReconnectSnapshot": "passed",
+  "snapshotSequence": 1643,
+  "resumedSequence": 1645,
+  "eventCount": 2
+}

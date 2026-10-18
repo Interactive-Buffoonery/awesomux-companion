@@ -1,0 +1,7 @@
+/bin/sh -c 'sleep 12
+0'; echo ZMX_TASK_CO
+MPLETED:b368:$?[2J[H[0mMidnight-Pro:t3-383f
+3760 sarah$ /bin/sh 
+-c 'sleep 120'; echo
+ ZMX_TASK_COMPLETED:
+b368:$?[6;20H[0m

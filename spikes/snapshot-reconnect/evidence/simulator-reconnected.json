@@ -1,0 +1,147 @@
+{
+  "applicationBuild" : "2",
+  "applicationVersion" : "0.2",
+  "automaticReplay" : {
+
+  },
+  "buildConfiguration" : "Debug",
+  "bundleIdentifier" : "com.interactivebuffoonery.awesomux.diagnostics",
+  "dependencyRevision" : "42bacd1339f323a693ddbca779295f4f77e5a697",
+  "deviceModel" : "iPhone",
+  "experimentalPrivateCAIOSurfaceLayer" : true,
+  "fixtureSHA256" : {
+
+  },
+  "generation" : "9F5A8DB1-65EE-484E-B74A-87A5ABCCF83B",
+  "manualAttestations" : {
+
+  },
+  "manualResults" : {
+    "generation" : "9F5A8DB1-65EE-484E-B74A-87A5ABCCF83B",
+    "physicalNetworkReconnect" : "unverified",
+    "rendering" : "unverified"
+  },
+  "phase" : "watching",
+  "recordedAt" : "2026-10-18T18:48:53Z",
+  "recoveryLog" : [
+    {
+      "event" : "disconnect",
+      "generation" : "A6FB6310-9EC8-4C0C-B8E9-9B451A2F7799",
+      "recordedAt" : "2026-10-18T18:48:00Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "028CC806-EAE2-4A0B-AF4D-D5BB63FF093E",
+      "recordedAt" : "2026-10-18T18:48:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "CF9B61A8-9DB3-42B7-A200-04B89B1F58DE",
+      "recordedAt" : "2026-10-18T18:48:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "AABCB665-2EDA-49D1-A10A-362ED517FCCC",
+      "recordedAt" : "2026-10-18T18:48:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "66846762-D92A-4B9A-8DD9-A32E20E959B1",
+      "recordedAt" : "2026-10-18T18:48:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "93FBEE0B-A2CA-4F5A-B08F-051F50CDE50B",
+      "recordedAt" : "2026-10-18T18:48:10Z",
+      "runID" : "none",
+      "sequence" : "none"
+    },
+    {
+      "event" : "connect",
+      "generation" : "8516D57E-2E97-4124-8A98-1CE80417A1C7",
+      "recordedAt" : "2026-10-18T18:48:10Z"
+    },
+    {
+      "event" : "snapshotApplied",
+      "generation" : "8516D57E-2E97-4124-8A98-1CE80417A1C7",
+      "outcome" : "fresh model applied",
+      "recordedAt" : "2026-10-18T18:48:11Z",
+      "runID" : "a8675049-45e5-4651-85de-30922376b2a6",
+      "sequence" : "288"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "8516D57E-2E97-4124-8A98-1CE80417A1C7",
+      "recordedAt" : "2026-10-18T18:48:28Z",
+      "runID" : "a8675049-45e5-4651-85de-30922376b2a6",
+      "sequence" : "305"
+    },
+    {
+      "event" : "disconnect",
+      "generation" : "E15555C6-FD78-4E1E-880A-DCCD92386260",
+      "recordedAt" : "2026-10-18T18:48:42Z",
+      "runID" : "a8675049-45e5-4651-85de-30922376b2a6",
+      "sequence" : "305"
+    },
+    {
+      "event" : "connect",
+      "generation" : "9F5A8DB1-65EE-484E-B74A-87A5ABCCF83B",
+      "recordedAt" : "2026-10-18T18:48:42Z"
+    },
+    {
+      "event" : "snapshotApplied",
+      "generation" : "9F5A8DB1-65EE-484E-B74A-87A5ABCCF83B",
+      "outcome" : "fresh model applied",
+      "recordedAt" : "2026-10-18T18:48:42Z",
+      "runID" : "a8675049-45e5-4651-85de-30922376b2a6",
+      "sequence" : "320"
+    }
+  ],
+  "replayPrerequisite" : {
+    "fixtureSetSHA256" : "639604eb73bd499210d0dfe90be1f6a9b8e31aacd962bb3497dd528ad990d625",
+    "originatingReplayGeneration" : "028CC806-EAE2-4A0B-AF4D-D5BB63FF093E",
+    "sourceManifestSHA256" : "2bfa2c837558623203bffb8f1bdde1ae15bb250e77f0902ab0f188a4d4c3db49"
+  },
+  "reportedDimensions" : [
+    {
+      "cellHeightPixels" : 0,
+      "cellWidthPixels" : 0,
+      "columns" : 20,
+      "heightPixels" : 443,
+      "requestedHeightPoints" : 152,
+      "requestedWidthPoints" : 216,
+      "rows" : 6,
+      "widthPixels" : 635
+    }
+  ],
+  "resultGeneration" : "9F5A8DB1-65EE-484E-B74A-87A5ABCCF83B",
+  "simulator" : true,
+  "sourceDimensions" : {
+    "columns" : 20,
+    "rows" : 6
+  },
+  "sourceManifestSHA256" : "2bfa2c837558623203bffb8f1bdde1ae15bb250e77f0902ab0f188a4d4c3db49",
+  "status" : "Watching synthetic fixture, sequence 331",
+  "syntheticNetwork" : {
+    "certificateSHA256" : "3b5c0c397d14bfdd6ff061c8361420722afcff65d1ff05655408081fbc962277",
+    "host" : "10.0.0.61",
+    "lastSequence" : "331",
+    "runID" : "a8675049-45e5-4651-85de-30922376b2a6",
+    "snapshotSequence" : "320",
+    "snapshotSHA256" : "03a93875177cfafde9d161877d2afc81dc2d9ef8963862abd94c7fbcbd281ac7",
+    "transport" : "HTTPS exact leaf pin; TLS >= 1.2",
+    "viewportText" : "WWWWWWWWWWWWWWW\nprogress DONE\nSEQ 000331\nWWWWWWWWWWWWWWWWWWWW\nWWWWWWWWWWWWWWW\nprogress DONE"
+  },
+  "systemName" : "iOS",
+  "systemVersion" : "26.5"
+}

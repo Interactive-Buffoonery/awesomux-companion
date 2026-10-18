@@ -1,0 +1,21 @@
+{
+  "binary": "/Users/sarah/Development/awesomux/vendor/zmx/zig-out/bin/zmx",
+  "sha256": "6b071e3df0cd23f5cd2886f40a27f541c329d7eba9f825dfcdb24cb8d11d5992",
+  "version": "zmx\t\t0.8.1\nghostty_vt\tghostty-1.3.2-dev-5UdBC4FtYAV-PdFOt-gceWieTHLri0H4ztHtd6Tr4dGj\nsocket_dir\t/tmp/zmx17-hx2bwb6i\nlog_dir\t\t/tmp/zmx17-hx2bwb6i/logs",
+  "requestedSize": {
+    "rows": 6,
+    "cols": 20
+  },
+  "size": {
+    "rows": 6,
+    "cols": 20
+  },
+  "sizeReadback": "CUP999;999 clamp serialized as CUP6;20 before fixture reset",
+  "live_equals_input": true,
+  "reattach_bytes": 189,
+  "reattach_osc133": 0,
+  "away_survives": true,
+  "final_survives": true,
+  "overwritten_progress_absent": true,
+  "final_progress_survives": true
+}

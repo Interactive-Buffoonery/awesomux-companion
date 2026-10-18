@@ -1,0 +1,17 @@
+{
+  "baseCommit": "52d483260847fc1863601412d1965308530b9d2f",
+  "sourceCommit": "df50d91e3971e27e2f016fbd4e10204c25166d1f",
+  "note": "Only documentation, evidence and informational manifest changed after this source commit.",
+  "artifacts": {
+    "Simulator": {
+      "binarySHA256": "d4358e41ac369b1999db84958e8f328ae34e4a546ace2f7aceaf9063aec35306",
+      "sourceManifestSHA256": "5c2fc01cf0b3670d532addf092a5e9bf27d1919afb06f2b851f3a0dc8419afc0",
+      "bundleID": "com.interactivebuffoonery.awesomux.diagnostics"
+    },
+    "Device": {
+      "binarySHA256": "1f03b455b13fea48c829654b96b4ea4adb62b945c2951875670d8a2d6ab0fd5b",
+      "sourceManifestSHA256": "5c2fc01cf0b3670d532addf092a5e9bf27d1919afb06f2b851f3a0dc8419afc0",
+      "bundleID": "com.interactivebuffoonery.awesomux.diagnostics"
+    }
+  }
+}

@@ -76,6 +76,13 @@ passed: `[+] no GPL license text; shell-integration holds only the MIT files`.
 That source check does not audit the native archive. A complete native
 dependency/embedded resource notice inventory remains a release gate.
 
+The [native license audit](ios-terminal-native-license-audit.md) records the
+Release artifact inventory and supporting notices. It confirms retained
+Oniguruma, Highway, simdutf and Wuffs code missing from the current app notices.
+Exact-source provenance, embedded font identity and some dependency retention
+remain unresolved; the audit does not clear this release gate. Its supporting
+notice files are evidence candidates, not a completed distribution notice set.
+
 ## Evidence handling and review
 
 The app writes `latest-evidence.json` in its application-support directory.

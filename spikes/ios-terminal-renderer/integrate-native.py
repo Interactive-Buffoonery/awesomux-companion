@@ -13,6 +13,9 @@ import sys
 import tarfile
 
 root = Path(__file__).resolve().parent
+sys.path.insert(0, str(root / "native"))
+from framework_identity import framework_hashes
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("artifact", type=Path)
 parser.add_argument("package_source", type=Path)
@@ -29,6 +32,10 @@ receipt_path = artifact.parent / "build-receipt.json"
 if not receipt_path.is_file():
     raise SystemExit("Native artifact is missing its build-receipt.json; rebuild it first")
 provenance = json.loads(receipt_path.read_text())
+if provenance.get("schemaVersion") != 2:
+    raise SystemExit("Native schema 2 receipt required; rebuild from source without upgrading old receipts")
+if not provenance.get("frameworkHashes") or framework_hashes(artifact) != provenance["frameworkHashes"]:
+    raise SystemExit("Complete XCFramework file set or hashes do not match their build receipt")
 patch_hash = hashlib.sha256((root / "native/0022-ios-public-metal-layer.patch").read_bytes()).hexdigest()
 if provenance["packageRevision"] != revision or provenance["ghosttyRevision"] != "1e9e14af5df14211892f5fc15fd21a49c7d94868":
     raise SystemExit("Native build revisions do not match the pinned inputs")
@@ -41,9 +48,9 @@ archive_hashes = {
 if len(archive_hashes) != 2 or provenance["archiveHashes"] != archive_hashes:
     raise SystemExit("Native archive hashes do not match their build receipt")
 snapshot = json.loads((artifact.parent / "build-inputs.json").read_text())
-if snapshot != {k: v for k, v in provenance.items() if k != "archiveHashes"}:
+if snapshot != {k: v for k, v in provenance.items() if k not in {"archiveHashes", "frameworkHashes"}}:
     raise SystemExit("Native receipt does not match its pre-build input snapshot")
-if provenance["schemaVersion"] != 1 or not provenance["sourceHashes"]:
+if not provenance["sourceHashes"]:
     raise SystemExit("Unsupported or empty native build receipt")
 recipe = provenance["recipe"]
 recipe_path = root / "native" / Path(recipe["path"]).name
@@ -52,6 +59,7 @@ if recipe_path.name not in {"build.sh", "rebuild-reviewed.sh"}:
 for path, expected in [
     (recipe_path, recipe["sha256"]),
     (root / "native/build-receipt.py", recipe["receiptScriptSHA256"]),
+    (root / "native/framework_identity.py", recipe["frameworkIdentityScriptSHA256"]),
     (package_source / "Script/build-ghostty.sh", recipe["driverSHA256"]),
     (Path(provenance["compiler"]["path"]), provenance["compiler"]["sha256"]),
 ]:
@@ -105,10 +113,8 @@ for relative, target in expected_symlinks.items():
     staged = destination / relative
     if not staged.is_symlink() or str(staged.readlink()) != target:
         raise SystemExit(f"Local package symlink differs from pinned wrapper: {relative}")
-for relative, original in framework_files.items():
-    staged = destination / "GhosttyKit.xcframework" / relative
-    if not staged.is_file() or hashlib.sha256(staged.read_bytes()).digest() != hashlib.sha256(original.read_bytes()).digest():
-        raise SystemExit(f"Local framework differs from native build: {relative}")
+if framework_hashes(destination / "GhosttyKit.xcframework") != provenance["frameworkHashes"]:
+    raise SystemExit("Local XCFramework file set or hashes differ from native build receipt")
 expected_paths = set(expected_files) | set(expected_symlinks) | {"GhosttyKit.xcframework/" + p for p in framework_files}
 actual_paths = {str(p.relative_to(destination)) for p in destination.rglob("*")
                 if (p.is_file() or p.is_symlink()) and p.relative_to(destination).parts[0] != ".build"}

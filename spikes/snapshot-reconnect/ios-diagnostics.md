@@ -63,8 +63,9 @@ network snapshots reset marks to unverified.
 The diagnostic target runs `script/diagnostics-manifest.py` before every build.
 It revalidates the native integration before writing the manifest and
 `native-build.json` directly into the app bundle. The unchanged native provenance
-includes archive hashes, exact source hashes, compiler identity, build recipe,
-driver, ordered patches and target configuration. The manifest hashes this receipt,
+requires schema 2 and includes archive hashes, the complete XCFramework file
+set and hashes (including headers and Info.plist), exact source hashes, compiler
+identity, build recipe, driver, ordered patches and target configuration. The manifest hashes this receipt,
 Swift sources, fixtures, Info.plists, both project specs, integration/generation/
 validation scripts, native build scripts/patch, notices and local Package.resolved.
 `ThirdPartyNotices` is bundled only in the diagnostic app. Exported JSON identifies
@@ -88,7 +89,11 @@ Simulators only, matching the two source-built native slices. Its target-level
 `ARCHS` setting also applies to Release builds; Intel Simulators are unsupported.
 First build the exact native pipeline using
 [the native build instructions](../ios-terminal-renderer/native/README.md), or
-reuse a verified artifact with its original receipt and inputs. Integrate it once
+use a freshly source-built schema 2 artifact with its original receipt and inputs.
+Legacy schema 1 artifacts are historical only and are rejected; do not add hashes
+to an older receipt. Integration checks the complete framework file set before
+staging it and again before each app build; added/deleted/changed headers or
+metadata and framework symlinks fail closed. Integrate the fresh artifact once
 into an ignored local package; no build products belong in Git. From the repository root:
 
 ```sh

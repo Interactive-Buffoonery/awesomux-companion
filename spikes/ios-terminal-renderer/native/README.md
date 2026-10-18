@@ -53,15 +53,22 @@ current target. No synchronous dispatch or renderer pointer capture is used.
 Both build entrypoints call `build-receipt.py begin` before compilation and
 `finish` after packaging and binary verification. Finish rejects changed inputs
 and refuses to overwrite a receipt. `build-inputs.json` contains the pre-build
-snapshot; `build-receipt.json` additionally binds the two packaged archive hashes.
+snapshot; schema 2 `build-receipt.json` additionally binds the two packaged archive
+hashes and the complete XCFramework regular-file set in `frameworkHashes`,
+including Info.plist, headers and any other packaged metadata. Added, removed or
+changed files fail integration, as do symlinks or non-regular file entries.
+The identity helper's hash is itself recorded among the recipe inputs.
 The receipt includes packageRevision, ghosttyRevision, patchSHA256, sourceHashes,
 sourceDirectory, exact Zig version/executable hash, Apple compiler identity,
 recipe/driver hashes, target configuration and ordered patch hashes. Source keys
 are relative to sourceDirectory; archiveHashes keys are relative to the adjacent
 GhosttyKit.xcframework. The receipt is build association evidence, not a signature.
 
-Integration must require this artifact-local receipt, compare archiveHashes with
-the actual archives and patchSHA256 with the current overlay, and propagate the
-receipt unchanged. Never attach the latest overlay hash to an older binary.
-The individual incremental pipeline executes the same before/after receipt
-steps; no receipt is retroactively added to older artifacts.
+Current integration requires a fresh schema 2 artifact-local receipt, compares
+both archiveHashes and the complete frameworkHashes set, verifies patchSHA256
+against the current overlay, and propagates provenance unchanged. Schema 1
+receipts are historical evidence only and are rejected for current acceptance.
+Run `build.sh` from source to produce a new schema 2 pre-build snapshot and
+finished receipt; never augment an old receipt or attach the latest overlay hash
+to an older binary. Both build entrypoints use the same begin/finish interface;
+no receipt is retroactively added to older artifacts.

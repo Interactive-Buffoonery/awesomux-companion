@@ -27,7 +27,8 @@ class NativeIntegrationTests(unittest.TestCase):
         self.artifact = self.root / 'artifact/GhosttyKit.xcframework'
         self.package = self.root / 'package'
         self.output = self.root / 'integration'
-        for relative in ['Info.plist', 'ios-arm64/libghostty.a', 'ios-arm64-simulator/libghostty.a']:
+        for relative in ['Info.plist', 'ios-arm64/libghostty.a', 'ios-arm64-simulator/libghostty.a',
+                         'ios-arm64/Headers/ghostty.h', 'ios-arm64-simulator/Headers/ghostty.h']:
             path = self.artifact / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b'CAMetalLayer presentDrawable:')
@@ -42,7 +43,7 @@ class NativeIntegrationTests(unittest.TestCase):
         compiler = self.root / 'zig'
         compiler.write_text('compiler')
         self.provenance = {
-            'schemaVersion': 1,
+            'schemaVersion': 2,
             'packageRevision': '42bacd1339f323a693ddbca779295f4f77e5a697',
             'ghosttyRevision': '1e9e14af5df14211892f5fc15fd21a49c7d94868',
             'patchSHA256': digest(overlay),
@@ -51,12 +52,16 @@ class NativeIntegrationTests(unittest.TestCase):
             'recipe': {
                 'path': str(SPIKE / 'native/build.sh'), 'sha256': digest(SPIKE / 'native/build.sh'),
                 'receiptScriptSHA256': digest(SPIKE / 'native/build-receipt.py'),
+                'frameworkIdentityScriptSHA256': digest(SPIKE / 'native/framework_identity.py'),
                 'driverSHA256': digest(driver),
                 'orderedPatchHashes': {str(overlay.relative_to(self.package)): digest(overlay)},
                 'targets': ['aarch64-ios', 'aarch64-ios-simulator'], 'simulatorCPU': 'apple_a17',
             },
             'archiveHashes': {str(p.relative_to(self.artifact)): digest(p)
                               for p in self.artifact.glob('*/libghostty.a')},
+        }
+        self.provenance['frameworkHashes'] = {
+            str(p.relative_to(self.artifact)): digest(p) for p in self.artifact.rglob('*') if p.is_file()
         }
         self.write_receipt()
         archive = io.BytesIO()
@@ -78,7 +83,7 @@ class NativeIntegrationTests(unittest.TestCase):
     def write_receipt(self):
         (self.artifact.parent / 'build-receipt.json').write_text(json.dumps(self.provenance))
         (self.artifact.parent / 'build-inputs.json').write_text(json.dumps({
-            k: v for k, v in self.provenance.items() if k != 'archiveHashes'}))
+            k: v for k, v in self.provenance.items() if k not in {'archiveHashes', 'frameworkHashes'}}))
 
     def integrate(self, validate=False):
         args = ['integrate-native.py', str(self.artifact), str(self.package),
@@ -134,6 +139,51 @@ class NativeIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, 'Unexpected files'):
             self.integrate(validate=True)
 
+    def test_reject_original_framework_mutation_before_initial_integration(self):
+        for relative in ['Info.plist', 'ios-arm64/Headers/ghostty.h']:
+            with self.subTest(relative=relative):
+                path = self.artifact / relative
+                original = path.read_bytes()
+                path.write_bytes(b'tampered before integration')
+                with self.assertRaisesRegex(SystemExit, 'XCFramework file set or hashes'):
+                    self.integrate()
+                path.write_bytes(original)
+                path.rename(self.root / 'saved-file')
+                with self.assertRaises(SystemExit):
+                    self.integrate()
+                (self.root / 'saved-file').rename(path)
+        self.assertFalse(self.output.exists())
+
+    def test_reject_added_header_or_metadata_before_initial_integration(self):
+        for relative in ['ios-arm64/Headers/injected.h', 'extra-metadata.plist']:
+            with self.subTest(relative=relative):
+                path = self.artifact / relative
+                path.write_text('injected')
+                with self.assertRaisesRegex(SystemExit, 'XCFramework file set or hashes'):
+                    self.integrate()
+                path.rename(self.root / Path(relative).name)
+        self.assertFalse(self.output.exists())
+
+    def test_reject_framework_symlink_substitution(self):
+        header = self.artifact / 'ios-arm64/Headers/ghostty.h'
+        header.rename(self.root / 'saved-header')
+        header.symlink_to(self.root / 'saved-header')
+        with self.assertRaisesRegex(SystemExit, 'symlinks are unsupported'):
+            self.integrate()
+
+    def test_reject_added_header_in_staged_framework(self):
+        package = self.integrate()
+        (package / 'GhosttyKit.xcframework/ios-arm64/Headers/injected.h').write_text('injected')
+        with self.assertRaisesRegex(SystemExit, 'Local XCFramework file set or hashes'):
+            self.integrate(validate=True)
+
+    def test_reject_legacy_receipt(self):
+        self.provenance['schemaVersion'] = 1
+        self.provenance.pop('frameworkHashes')
+        self.write_receipt()
+        with self.assertRaisesRegex(SystemExit, 'schema 2 receipt required'):
+            self.integrate()
+
     def test_reject_missing_receipt(self):
         (self.artifact.parent / 'build-receipt.json').rename(self.root / 'saved-receipt.json')
         with self.assertRaisesRegex(SystemExit, 'missing its build-receipt'):
@@ -146,12 +196,12 @@ class NativeIntegrationTests(unittest.TestCase):
 
     def test_reject_archive_mismatch(self):
         (self.artifact / 'ios-arm64/libghostty.a').write_bytes(b'changed')
-        with self.assertRaisesRegex(SystemExit, 'archive hashes'):
+        with self.assertRaisesRegex(SystemExit, 'XCFramework file set or hashes'):
             self.integrate()
 
     def test_reject_wrong_pin_patch_recipe_and_snapshot(self):
         for key, value in [('packageRevision', 'wrong'), ('patchSHA256', 'wrong'),
-                           ('schemaVersion', 2)]:
+                           ('schemaVersion', 1)]:
             with self.subTest(key=key):
                 original = self.provenance[key]
                 self.provenance[key] = value
@@ -171,6 +221,7 @@ class NativeIntegrationTests(unittest.TestCase):
         archive = self.artifact / 'ios-arm64/libghostty.a'
         archive.write_bytes(b'CAIOSurfaceLayer')
         self.provenance['archiveHashes']['ios-arm64/libghostty.a'] = digest(archive)
+        self.provenance['frameworkHashes']['ios-arm64/libghostty.a'] = digest(archive)
         self.write_receipt()
         with self.assertRaisesRegex(SystemExit, 'Private presentation class'):
             self.integrate()

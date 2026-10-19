@@ -89,7 +89,7 @@ struct MacClient: Sendable {
         let request = CompanionAPIRequest(operation: operation, connectionID: connectionID, limit: limit, cursor: cursor)
         let connection = try await FramedConnection.open(client: self)
         defer { connection.cancel() }
-        try await connection.send(JSONEncoder().encode(request))
+        try await connection.send(CompanionProtocol.encoder().encode(request))
         let data = try await withTimeout(Self.requestTimeout) {
             try await connection.receiveFrame(maximum: Self.maximumResponseBytes)
         }

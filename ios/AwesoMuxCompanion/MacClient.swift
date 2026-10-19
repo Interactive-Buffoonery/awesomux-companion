@@ -22,6 +22,16 @@ struct MacClient: Sendable {
     static let maximumResponseBytes = CompanionProtocol.maximumResponseBytes
     private static let requestTimeout: Duration = .seconds(8)
 
+    static func frameRequest(_ payload: Data) throws -> Data {
+        do {
+            return try CompanionFrame.encode(payload, maximum: CompanionProtocol.maximumRequestBytes)
+        } catch CompanionFrame.Failure.tooLarge {
+            throw MacClientFailure.oversizedResponse
+        } catch {
+            throw MacClientFailure.invalidResponse
+        }
+    }
+
     // MARK: Pairing
 
     typealias PairReply = CompanionPairingReply
@@ -173,7 +183,7 @@ private final class FramedConnection: @unchecked Sendable {
     func cancel() { connection.cancel() }
 
     func send(_ payload: Data) async throws {
-        let frame = try CompanionFrame.encode(payload, maximum: CompanionProtocol.maximumRequestBytes)
+        let frame = try MacClient.frameRequest(payload)
         let connection = connection
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in

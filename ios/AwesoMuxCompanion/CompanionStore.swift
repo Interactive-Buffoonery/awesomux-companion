@@ -341,7 +341,7 @@ final class CompanionStore {
              MacClientFailure.api("credential_unavailable"), MacClientFailure.api("access_disabled"),
              is PhoneIdentity.Failure:
             String(localized: "\(macName) no longer recognizes this iPhone. Pair again in Settings.")
-        case MacClientFailure.invalidResponse, MacClientFailure.oversizedResponse:
+        case MacClientFailure.invalidResponse, MacClientFailure.oversizedFrame:
             String(localized: "\(macName) sent an update this app can't read.")
         case MacClientFailure.api(let code):
             String(localized: "awesoMux isn't answering on \(macName) (\(code)).")

@@ -6,7 +6,7 @@ import os
 import Security
 
 enum MacClientFailure: Error, Equatable {
-    case unreachable, handshakeRejected, closed, invalidResponse, oversizedResponse, denied
+    case unreachable, handshakeRejected, closed, invalidResponse, oversizedFrame, denied
     case api(String)
 }
 
@@ -26,7 +26,7 @@ struct MacClient: Sendable {
         do {
             return try CompanionFrame.encode(payload, maximum: CompanionProtocol.maximumRequestBytes)
         } catch CompanionFrame.Failure.tooLarge {
-            throw MacClientFailure.oversizedResponse
+            throw MacClientFailure.oversizedFrame
         } catch {
             throw MacClientFailure.invalidResponse
         }
@@ -200,7 +200,7 @@ private final class FramedConnection: @unchecked Sendable {
         do {
             length = try CompanionFrame.payloadLength(header, maximum: maximum)
         } catch CompanionFrame.Failure.tooLarge {
-            throw MacClientFailure.oversizedResponse
+            throw MacClientFailure.oversizedFrame
         } catch {
             throw MacClientFailure.invalidResponse
         }

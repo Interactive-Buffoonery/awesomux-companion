@@ -10,7 +10,7 @@ final class MacClientTests: XCTestCase {
 
     func testOversizedRequestUsesClientFailure() {
         XCTAssertThrowsError(try MacClient.frameRequest(Data(repeating: 0, count: 8193))) { error in
-            XCTAssertEqual(error as? MacClientFailure, .oversizedResponse)
+            XCTAssertEqual(error as? MacClientFailure, .oversizedFrame)
         }
     }
 

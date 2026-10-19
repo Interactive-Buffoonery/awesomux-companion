@@ -12,7 +12,7 @@ contract lives in the awesoMux repository at
 `docs/companion-pairing-protocol.md`.
 
 The root `AwesoMuxCompanionProtocol` Swift package holds v1 wire types, framing,
-pairing links, and confirmation words (Swift 6, iOS 18, macOS 15). Run `swift test`
+pairing links, and confirmation words (Swift 6, iOS 26, macOS 15). Run `swift test`
 at the root. Contract fixtures follow the Mac protocol document; unknown response
 strings, optional phone metadata, fractional ISO dates, and UUID case remain
 compatible. TLS, credentials, authorization, and display policy stay in the apps.

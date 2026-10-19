@@ -4,7 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "AwesoMuxCompanionProtocol",
-    platforms: [.iOS(.v18), .macOS(.v15)],
+    platforms: [.iOS("26.0"), .macOS(.v15)],
     products: [.library(name: "AwesoMuxCompanionProtocol", targets: ["AwesoMuxCompanionProtocol"])],
     targets: [
         .target(name: "AwesoMuxCompanionProtocol"),

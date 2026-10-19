@@ -11,7 +11,7 @@ struct AgentsView: View {
                         Section {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(record.macName).font(.subheadline.weight(.semibold)).foregroundStyle(Cat.text)
-                                MacStatusLine(store: store, transport: record.transport)
+                                MacStatusLine(store: store)
                                 if let snapshotStatus {
                                     Text(snapshotStatus).font(.footnote).foregroundStyle(Cat.subtext0)
                                 }

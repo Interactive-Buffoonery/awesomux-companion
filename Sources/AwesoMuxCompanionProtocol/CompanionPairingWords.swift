@@ -262,6 +262,7 @@ public enum CompanionPairingWords {
     ]
 
     public static func words(macSPKI: Data, phoneSPKI: Data) -> [String] {
-        SHA256.hash(data: macSPKI + phoneSPKI).prefix(3).map { list[Int($0)] }
+        precondition(list.count == 256, "Each hash byte must index a word")
+        return SHA256.hash(data: macSPKI + phoneSPKI).prefix(3).map { list[Int($0)] }
     }
 }

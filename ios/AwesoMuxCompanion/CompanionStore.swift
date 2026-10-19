@@ -1,3 +1,4 @@
+import AwesoMuxCompanionProtocol
 import Foundation
 import Observation
 import UIKit
@@ -340,7 +341,7 @@ final class CompanionStore {
              MacClientFailure.api("credential_unavailable"), MacClientFailure.api("access_disabled"),
              is PhoneIdentity.Failure:
             String(localized: "\(macName) no longer recognizes this iPhone. Pair again in Settings.")
-        case MacClientFailure.invalidResponse, MacClientFailure.oversizedResponse:
+        case MacClientFailure.invalidResponse, MacClientFailure.oversizedFrame:
             String(localized: "\(macName) sent an update this app can't read.")
         case MacClientFailure.api(let code):
             String(localized: "awesoMux isn't answering on \(macName) (\(code)).")
@@ -361,7 +362,7 @@ struct AttentionTracker: Codable {
     var readingInitialHistory = true
 
     static func load() -> AttentionTracker {
-        UserDefaults.standard.data(forKey: key).flatMap { try? APIResponse.decoder.decode(Self.self, from: $0) } ?? Self()
+        UserDefaults.standard.data(forKey: key).flatMap { try? CompanionProtocol.decoder().decode(Self.self, from: $0) } ?? Self()
     }
 
     func save() {

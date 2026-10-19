@@ -1,0 +1,20 @@
+{
+  "events": [
+    {
+      "id": "01234567-89ab-cdef-0123-456789abcdef",
+      "attentionID": "01234567-89ab-cdef-0123-456789abcdef",
+      "change": "raised",
+      "paneID": "01234567-89ab-cdef-0123-456789abcdef",
+      "workspaceID": "01234567-89ab-cdef-0123-456789abcdef",
+      "provider": "Codex",
+      "providerSessionID": "provider-defined-session-id",
+      "targetVersion": "01234567-89ab-cdef-0123-456789abcdef",
+      "occurredAt": "2026-10-17T18:19:58Z",
+      "reason": "userInputRequired"
+    }
+  ],
+  "nextCursor": "<opaque string>",
+  "cursorStatus": "initial",
+  "hasMore": false,
+  "currentStateRecoveryRequired": false
+}

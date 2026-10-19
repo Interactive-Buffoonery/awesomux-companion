@@ -1,3 +1,4 @@
+import AwesoMuxCompanionProtocol
 import XCTest
 @testable import AwesoMuxCompanion
 

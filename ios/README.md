@@ -5,7 +5,7 @@ OpenCode, Pi, Grok) need you, are working, or are done, in four places: the app,
 a Home Screen and Lock Screen widget, a Live Activity (Lock Screen and Dynamic
 Island), and notifications. You answer agents at your Mac; the phone only looks.
 
-SwiftUI, Swift 6, iOS 18+, iPhone and iPad. The phone pairs with awesoMux on
+SwiftUI, Swift 6, iOS 26+, iPhone and iPad. The phone pairs with awesoMux on
 the Mac and reads `list_agents` and `get_attention_events` over mutual TLS, as
 described in the awesoMux repository's `docs/companion-pairing-protocol.md`.
 
@@ -16,6 +16,7 @@ described in the awesoMux repository's `docs/companion-pairing-protocol.md`.
 | `AwesoMuxCompanion/` | App target: pairing flow, phone identity, mutual TLS client, polling store, agent list, Live Activity lifecycle, notification handling |
 | `AwesoMuxCompanionWidgets/` | Widget extension: the `Agents` widget (small, medium, accessory rectangular and circular) and the Live Activity UI |
 | `Shared/` | Compiled into both targets: snapshot model and decoder, App Group storage, `GlanceActivityAttributes`, shared views |
+| `../Sources/AwesoMuxCompanionProtocol/` | Local Swift package used by the app for wire types, framing, links, and confirmation words |
 
 The app writes each snapshot to the App Group
 `group.com.interactivebuffoonery.awesomux.companion` and reloads widget timelines

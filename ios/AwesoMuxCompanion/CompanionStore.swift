@@ -371,7 +371,7 @@ final class CompanionStore {
         else { return }
         next.routes = routes
         try? PairingStore.save(next)
-        record = next
+        self.record = next
     }
 
     private func client(for route: CompanionRoute, record: PairingRecord) throws -> any CompanionSessionClient {

@@ -1,5 +1,6 @@
 import AwesoMuxCompanionProtocol
 import Foundation
+import Network
 import Observation
 import UIKit
 import UserNotifications
@@ -49,8 +50,9 @@ final class CompanionStore {
     }
 
     @ObservationIgnored private var clients: [String: any CompanionSessionClient] = [:]
-    /// While on Tailscale, LAN is tried again after this, so a LAN that stays down doesn't slow every read.
-    @ObservationIgnored private var lanRetryAfter = Date.distantPast
+    /// Set when LAN fails; reads stay on Tailscale until the network changes or the app returns to the foreground.
+    @ObservationIgnored private var lanFailed = false
+    @ObservationIgnored private let pathMonitor = NWPathMonitor()
     @ObservationIgnored private var routesCheckedAt = Date.distantPast
     /// Bumped whenever the pairing changes so reads that straddle the change are dropped.
     @ObservationIgnored private var revision = 0
@@ -110,6 +112,10 @@ final class CompanionStore {
         } catch {
             message = String(localized: "This iPhone's pairing couldn't be read. Pair again to continue.")
         }
+        pathMonitor.pathUpdateHandler = { [weak self] _ in
+            Task { @MainActor in self?.lanFailed = false }
+        }
+        pathMonitor.start(queue: .main)
     }
 
     // MARK: Pairing
@@ -232,7 +238,7 @@ final class CompanionStore {
         refreshTask?.cancel(); refreshTask = nil
         cache.clear()
         clients = [:]; activeRoute = nil; snapshot = nil; reachable = false; isSnapshotCached = false
-        lanRetryAfter = .distantPast; routesCheckedAt = .distantPast
+        lanFailed = false; routesCheckedAt = .distantPast
         tracker = AttentionTracker()
         pendingAlerts = []
         clearShared()
@@ -242,7 +248,7 @@ final class CompanionStore {
     // MARK: Reading
 
     func poll() async {
-        lanRetryAfter = .distantPast
+        lanFailed = false
         while !Task.isCancelled {
             await refresh()
             do { try await Task.sleep(for: .seconds(5)) } catch { return }
@@ -349,13 +355,12 @@ final class CompanionStore {
 
     // MARK: Routes
 
-    private static let lanRetryCooldown: TimeInterval = 60
     private static let routesCheckInterval: TimeInterval = 60
 
-    /// LAN first, unless Tailscale is in use and LAN failed within the cooldown.
+    /// LAN first, unless Tailscale is in use and LAN has failed on this network.
     private func orderedRoutes(_ record: PairingRecord) -> [CompanionRoute] {
         let routes = record.allRoutes
-        guard activeRoute?.transport == .tailscale, Date.now < lanRetryAfter else { return routes }
+        guard activeRoute?.transport == .tailscale, lanFailed else { return routes }
         return routes.filter { $0.transport == .tailscale } + routes.filter { $0.transport != .tailscale }
     }
 
@@ -388,7 +393,7 @@ final class CompanionStore {
                 return try (await work(route), route)
             } catch let failure as MacClientFailure where [.unreachable, .closed, .handshakeRejected].contains(failure) {
                 try Task.checkCancellation()
-                if route.transport == .lan { lanRetryAfter = .now + Self.lanRetryCooldown }
+                if route.transport == .lan { lanFailed = true }
                 failures.append(failure)
             }
         }

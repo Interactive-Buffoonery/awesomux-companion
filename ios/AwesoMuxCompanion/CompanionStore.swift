@@ -50,7 +50,7 @@ final class CompanionStore {
     }
 
     @ObservationIgnored private var clients: [String: any CompanionSessionClient] = [:]
-    /// Set when LAN fails; reads stay on Tailscale until the network changes or the app returns to the foreground.
+    /// Set when a read falls through to Tailscale; reads stay on Tailscale until the network changes or the app returns to the foreground.
     @ObservationIgnored private var lanFailed = false
     @ObservationIgnored private let pathMonitor = NWPathMonitor()
     @ObservationIgnored private var routesCheckedAt = Date.distantPast
@@ -300,6 +300,7 @@ final class CompanionStore {
             }
             guard revision == started else { throw CancellationError() }
             activeRoute = route
+            if route.transport == .tailscale { lanFailed = true }
             return response
         }
         if record.routes != nil, Date.now.timeIntervalSince(routesCheckedAt) > Self.routesCheckInterval {
@@ -357,10 +358,10 @@ final class CompanionStore {
 
     private static let routesCheckInterval: TimeInterval = 60
 
-    /// LAN first, unless Tailscale is in use and LAN has failed on this network.
+    /// LAN first, unless a read has already fallen through to Tailscale on this network.
     private func orderedRoutes(_ record: PairingRecord) -> [CompanionRoute] {
         let routes = record.allRoutes
-        guard activeRoute?.transport == .tailscale, lanFailed else { return routes }
+        guard lanFailed else { return routes }
         return routes.filter { $0.transport == .tailscale } + routes.filter { $0.transport != .tailscale }
     }
 
@@ -393,7 +394,6 @@ final class CompanionStore {
                 return try (await work(route), route)
             } catch let failure as MacClientFailure where [.unreachable, .closed, .handshakeRejected].contains(failure) {
                 try Task.checkCancellation()
-                if route.transport == .lan { lanFailed = true }
                 failures.append(failure)
             }
         }

@@ -92,6 +92,7 @@ private struct ScenePrivacyBridge: UIViewRepresentable {
         // the scene window, including while a navigation sheet is presented.
         _ = model.isLocked
         _ = model.isActive
+        _ = model.authenticationFailureMessage
         view.protectsContent = protectsContent
         view.updateCover()
     }
@@ -111,6 +112,7 @@ final class ScenePrivacyAnchor: UIView {
     private weak var observedScene: UIWindowScene?
     private weak var previousKeyWindow: UIWindow?
     private var blockedWindows: [BlockedWindow] = []
+    private var announcedFailure: String?
     private var preferencesObserver: NSObjectProtocol?
 
     private struct BlockedWindow {
@@ -156,6 +158,14 @@ final class ScenePrivacyAnchor: UIView {
 
     func updateCover() {
         guard let scene = observedScene else { return }
+        if model.isActive, let message = model.authenticationFailureMessage {
+            if announcedFailure != message {
+                UIAccessibility.post(notification: .announcement, argument: message)
+                announcedFailure = message
+            }
+        } else if model.authenticationFailureMessage == nil {
+            announcedFailure = nil
+        }
         let needsCover = !model.isActive || (protectsContent && model.isLocked)
         guard needsCover else {
             restoreWindows()

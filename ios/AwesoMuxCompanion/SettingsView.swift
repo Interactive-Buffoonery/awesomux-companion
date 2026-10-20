@@ -51,6 +51,9 @@ struct SettingsView: View {
             .listRowBackground(Cat.card)
             Section {
                 TerminalProtectionToggle(model: terminalLock).foregroundStyle(Cat.text)
+                if let message = terminalLock.authenticationFailureMessage {
+                    Text(message).font(.callout).foregroundStyle(Cat.subtext0)
+                }
             } header: { Text("Privacy").foregroundStyle(Cat.subtext0) }
             .listRowBackground(Cat.card)
             Section {

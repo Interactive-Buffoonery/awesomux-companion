@@ -37,6 +37,18 @@ final class PairingRouteTests: XCTestCase {
         XCTAssertNil(CompanionRoute.routes(CompanionRoutes(p: 1, lan: nil, tailscale: nil)))
     }
 
+    func testReportedRoutesKeepOmittedKinds() {
+        let lan = CompanionRoute(transport: .lan, host: "192.168.1.20")
+        let tailscale = CompanionRoute(transport: .tailscale, host: "100.100.20.30")
+        let movedLAN = CompanionRoute(transport: .lan, host: "10.0.0.2")
+        let movedTailscale = CompanionRoute(transport: .tailscale, host: "100.100.20.31")
+        // A reply sent while Tailscale is still coming up must not strand the phone away from home.
+        XCTAssertEqual(CompanionRoute.merged([movedLAN], keeping: [lan, tailscale]), [movedLAN, tailscale])
+        XCTAssertEqual(CompanionRoute.merged([movedTailscale], keeping: [lan, tailscale]), [lan, movedTailscale])
+        XCTAssertEqual(CompanionRoute.merged([movedTailscale, movedLAN], keeping: [lan]), [movedLAN, movedTailscale])
+        XCTAssertEqual(CompanionRoute.merged([movedLAN], keeping: [movedLAN]), [movedLAN])
+    }
+
     func testV1RecordStillDecodes() throws {
         let json = #"{"macName":"Mac","host":"192.168.1.20","port":43123,"macFingerprint":"x","transport":"lan","connectionID":"01234567-89AB-CDEF-0123-456789ABCDEF","identityTag":"t","identityStorage":"secureEnclave","pairedAt":0}"#
         let record = try JSONDecoder().decode(PairingRecord.self, from: Data(json.utf8))

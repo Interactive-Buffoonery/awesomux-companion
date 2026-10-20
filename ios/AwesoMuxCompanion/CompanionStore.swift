@@ -365,11 +365,15 @@ final class CompanionStore {
         return routes.filter { $0.transport == .tailscale } + routes.filter { $0.transport != .tailscale }
     }
 
-    /// Replaces the saved routes with the Mac's current ones, whole or not at all. Never applies to v1 pairings.
+    /// Merges the Mac's current routes into the saved ones; a malformed report changes nothing. Updates the
+    /// live record only while it is still the pairing that was read, so a reply that lands after an unpair or
+    /// re-pair is dropped. Never applies to v1 pairings.
     private func updateRoutes(_ metadata: CompanionRoutes?, record read: PairingRecord) {
-        guard let metadata, metadata.p == read.port, let routes = CompanionRoute.routes(metadata),
-              var next = record, next.connectionID == read.connectionID, next.routes != nil, next.routes != routes
+        guard let metadata, metadata.p == read.port, let reported = CompanionRoute.routes(metadata),
+              var next = self.record, next.connectionID == read.connectionID, let saved = next.routes
         else { return }
+        let routes = CompanionRoute.merged(reported, keeping: saved)
+        guard routes != saved else { return }
         next.routes = routes
         try? PairingStore.save(next)
         self.record = next

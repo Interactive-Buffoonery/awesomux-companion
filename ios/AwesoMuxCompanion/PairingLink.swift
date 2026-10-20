@@ -45,6 +45,13 @@ struct CompanionRoute: Codable, Equatable, Sendable {
         }
         return routes.v == 2 && !valid.isEmpty ? valid : nil
     }
+
+    /// The reported routes, plus each saved route whose kind the report omits, LAN first. A route the Mac
+    /// can't currently see (Tailscale still coming up after wake) keeps its last-known address until reported again.
+    static func merged(_ reported: [CompanionRoute], keeping saved: [CompanionRoute]) -> [CompanionRoute] {
+        let kept = saved.filter { route in !reported.contains { $0.transport == route.transport } }
+        return (reported + kept).sorted { $0.transport == .lan && $1.transport != .lan }
+    }
 }
 
 /// A v1 link names one route (`h`, `t`); a v2 link carries up to one LAN and one Tailscale route on one port.

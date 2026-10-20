@@ -62,8 +62,9 @@ final class TerminalLockModel {
         self.defaults = defaults
         self.now = now
         self.authenticator = authenticator
-        isEnabled = defaults.object(forKey: Self.preferenceKey) as? Bool ?? true
-        isLocked = isEnabled
+        let enabled = defaults.object(forKey: Self.preferenceKey) as? Bool ?? true
+        isEnabled = enabled
+        isLocked = enabled
     }
 
     func becomeInactive() {

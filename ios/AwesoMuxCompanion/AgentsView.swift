@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AgentsView: View {
     @Bindable var store: CompanionStore
+    @Environment(TerminalLockModel.self) private var terminalLock
 
     var body: some View {
         NavigationStack {
@@ -50,9 +51,14 @@ struct AgentsView: View {
                     guard let paneID else { return }
                     withAnimation { proxy.scrollTo(paneID, anchor: .center) }
                 }
-                .task(id: store.focusedPaneID) {
-                    guard store.focusedPaneID != nil else { return }
-                    try? await Task.sleep(for: .seconds(3))
+                .task(id: terminalLock.isLocked ? nil : store.focusedPaneID) {
+                    guard !terminalLock.isLocked, let paneID = store.focusedPaneID else { return }
+                    do {
+                        try await Task.sleep(for: .seconds(3))
+                    } catch {
+                        return
+                    }
+                    guard !terminalLock.isLocked, store.focusedPaneID == paneID else { return }
                     store.focusedPaneID = nil
                 }
             }

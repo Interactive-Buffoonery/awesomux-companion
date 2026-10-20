@@ -27,27 +27,31 @@ struct TerminalLockGate: View {
     let model: TerminalLockModel
 
     var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
-            Image(systemName: "lock.fill").font(.largeTitle).accessibilityHidden(true)
-            Text("awesoMux Locked").font(.title2.bold())
-            Text("Authenticate to view your agents and terminals.")
-                .multilineTextAlignment(.center)
-            Button("Unlock") { Task { await model.unlock() } }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isAuthenticating || !model.isActive)
-            if model.isAuthenticating {
-                ProgressView("Authenticating…")
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 20) {
+                    Spacer()
+                    Image(systemName: "lock.fill").font(.largeTitle).accessibilityHidden(true)
+                    Text("awesoMux Locked").font(.title2.bold())
+                    Text("Authenticate to view your agents and terminals.")
+                        .multilineTextAlignment(.center)
+                    Button("Unlock") { Task { await model.unlock() } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.isAuthenticating || !model.isActive)
+                    if model.isAuthenticating {
+                        ProgressView("Authenticating…")
+                    }
+                    if let message = model.authenticationFailureMessage {
+                        Text(message)
+                            .font(.callout).multilineTextAlignment(.center)
+                    }
+                    Spacer()
+                    TerminalProtectionToggle(model: model)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
             }
-            if let message = model.authenticationFailureMessage {
-                Text(message)
-                    .font(.callout).multilineTextAlignment(.center)
-            }
-            Spacer()
-            TerminalProtectionToggle(model: model)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(Cat.text)
         .background(Cat.page.ignoresSafeArea())
         .tint(Cat.accent)

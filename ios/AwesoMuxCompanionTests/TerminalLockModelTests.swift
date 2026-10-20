@@ -185,7 +185,7 @@ private final class Fixture {
         model = TerminalLockModel(defaults: defaults, now: { [clock] in clock.time }, authenticator: auth)
     }
 
-    deinit { defaults.removePersistentDomain(forName: suite) }
+    deinit { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
 
     func start(_ action: @escaping @MainActor () async -> Void) async -> Task<Void, Never> {
         let task = Task { await action() }

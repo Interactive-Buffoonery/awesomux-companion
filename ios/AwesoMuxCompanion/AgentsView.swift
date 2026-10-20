@@ -47,12 +47,9 @@ struct AgentsView: View {
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
                 .background(Cat.page)
-                .onChange(of: store.focusedPaneID) { _, paneID in
-                    guard let paneID else { return }
+                .task(id: visibleFocusedPaneID) {
+                    guard let paneID = visibleFocusedPaneID else { return }
                     withAnimation { proxy.scrollTo(paneID, anchor: .center) }
-                }
-                .task(id: terminalLock.isLocked ? nil : store.focusedPaneID) {
-                    guard !terminalLock.isLocked, let paneID = store.focusedPaneID else { return }
                     do {
                         try await Task.sleep(for: .seconds(3))
                     } catch {
@@ -79,6 +76,12 @@ struct AgentsView: View {
         if store.isSnapshotCached { return String(localized: "Cached · stale until your Mac answers") }
         if !store.reachable { return String(localized: "Stale · last known agents") }
         return nil
+    }
+
+    private var visibleFocusedPaneID: String? {
+        guard !terminalLock.isLocked, let paneID = store.focusedPaneID,
+              store.snapshot?.agents.contains(where: { $0.id == paneID }) == true else { return nil }
+        return paneID
     }
 
     @ViewBuilder private func agentSections(_ snapshot: GlanceSnapshot) -> some View {

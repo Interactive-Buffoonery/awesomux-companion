@@ -60,6 +60,43 @@ private func object(_ data: Data) throws -> NSDictionary {
     #expect(try object(CompanionProtocol.encoder().encode(page)) == object(fixture(12)))
 }
 
+@Test func attentionEventOmitsCommandMetadata() throws {
+    let data = try fixture(12)
+    let page = try CompanionProtocol.decoder().decode(CompanionAPIResponse.AttentionPage.self, from: data)
+    let event = try #require(page.events.first)
+    #expect(event.exitCode == nil)
+    #expect(event.durationSeconds == nil)
+    #expect(try object(CompanionProtocol.encoder().encode(page)) == object(data))
+
+    let initialized = CompanionAPIResponse.Event(id: event.id, attentionID: event.attentionID,
+        change: event.change, paneID: event.paneID, workspaceID: event.workspaceID,
+        provider: event.provider, occurredAt: event.occurredAt, reason: event.reason)
+    #expect(initialized.exitCode == nil)
+    #expect(initialized.durationSeconds == nil)
+    let encoded = try object(CompanionProtocol.encoder().encode(initialized))
+    #expect(encoded["exitCode"] == nil)
+    #expect(encoded["durationSeconds"] == nil)
+}
+
+@Test(arguments: [0, 17]) func commandCompletedEventVectors(_ exitCode: Int) throws {
+    let data = Data("""
+    {"id":"command-event","attentionID":"command-attention","change":"raised",
+     "paneID":"opaque-pane","workspaceID":"opaque-workspace","provider":"shell",
+     "occurredAt":"2026-10-17T18:19:58Z","reason":"commandCompleted",
+     "exitCode":\(exitCode),"durationSeconds":1.25}
+    """.utf8)
+    let event = try CompanionProtocol.decoder().decode(CompanionAPIResponse.Event.self, from: data)
+    #expect(event.exitCode == exitCode)
+    #expect(event.durationSeconds == 1.25)
+    #expect(try object(CompanionProtocol.encoder().encode(event)) == object(data))
+
+    let initialized = CompanionAPIResponse.Event(id: event.id, attentionID: event.attentionID,
+        change: event.change, paneID: event.paneID, workspaceID: event.workspaceID,
+        provider: event.provider, occurredAt: event.occurredAt, reason: event.reason,
+        exitCode: exitCode, durationSeconds: 1.25)
+    #expect(try object(CompanionProtocol.encoder().encode(initialized)) == object(data))
+}
+
 @Test func tolerantPhoneDecoding() throws {
     let data = Data("""
     {"schemaVersion":1,"requestID":"01234567-89AB-CDEF-0123-456789ABCDEF",

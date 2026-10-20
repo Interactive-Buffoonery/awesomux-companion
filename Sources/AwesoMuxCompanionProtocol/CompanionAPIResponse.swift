@@ -69,6 +69,8 @@ public struct CompanionAPIResponse: Codable, Sendable {
         public let providerSessionID: String?
         public let targetVersion: String?
         public let resolvedAt: Date?
+        public let exitCode: Int?
+        public let durationSeconds: Double?
 
         public init(
             id: String,
@@ -81,7 +83,9 @@ public struct CompanionAPIResponse: Codable, Sendable {
             reason: String,
             providerSessionID: String? = nil,
             targetVersion: String? = nil,
-            resolvedAt: Date? = nil
+            resolvedAt: Date? = nil,
+            exitCode: Int? = nil,
+            durationSeconds: Double? = nil
         ) {
             self.id = id
             self.attentionID = attentionID
@@ -94,6 +98,8 @@ public struct CompanionAPIResponse: Codable, Sendable {
             self.providerSessionID = providerSessionID
             self.targetVersion = targetVersion
             self.resolvedAt = resolvedAt
+            self.exitCode = exitCode
+            self.durationSeconds = durationSeconds
         }
     }
 

@@ -375,7 +375,8 @@ final class CompanionStore {
         let routes = CompanionRoute.merged(reported, keeping: saved)
         guard routes != saved else { return }
         next.routes = routes
-        try? PairingStore.save(next)
+        // Publish only what was saved, so a failed write is retried by the next identical report.
+        guard (try? PairingStore.save(next)) != nil else { return }
         self.record = next
     }
 

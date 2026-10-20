@@ -39,8 +39,8 @@ struct TerminalLockGate: View {
             if model.isAuthenticating {
                 ProgressView("Authenticating…")
             }
-            if model.authenticationFailed {
-                Text("Authentication did not complete. Try again.")
+            if let message = model.authenticationFailureMessage {
+                Text(message)
                     .font(.callout).multilineTextAlignment(.center)
             }
             Spacer()

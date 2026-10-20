@@ -1,3 +1,4 @@
+import LocalAuthentication
 import XCTest
 @testable import AwesoMuxCompanion
 
@@ -18,6 +19,20 @@ final class TerminalLockModelTests: XCTestCase {
         let restored = TerminalLockModel(defaults: fixture.defaults, authenticator: fixture.auth)
         XCTAssertFalse(restored.isEnabled)
         XCTAssertFalse(restored.isLocked)
+    }
+
+    func testMissingPasscodeExplainsRecoveryWithoutUnlocking() async {
+        let fixture = Fixture()
+        fixture.auth.failureMessage = DeviceOwnerAuthenticator.message(for: LAError(.passcodeNotSet))
+        XCTAssertNotNil(fixture.auth.failureMessage)
+        XCTAssertNil(DeviceOwnerAuthenticator.message(for: LAError(.userCancel)))
+        fixture.model.becomeActive()
+        let request = await fixture.start { await fixture.model.unlock() }
+        fixture.auth.finish(false)
+        await request.value
+        XCTAssertTrue(fixture.model.isLocked)
+        XCTAssertTrue(fixture.model.isEnabled)
+        XCTAssertEqual(fixture.model.authenticationFailureMessage, fixture.auth.failureMessage)
     }
 
     func testGraceExpiresAtFifteenSecondsAndNotBefore() async {
@@ -193,6 +208,7 @@ private final class TestClock {
 
 @MainActor
 private final class ControlledAuthenticator: TerminalAuthenticating {
+    var failureMessage: String?
     private var completion: CheckedContinuation<Bool, Never>?
     private var started: CheckedContinuation<Void, Never>?
     private(set) var requestCount = 0

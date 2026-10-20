@@ -1,18 +1,26 @@
+import Darwin
 import Foundation
 import LocalAuthentication
 import Observation
 
 @MainActor
 protocol TerminalAuthenticating {
+    var failureMessage: String? { get }
     func authenticate() async -> Bool
     func cancel()
+}
+
+extension TerminalAuthenticating {
+    var failureMessage: String? { nil }
 }
 
 @MainActor
 final class DeviceOwnerAuthenticator: TerminalAuthenticating {
     private var context: LAContext?
+    private(set) var failureMessage: String?
 
     func authenticate() async -> Bool {
+        failureMessage = nil
         let context = LAContext()
         self.context = context
         defer { if self.context === context { self.context = nil } }
@@ -21,8 +29,14 @@ final class DeviceOwnerAuthenticator: TerminalAuthenticating {
                 .deviceOwnerAuthentication,
                 localizedReason: String(localized: "Unlock your agents and terminals."))
         } catch {
+            failureMessage = Self.message(for: error)
             return false
         }
+    }
+
+    static func message(for error: Error) -> String? {
+        guard (error as? LAError)?.code == .passcodeNotSet else { return nil }
+        return String(localized: "Set a device passcode in iOS Settings to unlock awesoMux.")
     }
 
     func cancel() {
@@ -45,7 +59,8 @@ final class TerminalLockModel {
     }
     @ObservationIgnored var securityDidChange: (() -> Void)?
     private(set) var isAuthenticating = false
-    private(set) var authenticationFailed = false
+    private(set) var authenticationFailureMessage: String?
+    var authenticationFailed: Bool { authenticationFailureMessage != nil }
 
     private let defaults: UserDefaults
     private let now: () -> TimeInterval
@@ -56,7 +71,11 @@ final class TerminalLockModel {
 
     init(
         defaults: UserDefaults = .standard,
-        now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        now: @escaping () -> TimeInterval = {
+            var timebase = mach_timebase_info_data_t()
+            mach_timebase_info(&timebase)
+            return Double(mach_continuous_time()) * Double(timebase.numer) / Double(timebase.denom) / 1e9
+        },
         authenticator: any TerminalAuthenticating = DeviceOwnerAuthenticator()
     ) {
         self.defaults = defaults
@@ -125,13 +144,14 @@ final class TerminalLockModel {
         guard isActive, !isAuthenticating else { return }
         generation += 1
         let request = generation
-        authenticationFailed = false
+        authenticationFailureMessage = nil
         isAuthenticating = true
         let success = await authenticator.authenticate()
         guard request == generation else { return }
         guard success, !Task.isCancelled else {
             isAuthenticating = false
-            authenticationFailed = true
+            authenticationFailureMessage = authenticator.failureMessage
+                ?? String(localized: "Authentication did not complete. Try again.")
             return
         }
         pendingSuccess = (request, disabling)
@@ -153,7 +173,7 @@ final class TerminalLockModel {
         generation += 1
         pendingSuccess = nil
         isAuthenticating = false
-        authenticationFailed = false
+        authenticationFailureMessage = nil
         authenticator.cancel()
     }
 }

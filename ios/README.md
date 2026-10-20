@@ -132,9 +132,10 @@ Protection is on by default. The paired agent content requires Face ID, Touch ID
 or the device passcode on each launch. Settings → Privacy controls the persisted
 preference; turning it off also requires authentication, including from the locked
 screen. Pairing stays available without unlocking. Authentication failure or
-cancellation leaves the gate closed. Enabling protection locks immediately.
+cancellation leaves the gate closed. Devices without a passcode stay locked and
+show instructions to set a passcode in iOS Settings. Enabling protection locks immediately.
 
-Background returns under 15 seconds keep an already unlocked session; returns at
+The grace clock advances during device sleep. Background returns under 15 seconds keep an already unlocked session; returns at
 15 seconds or later lock again. Every inactive scene gets an opaque
 privacy window above app navigation and sheets, even with protection disabled.
 Backgrounding cancels pending authentication and rejects late results. Temporary

@@ -78,22 +78,25 @@ private func object(_ data: Data) throws -> NSDictionary {
     #expect(encoded["durationSeconds"] == nil)
 }
 
-@Test(arguments: [0, 17]) func commandCompletedEventVectors(_ exitCode: Int) throws {
+@Test(arguments: [0, 17]) func commandCompletionEventVectors(_ exitCode: Int) throws {
+    let reason = exitCode == 0 ? "commandFinished" : "commandFailed"
     let data = Data("""
     {"id":"command-event","attentionID":"command-attention","change":"raised",
-     "paneID":"opaque-pane","workspaceID":"opaque-workspace","provider":"shell",
-     "occurredAt":"2026-10-17T18:19:58Z","reason":"commandCompleted",
-     "exitCode":\(exitCode),"durationSeconds":1.25}
+     "paneID":"opaque-pane","workspaceID":"opaque-workspace","provider":"Shell",
+     "occurredAt":"2026-10-17T18:19:58Z","reason":"\(reason)",
+     "exitCode":\(exitCode),"durationSeconds":42.5}
     """.utf8)
     let event = try CompanionProtocol.decoder().decode(CompanionAPIResponse.Event.self, from: data)
     #expect(event.exitCode == exitCode)
-    #expect(event.durationSeconds == 1.25)
+    #expect(event.reason == reason)
+    #expect(event.provider == "Shell")
+    #expect(event.durationSeconds == 42.5)
     #expect(try object(CompanionProtocol.encoder().encode(event)) == object(data))
 
     let initialized = CompanionAPIResponse.Event(id: event.id, attentionID: event.attentionID,
         change: event.change, paneID: event.paneID, workspaceID: event.workspaceID,
         provider: event.provider, occurredAt: event.occurredAt, reason: event.reason,
-        exitCode: exitCode, durationSeconds: 1.25)
+        exitCode: exitCode, durationSeconds: 42.5)
     #expect(try object(CompanionProtocol.encoder().encode(initialized)) == object(data))
 }
 

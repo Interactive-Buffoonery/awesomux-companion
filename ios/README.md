@@ -125,3 +125,32 @@ the source-built public CAMetalLayer renderer for bundled replay and
 an isolated synthetic Mac-to-phone reconnect fixture, without pairing. See the
 [build and usage guide](../spikes/snapshot-reconnect/ios-diagnostics.md) and
 [verification ledger](../spikes/snapshot-reconnect/verification.md).
+
+## Agent and terminal protection
+
+Protection is on by default. The paired agent content requires Face ID, Touch ID,
+or the device passcode on each launch. Settings → Privacy controls the persisted
+preference; turning it off also requires authentication, including from the locked
+screen. Pairing stays available without unlocking. Authentication failure or
+cancellation leaves the gate closed. Enabling protection locks immediately.
+
+Background returns under 15 seconds keep an already unlocked session; returns at
+15 seconds or later lock again. Every inactive scene gets an opaque
+privacy window above app navigation and sheets, even with protection disabled.
+Backgrounding cancels pending authentication and rejects late results. Temporary
+inactivity during the system authentication prompt withholds success until active.
+Polling, notifications, widgets and Live Activities run independently of this
+screen lock; their existing content visibility is unchanged.
+
+Issue #10 should reuse `TerminalLockContainer` at the terminal entry point, with
+one scene-owned `TerminalLockModel`. Today the app root gates paired agent content
+because there is no shipping terminal view. Keep transport, phone identity and
+background refresh outside the container: this is local screen protection, not
+cryptographic proof of user presence to the Mac.
+
+`TerminalLockModelTests` uses an injected monotonic clock, isolated preferences and
+controlled authentication completions. `TerminalLockRenderingTests` hosts the real
+gate and scene cover in test windows and keeps screenshot attachments in the
+xcresult. Those renderings do not verify the actual iOS app switcher, biometric or
+passcode UI, accessibility focus, or device lifecycle timing. Verify those on a
+device, including sheets, backgrounding during authentication and a grace return.

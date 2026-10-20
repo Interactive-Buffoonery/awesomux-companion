@@ -33,6 +33,7 @@ targets:
         CFBundleDisplayName: awesoMux
         NSSupportsLiveActivities: true
         ITSAppUsesNonExemptEncryption: false
+        NSFaceIDUsageDescription: awesoMux uses Face ID to unlock your agents and terminals.
         NSCameraUsageDescription: awesoMux uses the camera to scan the pairing code your Mac shows.
         NSLocalNetworkUsageDescription: awesoMux connects to your Mac on this network to show your agents.
         CFBundleURLTypes:

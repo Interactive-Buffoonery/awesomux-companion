@@ -29,6 +29,7 @@ public enum CompanionOperation: String, Codable, CaseIterable, Sendable {
     case connectionStatus = "get_connection_status"
     case unpair
     case listAgents = "list_agents"
+    case listPanes = "list_panes"
     case attentionEvents = "get_attention_events"
     case getAlertPreferences = "get_alert_preferences"
     case setAlertPreferences = "set_alert_preferences"

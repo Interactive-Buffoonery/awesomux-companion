@@ -135,6 +135,7 @@ public struct CompanionAPIResponse: Codable, Sendable {
     public let agents: [Agent]?
     public let attentionEvents: AttentionPage?
     public let workspaces: [Workspace]?
+    public let terminalPreviewAllowed: Bool?
     /// v2 grants only. Malformed route metadata decodes as `nil` so the rest of the response survives.
     public let routes: CompanionRoutes?
     public let alertPreferences: CompanionAlertPreferences?
@@ -151,7 +152,8 @@ public struct CompanionAPIResponse: Codable, Sendable {
         attentionEvents: AttentionPage? = nil,
         routes: CompanionRoutes? = nil,
         alertPreferences: CompanionAlertPreferences? = nil,
-        workspaces: [Workspace]? = nil
+        workspaces: [Workspace]? = nil,
+        terminalPreviewAllowed: Bool? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.requestID = requestID
@@ -165,6 +167,7 @@ public struct CompanionAPIResponse: Codable, Sendable {
         self.routes = routes
         self.alertPreferences = alertPreferences
         self.workspaces = workspaces
+        self.terminalPreviewAllowed = terminalPreviewAllowed
     }
 
     public init(from decoder: any Decoder) throws {
@@ -181,6 +184,7 @@ public struct CompanionAPIResponse: Codable, Sendable {
         alertPreferences = try container.decodeIfPresent(CompanionAlertPreferences.self, forKey: .alertPreferences)
         routes = (try? container.decodeIfPresent(CompanionRoutes.self, forKey: .routes)) ?? nil
         workspaces = try container.decodeIfPresent([Workspace].self, forKey: .workspaces)
+        terminalPreviewAllowed = try container.decodeIfPresent(Bool.self, forKey: .terminalPreviewAllowed)
     }
 }
 

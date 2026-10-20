@@ -30,6 +30,7 @@ public enum CompanionOperation: String, Codable, CaseIterable, Sendable {
     case unpair
     case listAgents = "list_agents"
     case listPanes = "list_panes"
+    case setTerminalPreview = "set_terminal_preview"
     case attentionEvents = "get_attention_events"
     case getAlertPreferences = "get_alert_preferences"
     case setAlertPreferences = "set_alert_preferences"
@@ -44,9 +45,11 @@ public struct CompanionAPIRequest: Codable, Sendable {
     public let cursor: String?
     public let includeCommandEvents: Bool?
     public let alertPreferences: CompanionAlertPreferences?
+    public let terminalPreviewAllowed: Bool?
 
     public init(operation: String, connectionID: UUID, limit: Int? = nil, cursor: String? = nil,
-                includeCommandEvents: Bool? = nil, alertPreferences: CompanionAlertPreferences? = nil, requestID: UUID = UUID()) {
+                includeCommandEvents: Bool? = nil, alertPreferences: CompanionAlertPreferences? = nil,
+                terminalPreviewAllowed: Bool? = nil, requestID: UUID = UUID()) {
         schemaVersion = CompanionProtocol.version
         self.requestID = requestID
         self.operation = operation
@@ -55,6 +58,7 @@ public struct CompanionAPIRequest: Codable, Sendable {
         self.cursor = cursor
         self.includeCommandEvents = includeCommandEvents
         self.alertPreferences = alertPreferences
+        self.terminalPreviewAllowed = terminalPreviewAllowed
     }
 }
 

@@ -40,3 +40,31 @@ struct PaneListTests {
         #expect(try CompanionProtocol.encoder().encode(response) == data)
     }
 }
+
+@Test func terminalPreviewPermissionWireRoundTrip() throws {
+    let request = CompanionAPIRequest(
+        operation: CompanionOperation.setTerminalPreview.rawValue, connectionID: UUID(),
+        terminalPreviewAllowed: true)
+    let data = try CompanionProtocol.encoder().encode(request)
+    #expect(
+        try CompanionProtocol.decoder().decode(CompanionAPIRequest.self, from: data)
+            .terminalPreviewAllowed == true)
+    let response = CompanionAPIResponse(terminalPreviewAllowed: false)
+    #expect(
+        try CompanionProtocol.decoder().decode(
+            CompanionAPIResponse.self, from: CompanionProtocol.encoder().encode(response)
+        ).terminalPreviewAllowed == false)
+    #expect(
+        try CompanionProtocol.decoder().decode(
+            CompanionAPIResponse.self, from: Data("{\"schemaVersion\":1}".utf8)
+        ).terminalPreviewAllowed == nil)
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    for invalid: Any in [1, "true"] {
+        var malformed = object
+        malformed["terminalPreviewAllowed"] = invalid
+        #expect(throws: (any Error).self) {
+            try CompanionProtocol.decoder().decode(
+                CompanionAPIRequest.self, from: JSONSerialization.data(withJSONObject: malformed))
+        }
+    }
+}

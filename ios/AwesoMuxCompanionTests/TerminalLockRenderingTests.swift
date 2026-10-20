@@ -20,7 +20,7 @@ final class TerminalLockRenderingTests: XCTestCase {
         window.rootViewController = host
         window.makeKeyAndVisible()
         let anchor = ScenePrivacyAnchor(model: model, protectsContent: true)
-        host.view.addSubview(anchor)
+        window.addSubview(anchor)
         defer {
             anchor.detach()
             host.dismiss(animated: false)

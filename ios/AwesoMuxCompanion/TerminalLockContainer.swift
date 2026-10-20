@@ -37,6 +37,7 @@ struct TerminalLockGate: View {
                         .multilineTextAlignment(.center)
                     Button("Unlock") { Task { await model.unlock() } }
                         .buttonStyle(.borderedProminent)
+                    .foregroundStyle(Cat.crust)
                         .disabled(model.isAuthenticating || !model.isActive)
                     if model.isAuthenticating {
                         ProgressView("Authenticating…")

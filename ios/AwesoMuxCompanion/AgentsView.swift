@@ -12,6 +12,9 @@ struct AgentsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(record.macName).font(.subheadline.weight(.semibold)).foregroundStyle(Cat.text)
                                 MacStatusLine(store: store, transport: record.transport)
+                                if let snapshotStatus {
+                                    Text(snapshotStatus).font(.footnote).foregroundStyle(Cat.subtext0)
+                                }
                             }
                             .accessibilityElement(children: .combine)
                         }
@@ -65,6 +68,13 @@ struct AgentsView: View {
         }
     }
 
+    private var snapshotStatus: String? {
+        guard store.snapshot != nil else { return nil }
+        if store.isSnapshotCached { return String(localized: "Cached · stale until your Mac answers") }
+        if !store.reachable { return String(localized: "Stale · last known agents") }
+        return nil
+    }
+
     @ViewBuilder private func agentSections(_ snapshot: GlanceSnapshot) -> some View {
         if snapshot.agents.isEmpty {
             let title = snapshot.connected
@@ -79,7 +89,7 @@ struct AgentsView: View {
             ContentUnavailableView(title, systemImage: "moon.zzz", description: Text(detail))
                 // ContentUnavailableView ignores accessibilityHidden on its icon, which reads as "Snooze".
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(title). \(detail)")
+                .accessibilityLabel([title, detail, snapshotStatus].compactMap { $0 }.joined(separator: ". "))
                 .listRowBackground(Color.clear)
         }
         ForEach(GlanceGroup.allCases) { group in
@@ -87,7 +97,7 @@ struct AgentsView: View {
             if !agents.isEmpty {
                 Section {
                     ForEach(agents) { agent in
-                        AgentRow(agent: agent)
+                        AgentRow(agent: agent, snapshotStatus: snapshotStatus)
                             .id(agent.id)
                             .listRowBackground(store.focusedPaneID == agent.id ? Cat.needs.opacity(0.18) : Cat.card)
                     }
@@ -107,6 +117,7 @@ struct AgentsView: View {
 
 private struct AgentRow: View {
     let agent: GlanceAgent
+    let snapshotStatus: String?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -132,6 +143,7 @@ private struct AgentRow: View {
         if let since = agent.since {
             sentence += ", " + since.formatted(.relative(presentation: .named, unitsStyle: .wide))
         }
+        if let snapshotStatus { sentence += ". " + snapshotStatus }
         return sentence
     }
 }

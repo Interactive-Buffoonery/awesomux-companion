@@ -143,6 +143,46 @@ final class TerminalLockModelTests: XCTestCase {
         XCTAssertTrue(restored.isLocked)
     }
 
+    func testPendingSuccessCannotSurviveBackgroundGraceExpiry() async {
+        let fixture = Fixture()
+        fixture.model.becomeActive()
+        let request = await fixture.start { await fixture.model.unlock() }
+        fixture.model.becomeInactive()
+        fixture.auth.finish(true)
+        await request.value
+        fixture.model.enterBackground()
+        fixture.clock.time += TerminalLockModel.gracePeriod
+        fixture.model.enterForeground()
+        fixture.model.becomeActive()
+        XCTAssertTrue(fixture.model.isLocked)
+        XCTAssertTrue(fixture.model.isEnabled)
+        XCTAssertFalse(fixture.model.isAuthenticating)
+    }
+
+    func testExternalPreferenceChangeInvalidatesPendingSuccess() async {
+        for completesWhileInactive in [false, true] {
+            let fixture = Fixture()
+            fixture.model.becomeActive()
+            let request = await fixture.start { await fixture.model.unlock() }
+            fixture.model.becomeInactive()
+            if completesWhileInactive {
+                fixture.auth.finish(true)
+                await request.value
+            }
+            fixture.defaults.set(false, forKey: TerminalLockModel.preferenceKey)
+            fixture.model.synchronizePreference()
+            fixture.defaults.set(true, forKey: TerminalLockModel.preferenceKey)
+            fixture.model.becomeActive()
+            if !completesWhileInactive {
+                fixture.auth.finish(true)
+                await request.value
+            }
+            XCTAssertTrue(fixture.model.isLocked)
+            XCTAssertTrue(fixture.model.isEnabled)
+            XCTAssertFalse(fixture.model.isAuthenticating)
+        }
+    }
+
     func testScenesSharePreferenceButNotUnlockedSessions() async {
         let fixture = Fixture()
         let other = TerminalLockModel(defaults: fixture.defaults, authenticator: fixture.auth)

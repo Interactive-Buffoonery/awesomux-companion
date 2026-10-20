@@ -39,14 +39,17 @@ public struct CompanionAPIRequest: Codable, Sendable {
     public let connectionID: UUID
     public let limit: Int?
     public let cursor: String?
+    public let includeCommandEvents: Bool?
 
-    public init(operation: String, connectionID: UUID, limit: Int? = nil, cursor: String? = nil, requestID: UUID = UUID()) {
+    public init(operation: String, connectionID: UUID, limit: Int? = nil, cursor: String? = nil,
+                includeCommandEvents: Bool? = nil, requestID: UUID = UUID()) {
         schemaVersion = CompanionProtocol.version
         self.requestID = requestID
         self.operation = operation
         self.connectionID = connectionID
         self.limit = limit
         self.cursor = cursor
+        self.includeCommandEvents = includeCommandEvents
     }
 }
 

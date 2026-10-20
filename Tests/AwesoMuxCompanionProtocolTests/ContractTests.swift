@@ -31,10 +31,37 @@ private func object(_ data: Data) throws -> NSDictionary {
     let request = try CompanionProtocol.decoder().decode(CompanionAPIRequest.self, from: data)
     #expect(request.requestID == requestID)
     #expect(request.connectionID == requestID)
+    #expect(request.includeCommandEvents == nil)
     let encoded = try object(CompanionProtocol.encoder().encode(request))
+    #expect(encoded["includeCommandEvents"] == nil)
     #expect(encoded["profile"] == nil)
     #expect(encoded["credential"] == nil)
     #expect((encoded["operation"] as? String) == (try object(data)["operation"] as? String))
+    let canonical = Data(String(decoding: data, as: UTF8.self)
+        .replacingOccurrences(of: requestID.uuidString.lowercased(), with: requestID.uuidString).utf8)
+    #expect(encoded == (try object(canonical)))
+}
+
+@Test(arguments: [nil, false, true] as [Bool?])
+func commandEventOptInRequestVectors(_ includeCommandEvents: Bool?) throws {
+    let flag = includeCommandEvents.map { ",\"includeCommandEvents\":\($0)" } ?? ""
+    let data = Data("""
+    {"schemaVersion":1,"requestID":"\(requestID.uuidString)",
+     "operation":"get_attention_events","connectionID":"\(requestID.uuidString)"\(flag)}
+    """.utf8)
+    let request = try CompanionProtocol.decoder().decode(CompanionAPIRequest.self, from: data)
+    #expect(request.includeCommandEvents == includeCommandEvents)
+    #expect(try object(CompanionProtocol.encoder().encode(request)) == object(data))
+
+    let initialized = CompanionAPIRequest(operation: "get_attention_events", connectionID: requestID,
+        includeCommandEvents: includeCommandEvents, requestID: requestID)
+    #expect(try object(CompanionProtocol.encoder().encode(initialized)) == object(data))
+    if includeCommandEvents == nil {
+        let defaulted = CompanionAPIRequest(operation: "get_attention_events", connectionID: requestID,
+            requestID: requestID)
+        #expect(defaulted.includeCommandEvents == nil)
+        #expect(try object(CompanionProtocol.encoder().encode(defaulted)) == object(data))
+    }
 }
 
 @Test(arguments: [5, 6, 7, 10]) func apiResponseVectors(_ number: Int) throws {
@@ -58,6 +85,46 @@ private func object(_ data: Data) throws -> NSDictionary {
     #expect(page.events.first?.change == "raised")
     #expect(page.events.first?.resolvedAt == nil)
     #expect(try object(CompanionProtocol.encoder().encode(page)) == object(fixture(12)))
+}
+
+@Test func attentionEventOmitsCommandMetadata() throws {
+    let data = try fixture(12)
+    let page = try CompanionProtocol.decoder().decode(CompanionAPIResponse.AttentionPage.self, from: data)
+    let event = try #require(page.events.first)
+    #expect(event.exitCode == nil)
+    #expect(event.durationSeconds == nil)
+    #expect(try object(CompanionProtocol.encoder().encode(page)) == object(data))
+
+    let initialized = CompanionAPIResponse.Event(id: event.id, attentionID: event.attentionID,
+        change: event.change, paneID: event.paneID, workspaceID: event.workspaceID,
+        provider: event.provider, occurredAt: event.occurredAt, reason: event.reason)
+    #expect(initialized.exitCode == nil)
+    #expect(initialized.durationSeconds == nil)
+    let encoded = try object(CompanionProtocol.encoder().encode(initialized))
+    #expect(encoded["exitCode"] == nil)
+    #expect(encoded["durationSeconds"] == nil)
+}
+
+@Test(arguments: [0, 17]) func commandCompletionEventVectors(_ exitCode: Int) throws {
+    let reason = exitCode == 0 ? "commandFinished" : "commandFailed"
+    let data = Data("""
+    {"id":"command-event","attentionID":"command-attention","change":"raised",
+     "paneID":"opaque-pane","workspaceID":"opaque-workspace","provider":"Shell",
+     "occurredAt":"2026-10-17T18:19:58Z","reason":"\(reason)",
+     "exitCode":\(exitCode),"durationSeconds":42.5}
+    """.utf8)
+    let event = try CompanionProtocol.decoder().decode(CompanionAPIResponse.Event.self, from: data)
+    #expect(event.exitCode == exitCode)
+    #expect(event.reason == reason)
+    #expect(event.provider == "Shell")
+    #expect(event.durationSeconds == 42.5)
+    #expect(try object(CompanionProtocol.encoder().encode(event)) == object(data))
+
+    let initialized = CompanionAPIResponse.Event(id: event.id, attentionID: event.attentionID,
+        change: event.change, paneID: event.paneID, workspaceID: event.workspaceID,
+        provider: event.provider, occurredAt: event.occurredAt, reason: event.reason,
+        exitCode: exitCode, durationSeconds: 42.5)
+    #expect(try object(CompanionProtocol.encoder().encode(initialized)) == object(data))
 }
 
 @Test func tolerantPhoneDecoding() throws {

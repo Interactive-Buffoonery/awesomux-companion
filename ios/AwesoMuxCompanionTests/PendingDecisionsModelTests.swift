@@ -43,6 +43,39 @@ final class PendingDecisionsModelTests: XCTestCase {
             XCTAssertFalse(f.model.canRetry(f.identity))
             XCTAssertFalse(f.model.canAnswer(f.identity, choice: .deny))
             XCTAssertEqual(f.sent.count, 1)
+            XCTAssertEqual(f.announcements.count, 1)
+            XCTAssertTrue(f.announcements[0].contains(String(f.identity.invocationID.uuidString.prefix(8))))
+            XCTAssertTrue(f.announcements[0].contains("Mac"))
+            await f.model.refresh()
+            await f.model.refresh()
+            XCTAssertEqual(f.announcements.count, 1)
+        }
+    }
+
+    func testLateRefusalAnnouncementsAreSuppressedWhenInactiveOrLocked() async {
+        for result: CompanionDecisionReceipt.Result in [.expired, .retryConflict, .capacityExceeded] {
+            for locked in [false, true] {
+                let f = DecisionFixture()
+                f.receiptOverride = .init(identity: f.identity, result: result, state: .pending)
+                await f.model.refresh()
+                let gate = RequestGate("refusal receipt")
+                f.sendGate = gate
+                let answer = Task { await f.model.answer(f.identity, choice: .allow) }
+                await fulfillment(of: [gate.started], timeout: 3)
+                if locked {
+                    f.unlocked = false
+                    f.lockEnabled = true
+                    f.model.sceneChanged(active: true)
+                } else {
+                    f.active = false
+                    f.model.sceneChanged(active: false)
+                }
+                gate.release()
+                await answer.value
+                XCTAssertEqual(f.sent.count, 1)
+                XCTAssertTrue(f.announcements.isEmpty)
+                XCTAssertTrue(f.model.receipts.isEmpty)
+            }
         }
     }
 

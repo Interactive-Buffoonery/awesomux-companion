@@ -369,6 +369,15 @@ final class PendingDecisionsModel {
             markClosed(answer.identity)
             receipts = stableReceipts()
             message = nil
+            let refusal: String? = switch receipt.result {
+            case .expired: String(localized: "The Mac refused this answer because the remote window expired. Check your Mac.")
+            case .retryConflict: String(localized: "The Mac refused a conflicting retry. Do not send a different choice; check your Mac.")
+            case .capacityExceeded: String(localized: "The Mac could not accept this answer because its decision history is full. Check your Mac.")
+            default: nil
+            }
+            if let refusal {
+                announceEvent("refusal-\(answer.retryID)", String(localized: "Request \(String(answer.identity.invocationID.uuidString.prefix(8))): \(refusal)"))
+            }
         } catch {
             guard current(token, epoch), canUseContent else { finishLateAnswer(token, epoch); return }
             message = String(localized: "The reply was not confirmed. Refresh status before retrying the same answer.")

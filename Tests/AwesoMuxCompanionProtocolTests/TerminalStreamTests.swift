@@ -66,6 +66,15 @@ import Testing
         }
     }
 
+    @Test func capabilityDiscoveryUsesPairedRequestEnvelope() throws {
+        let request = CompanionAPIRequest(operation: "get_capabilities", connectionID: Self.id)
+        let decoded = try CompanionProtocol.decoder().decode(
+            CompanionAPIRequest.self, from: CompanionProtocol.encoder().encode(request))
+        #expect(CompanionOperation(rawValue: decoded.operation) != nil)
+        #expect(decoded.connectionID == Self.id)
+        #expect(decoded.paneID == nil)
+    }
+
     @Test func watchRequestVector() throws {
         let data = try Data(contentsOf: #require(Bundle.module.url(forResource: "vector-13", withExtension: "json", subdirectory: "Fixtures")))
         let request = try CompanionProtocol.decoder().decode(CompanionAPIRequest.self, from: data)

@@ -27,6 +27,7 @@ public enum CompanionProtocol {
 
 public enum CompanionOperation: String, Codable, CaseIterable, Sendable {
     case connectionStatus = "get_connection_status"
+    case capabilities = "get_capabilities"
     case unpair
     case listAgents = "list_agents"
     case listPanes = "list_panes"

@@ -78,6 +78,7 @@ public enum CompanionTerminalStream {
     public struct Capabilities: Codable, Equatable, Sendable {
         public let version: Int
         public let maximumDataBytes: Int
+        /// Maximum queued bytes per stream, enforced by the Mac relay rather than the single-frame codec.
         public let maximumPendingBytes: Int
         public let maximumSnapshotBytes: Int
         public let heartbeatSeconds: Int
@@ -229,18 +230,27 @@ public enum CompanionTerminalStream {
     public static func decode(_ data: Data) throws -> (frame: Frame, generation: UInt32) {
         guard data.count >= headerBytes else { throw Failure.tooShort }
         guard data.count <= maximumFrameBytes else { throw Failure.tooLarge }
-        let bytes = [UInt8](data)
-        guard let type = FrameType(rawValue: bytes[0]) else { throw Failure.unknownType(bytes[0]) }
-        let generation = bytes[1..<5].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
-        let body = data.dropFirst(headerBytes)
+        var cursor = data.startIndex
+        func integer<T: FixedWidthInteger>(_ count: Int, as _: T.Type) -> T {
+            var value: T = 0
+            for _ in 0..<count {
+                value = (value << 8) | T(data[cursor])
+                data.formIndex(after: &cursor)
+            }
+            return value
+        }
+        let rawType = integer(1, as: UInt8.self)
+        guard let type = FrameType(rawValue: rawType) else { throw Failure.unknownType(rawType) }
+        let generation = integer(4, as: UInt32.self)
+        let body = data[cursor...]
         func control<T: Decodable>(_ kind: T.Type) throws -> T {
             guard let value = try? CompanionProtocol.decoder().decode(kind, from: Data(body)) else { throw Failure.invalidControl }
             return value
         }
         func payload() throws -> (UInt64, Data) {
             guard body.count >= sequenceBytes else { throw Failure.tooShort }
-            let sequence = body.prefix(sequenceBytes).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
-            return (sequence, Data(body.dropFirst(sequenceBytes)))
+            let sequence = integer(sequenceBytes, as: UInt64.self)
+            return (sequence, Data(data[cursor...]))
         }
         let frame: Frame
         switch type {

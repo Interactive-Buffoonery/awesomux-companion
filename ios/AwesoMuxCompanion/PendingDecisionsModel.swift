@@ -7,7 +7,7 @@ import UIKit
 /// Scene-local decision content. Nothing here is written to caches, widgets or notifications.
 @MainActor @Observable
 final class PendingDecisionsModel {
-    enum Availability { case idle, loading, available, disabled, unavailable, unsupported, denied, capacity }
+    enum Availability { case idle, loading, available, disabled, unavailable, unsupported, denied, capacity, clockChanged }
 
     private(set) var availability: Availability = .idle
     private(set) var pending: [CompanionPendingDecision] = []
@@ -52,6 +52,7 @@ final class PendingDecisionsModel {
     private var deadlines: [CompanionDecisionIdentity: Deadline] = [:]
     private var closed: [CompanionDecisionIdentity: Deadline] = [:]
     @ObservationIgnored private var wallHighWater = Date.distantPast
+    private var clockInvalid = false
     private var announcedOutcomes: [CompanionDecisionIdentity: CompanionDecisionReceipt] = [:]
     private var announcedEvents: [String: TimeInterval] = [:]
     private var lastRead: TimeInterval?
@@ -85,6 +86,7 @@ final class PendingDecisionsModel {
 
     private var canUseContent: Bool {
         active && isUnlocked() && session() != nil && connection == session() && pairedConnection == pairing()
+            && !clockInvalid && now() >= wallHighWater.addingTimeInterval(-60)
     }
 
     func sceneChanged(active: Bool, backgrounded: Bool = false) {
@@ -92,6 +94,7 @@ final class PendingDecisionsModel {
         synchronizeConnection()
         if !active || !isUnlocked() { clearContent() }
         if backgrounded || isLocked() { invalidateAnswer() }
+        _ = observeTime()
     }
 
     func connectionChanged(denied: Bool = false) {
@@ -148,7 +151,7 @@ final class PendingDecisionsModel {
     }
 
     func expire() {
-        observeTime()
+        guard observeTime() else { return }
         let expired = pending.filter { !isLive($0.identity) }
         if !expired.isEmpty {
             pending.removeAll { !isLive($0.identity) }
@@ -166,7 +169,19 @@ final class PendingDecisionsModel {
 
     private var effectiveNow: Date { max(now(), wallHighWater) }
 
-    private func observeTime() { wallHighWater = effectiveNow }
+    @discardableResult
+    private func observeTime() -> Bool {
+        guard !clockInvalid, now() >= wallHighWater.addingTimeInterval(-60) else {
+            clockInvalid = true
+            invalidateAnswer()
+            clearContent()
+            message = nil
+            availability = .clockChanged
+            return false
+        }
+        wallHighWater = effectiveNow
+        return true
+    }
 
     private func pruneHistory() {
         // An immutable wire deadline cannot become live again after clock rollback:
@@ -200,11 +215,11 @@ final class PendingDecisionsModel {
     @discardableResult
     private func refreshCurrent() async -> Bool {
         synchronizeConnection()
+        guard observeTime() else { return false }
         guard canUseContent, let token = session() else { clearContent(); return false }
         readGeneration += 1
         let readID = readGeneration
         let epoch = generation
-        observeTime()
         pruneHistory()
         isReading = true
         if availability == .idle { availability = .loading }
@@ -214,6 +229,9 @@ final class PendingDecisionsModel {
                 guard let self else { return false }
                 return self.current(token, epoch) && self.readGeneration == readID && self.canUseContent
             })
+            if current(token, epoch), readID == readGeneration {
+                guard observeTime() else { return false }
+            }
             guard current(token, epoch), readID == readGeneration, canUseContent else {
                 if readID == readGeneration { clearContent() }
                 return false

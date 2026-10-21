@@ -71,6 +71,28 @@ final class PendingDecisionsModelTests: XCTestCase {
         XCTAssertEqual(f.announcements.count, 2)
     }
 
+    func testCorrectedClockAfterForwardJumpExplainsPausedAnswersUntilModelRecreated() async {
+        let f = DecisionFixture()
+        await f.model.refresh()
+        let correctTime = f.wallTime
+        f.wallTime += 3600
+        await f.model.refresh()
+        f.wallTime = correctTime
+        await f.model.refresh()
+        XCTAssertEqual(f.model.availability, .clockChanged)
+        XCTAssertTrue(f.model.pending.isEmpty)
+        XCTAssertTrue(f.model.outcomes.isEmpty)
+        XCTAssertFalse(f.model.isReading)
+        XCTAssertFalse(f.model.canAnswer(f.identity, choice: .allow))
+        await f.model.answer(f.identity, choice: .allow)
+        XCTAssertTrue(f.sent.isEmpty)
+        XCTAssertEqual(f.auth.calls, 0)
+        f.wallTime += 7200
+        await f.model.refresh()
+        XCTAssertEqual(f.model.availability, .clockChanged)
+        XCTAssertTrue(f.sent.isEmpty)
+    }
+
     func testRefusalReceiptsAreConfirmedEvenWhileMacRemainsPending() async {
         for result: CompanionDecisionReceipt.Result in [.expired, .retryConflict, .capacityExceeded] {
             let f = DecisionFixture()

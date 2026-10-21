@@ -24,6 +24,8 @@ struct PendingDecisionsSection: View {
                 Text("Permission status is unavailable. Refresh when your Mac is reachable.")
             case .capacity:
                 Text("This iPhone’s decision history is full. Answer on your Mac or wait for older requests to expire, then refresh.")
+            case .clockChanged:
+                Text("This iPhone’s clock changed. Remote answers are paused to protect request deadlines. Check the device time, then close and reopen the app. Answer on your Mac in the meantime.")
             case .available:
                 if model.pending.isEmpty && model.outcomes.isEmpty && model.receipts.isEmpty {
                     Text("No permission requests available for this iPhone. Decide access is granted per workspace in Mac settings.")

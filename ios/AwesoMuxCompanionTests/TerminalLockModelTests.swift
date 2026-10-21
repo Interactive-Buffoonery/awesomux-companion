@@ -4,7 +4,31 @@ import XCTest
 
 @MainActor
 final class TerminalLockModelTests: XCTestCase {
-    func testStartsLockedByDefaultAndPersistsAuthenticatedDisable() async {
+    // Failure modes: the old absent-key default must not become consent, while
+    // persisted true was only written by an explicit enable in previous builds.
+    func testFreshAndLegacyDefaultsStayUnlockedWithoutAuthentication() async {
+        for storedValue in [nil, false] as [Bool?] {
+            let fixture = Fixture(enabled: storedValue)
+            XCTAssertFalse(fixture.model.isEnabled)
+            XCTAssertFalse(fixture.model.isLocked)
+            fixture.model.becomeActive()
+            await fixture.model.unlock()
+            fixture.model.enterBackground()
+            fixture.clock.time += TerminalLockModel.gracePeriod
+            fixture.model.becomeActive()
+            XCTAssertFalse(fixture.model.isLocked)
+            XCTAssertEqual(fixture.auth.requestCount, 0)
+            XCTAssertEqual(fixture.defaults.object(forKey: TerminalLockModel.preferenceKey) as? Bool, storedValue)
+        }
+    }
+
+    func testLegacyExplicitEnableRemainsLocked() {
+        let fixture = Fixture(enabled: true)
+        XCTAssertTrue(fixture.model.isEnabled)
+        XCTAssertTrue(fixture.model.isLocked)
+    }
+
+    func testExplicitProtectionOptInPersistsAuthenticatedDisable() async {
         let fixture = Fixture()
         XCTAssertTrue(fixture.model.isEnabled)
         XCTAssertTrue(fixture.model.isLocked)
@@ -92,7 +116,7 @@ final class TerminalLockModelTests: XCTestCase {
             XCTAssertTrue(fixture.model.isLocked)
             XCTAssertTrue(fixture.model.isEnabled)
             XCTAssertTrue(fixture.model.authenticationFailed)
-            XCTAssertNil(fixture.defaults.object(forKey: TerminalLockModel.preferenceKey))
+            XCTAssertEqual(fixture.defaults.object(forKey: TerminalLockModel.preferenceKey) as? Bool, true)
         }
     }
 
@@ -237,8 +261,9 @@ private final class Fixture {
     let clock: TestClock
     let model: TerminalLockModel
 
-    init() {
+    init(enabled: Bool? = true) {
         defaults = UserDefaults(suiteName: suite)!
+        if let enabled { defaults.set(enabled, forKey: TerminalLockModel.preferenceKey) }
         let clock = TestClock()
         self.clock = clock
         model = TerminalLockModel(defaults: defaults, now: { [clock] in clock.time }, authenticator: auth)

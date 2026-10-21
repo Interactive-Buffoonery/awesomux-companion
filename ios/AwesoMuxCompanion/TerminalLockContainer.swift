@@ -63,7 +63,7 @@ struct TerminalProtectionToggle: View {
     let model: TerminalLockModel
 
     var body: some View {
-        Toggle("Protect Agents and Terminals", isOn: Binding(
+        Toggle("Lock App", isOn: Binding(
             get: { model.isEnabled },
             set: { enabled in Task { await model.setEnabled(enabled) } }))
             .disabled(model.isAuthenticating || !model.isActive)

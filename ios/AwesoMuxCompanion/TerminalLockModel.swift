@@ -83,7 +83,7 @@ final class TerminalLockModel {
         self.defaults = defaults
         self.now = now
         self.authenticator = authenticator
-        let enabled = defaults.object(forKey: Self.preferenceKey) as? Bool ?? true
+        let enabled = defaults.object(forKey: Self.preferenceKey) as? Bool ?? false
         isEnabled = enabled
         isLocked = enabled
     }
@@ -119,7 +119,7 @@ final class TerminalLockModel {
     }
 
     func synchronizePreference() {
-        let enabled = defaults.object(forKey: Self.preferenceKey) as? Bool ?? true
+        let enabled = defaults.object(forKey: Self.preferenceKey) as? Bool ?? false
         guard enabled != isEnabled else { return }
         invalidateAuthentication()
         isEnabled = enabled

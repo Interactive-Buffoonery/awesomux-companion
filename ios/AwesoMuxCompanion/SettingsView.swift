@@ -56,6 +56,7 @@ struct SettingsView: View {
                     Text(message).font(.callout).foregroundStyle(Cat.subtext0)
                 }
             } header: { Text("Privacy").foregroundStyle(Cat.subtext0) }
+                footer: { Text("Lock App is optional. When enabled, use Face ID, Touch ID, or your device passcode to view agents and terminals.").foregroundStyle(Cat.subtext0) }
             .listRowBackground(Cat.card)
             Section {
                 LabeledContent("Version", value: Self.version).foregroundStyle(Cat.text)

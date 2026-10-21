@@ -12,10 +12,13 @@ final class TerminalLockRenderingTests: XCTestCase {
         let suite = "TerminalLockRendering.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set(false, forKey: TerminalLockModel.preferenceKey)
         let model = TerminalLockModel(defaults: defaults, authenticator: RenderingAuthenticator())
         model.becomeActive()
-        let host = UIHostingController(rootView: Text("Sensitive agent content"))
+        let store = CompanionStore(defaults: defaults, loadPairing: { nil }, liveActivity: nil,
+                                   writeShared: { _ in }, clearShared: {})
+        let host = UIHostingController(rootView: NavigationStack {
+            SettingsView(store: store)
+        }.environment(model))
         let window = UIWindow(windowScene: scene)
         window.frame = scene.effectiveGeometry.coordinateSpace.bounds
         window.rootViewController = host
@@ -29,6 +32,11 @@ final class TerminalLockRenderingTests: XCTestCase {
             window.rootViewController = nil
             previousKeyWindow?.makeKey()
         }
+        XCTAssertFalse(model.isEnabled)
+        XCTAssertFalse(model.isLocked)
+        XCTAssertTrue(anchor.privacyWindow == nil || anchor.privacyWindow?.isHidden == true)
+        XCTAssertTrue(window.isUserInteractionEnabled)
+        attach(window, name: "Optional Lock App off by default — app-hosted Settings")
         let sheet = UIViewController()
         sheet.view.backgroundColor = .systemRed
         let field = UITextField(frame: CGRect(x: 24, y: 48, width: 240, height: 44))

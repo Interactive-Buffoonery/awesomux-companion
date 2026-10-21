@@ -256,15 +256,33 @@ separately: recorded means the Mac accepted an answer, delivered means the hook
 acknowledged it, and neither proves that Claude executed a tool. Expired,
 cancelled and unknown states are inert.
 
+Decide workspace denial clears decision content and invalidates decision
+operations without changing agent, pane, widget or Live Activity connectivity.
+Authentication generations are separate from pairing identity: a temporary
+authority loss retains the same pairing's bounded retry tuples and deadline
+history; replacing or removing the pairing clears them. Remote refusal receipts
+are shown as refusals even when the Mac's local request remains pending. An
+original losing receipt identifies the winning source and says this phone's
+attempt was not used; fresh list statuses describe the current state without
+implying that every list entry is a losing phone submission.
+
 Decision summaries and outcomes live only in the scene model. Inactivity,
 locking, backgrounding, stale/failed reads and pairing changes clear displayed
 content. Decisions never enter the agent cache, App Group, widgets, Live Activity
 or notifications. Fixed wall and sleep-aware monotonic deadlines prevent repeated
 reads or clock rollback from extending a remote window. In-memory retry tuples
-expire after ten minutes; identity/deadline tombstones are bounded and refuse
-new work rather than reopen old requests. Foreground polling refreshes every
-five seconds; content becomes non-actionable after six seconds without a fresh
-read. Model tests control clocks, authentication and asynchronous completions;
+expire after ten minutes. Identity/deadline history prunes only after its fixed
+wall and monotonic deadlines plus a retry horizon. A per-pairing wall-clock high
+water mark prevents an immutable expired wire deadline from reopening after
+pruning and clock rollback. Saturated history shows an explicit capacity state.
+Foreground polling refreshes every five seconds. Pending and outcome rows remain
+stable during an unchanged successful poll while answer authority is withheld;
+a failed read clears them. Content becomes non-actionable after six seconds
+without a fresh read. Guarded reads recheck scene and lock state between status
+and list, on route retries, and just before each request frame is sent.
+Accessibility announcements cover authentication failure, uncertain submission,
+expiry and changed outcomes only while active and unlocked, with repeated poll
+results deduplicated. Model tests control clocks, authentication and asynchronous completions;
 store tests cover production gate discovery, route handling and authority at
 send. App-hosted fixture renderings exercise request context and status copy;
 physical authentication, live paired networking, native Claude races and

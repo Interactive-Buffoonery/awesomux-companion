@@ -36,13 +36,14 @@ private struct ProtectedCompanionRoot: View {
         _terminalLock = State(initialValue: lock)
         _decisions = State(initialValue: PendingDecisionsModel(
             session: { [weak store] in store?.decisionSession },
+            pairing: { [weak store] in store?.decisionPairing },
             isUnlocked: { [weak store] in
                 lock.isActive && !lock.isLocked && store?.showingPairing == false && store?.pairingStep == .idle
             },
             isLocked: { lock.isLocked },
-            read: { [weak store] session in
+            read: { [weak store] session, canRead in
                 guard let store else { throw CancellationError() }
-                return try await store.readDecisions(session: session)
+                return try await store.readDecisions(session: session, canRead: canRead)
             },
             submit: { [weak store] answer, session, canSend in
                 guard let store else { throw CancellationError() }

@@ -17,6 +17,8 @@ enum PairingStep: Equatable {
 
 protocol CompanionSessionClient: Sendable {
     func call(_ operation: String, connectionID: UUID, limit: Int?, cursor: String?) async throws -> APIResponse
+    func call(_ operation: String, connectionID: UUID, limit: Int?, cursor: String?,
+              canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
     func unpair(connectionID: UUID) async throws
     func answerDecision(_ answer: CompanionDecisionAnswer, connectionID: UUID,
                         canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
@@ -24,6 +26,12 @@ protocol CompanionSessionClient: Sendable {
 }
 
 extension CompanionSessionClient {
+    func call(_ operation: String, connectionID: UUID, limit: Int?, cursor: String?,
+              canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse {
+        guard await canSend() else { throw CancellationError() }
+        return try await call(operation, connectionID: connectionID, limit: limit, cursor: cursor)
+    }
+
     func answerDecision(_ answer: CompanionDecisionAnswer, connectionID: UUID,
                         canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse {
         throw MacClientFailure.api("unsupported_operation")
@@ -39,6 +47,8 @@ extension MacClient: CompanionSessionClient {}
 @MainActor @Observable
 final class CompanionStore {
     private(set) var panes = PaneRoster()
+    private(set) var decisionPairingID = UUID()
+    var decisionPairing: UUID? { record == nil || isUnpairing ? nil : decisionPairingID }
     private(set) var decisionSessionID = UUID()
     private(set) var decisionAccessDenied = false
     var decisionSession: UUID? { record == nil || isUnpairing ? nil : decisionSessionID }
@@ -294,6 +304,7 @@ final class CompanionStore {
     }
 
     private func forgetConnection() {
+        decisionPairingID = UUID()
         decisionAccessDenied = false
         decisionSessionID = UUID()
         revision += 1
@@ -591,11 +602,12 @@ final class CompanionStore {
     }
 
     private func sessionCall(_ operation: String, record: PairingRecord, revision started: Int,
-                             limit: Int? = nil, cursor: String? = nil, previewAllowed: Bool? = nil, paneGeneration: Int? = nil) async throws -> APIResponse {
+                             limit: Int? = nil, cursor: String? = nil, previewAllowed: Bool? = nil, paneGeneration: Int? = nil,
+                             canRead: (@MainActor @Sendable () -> Bool)? = nil, scopedDecision: Bool = false) async throws -> APIResponse {
         let permissionStarted = permissionRevision
         func checkCurrent() throws {
             try Task.checkCancellation()
-            guard revision == started, permissionRevision == permissionStarted,
+            guard revision == started, permissionRevision == permissionStarted, canRead?() ?? true,
                   paneGeneration.map({ acceptsPaneRead($0, revision: started) }) ?? true else { throw CancellationError() }
         }
         try checkCurrent()
@@ -606,6 +618,12 @@ final class CompanionStore {
                 if let previewAllowed {
                     return try await client.setTerminalPreview(previewAllowed, connectionID: record.connectionID)
                 }
+                if let canRead {
+                    return try await client.call(operation, connectionID: record.connectionID, limit: limit, cursor: cursor,
+                        canSend: { [weak self] in
+                            self?.revision == started && self?.permissionRevision == permissionStarted && canRead()
+                        })
+                }
                 return try await client.call(operation, connectionID: record.connectionID, limit: limit, cursor: cursor)
             }
             try checkCurrent()
@@ -614,9 +632,18 @@ final class CompanionStore {
             return response
         } catch {
             try checkCurrent()
-            if error.isCompanionAuthorizationFailure { handleAuthorizationFailure(error) }
+            if scopedDecision, (error as? MacClientFailure) == .api("permission_denied") {
+                handleDecisionDenial()
+            } else if error.isCompanionAuthorizationFailure {
+                handleAuthorizationFailure(error)
+            }
             throw error
         }
+    }
+
+    private func handleDecisionDenial() {
+        decisionAccessDenied = true
+        decisionSessionID = UUID()
     }
 
     private func handleAuthorizationFailure(_ error: Error) {
@@ -647,17 +674,17 @@ final class CompanionStore {
 
     // MARK: Foreground decisions
 
-    func readDecisions(session: UUID) async throws -> APIResponse {
-        guard decisionSession == session, let record else { throw CancellationError() }
+    func readDecisions(session: UUID, canRead: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse {
+        guard canRead(), decisionSession == session, let record else { throw CancellationError() }
         let started = revision
         let status = try await sessionCall(CompanionOperation.connectionStatus.rawValue,
-                                           record: record, revision: started)
-        guard decisionSession == session else { throw CancellationError() }
+                                           record: record, revision: started, canRead: canRead)
+        guard canRead(), decisionSession == session else { throw CancellationError() }
         decisionAccessDenied = false
         guard status.remoteDecisionsEnabled == true else { return status }
         let response = try await sessionCall(CompanionOperation.pendingDecisions.rawValue,
-                                             record: record, revision: started)
-        guard decisionSession == session else { throw CancellationError() }
+                                             record: record, revision: started, canRead: canRead, scopedDecision: true)
+        guard canRead(), decisionSession == session else { throw CancellationError() }
         return response
     }
 
@@ -677,7 +704,11 @@ final class CompanionStore {
             return response
         } catch {
             guard decisionSession == session else { throw CancellationError() }
-            if error.isCompanionAuthorizationFailure { handleAuthorizationFailure(error) }
+            if (error as? MacClientFailure) == .api("permission_denied") {
+                handleDecisionDenial()
+            } else if error.isCompanionAuthorizationFailure {
+                handleAuthorizationFailure(error)
+            }
             throw error
         }
     }

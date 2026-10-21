@@ -89,6 +89,12 @@ struct MacClient: Sendable {
         try await exchange(CompanionAPIRequest(operation: operation, connectionID: connectionID, limit: limit, cursor: cursor))
     }
 
+    func call(_ operation: String, connectionID: UUID, limit: Int?, cursor: String?,
+              canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse {
+        try await exchange(CompanionAPIRequest(operation: operation, connectionID: connectionID,
+                                              limit: limit, cursor: cursor), canSend: canSend)
+    }
+
     func setTerminalPreview(_ allowed: Bool, connectionID: UUID) async throws -> APIResponse {
         try await exchange(Self.previewRequest(allowed, connectionID: connectionID))
     }

@@ -22,6 +22,8 @@ struct PendingDecisionsSection: View {
                 Text("Your Mac could not authorize Decide access. Check this iPhone’s workspace grant in Mac settings.")
             case .unavailable:
                 Text("Permission status is unavailable. Refresh when your Mac is reachable.")
+            case .capacity:
+                Text("This iPhone’s decision history is full. Answer on your Mac or wait for older requests to expire, then refresh.")
             case .available:
                 if model.pending.isEmpty && model.outcomes.isEmpty && model.receipts.isEmpty {
                     Text("No permission requests available for this iPhone. Decide access is granted per workspace in Mac settings.")
@@ -63,7 +65,9 @@ struct PendingDecisionsSection: View {
             ForEach(model.outcomes, id: \.identity) { outcome in
                 DecisionOutcomeView(receipt: outcome, isCurrent: true, context: context(outcome.identity))
             }
-            ForEach(model.receipts.filter { receipt in !model.outcomes.contains { $0.identity == receipt.identity } }, id: \.identity) { receipt in
+            ForEach(model.receipts.filter { receipt in
+                receipt.result != .recorded || !model.outcomes.contains { $0.identity == receipt.identity }
+            }, id: \.identity) { receipt in
                 DecisionOutcomeView(receipt: receipt, isCurrent: false, context: context(receipt.identity))
             }
             if model.isAnswering {
@@ -89,7 +93,7 @@ struct DecisionOutcomeView: View {
             DecisionContextView(context: context)
             Text(isCurrent ? "Latest Mac status" : "Original submission receipt")
                 .font(.caption).foregroundStyle(Cat.subtext0)
-            Text(status).font(.callout)
+            Text(statusText).font(.callout)
             if let choice = receipt.choice {
                 Text("Recorded choice: \(choice == .allow ? String(localized: "Allow once") : String(localized: "Deny once"))")
             }
@@ -104,7 +108,34 @@ struct DecisionOutcomeView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var status: String {
+    var statusText: String {
+        if !isCurrent {
+            switch receipt.result {
+            case .expired:
+                return String(localized: "The Mac refused this answer because the remote window expired. Check your Mac.")
+            case .retryConflict:
+                return String(localized: "The Mac refused a conflicting retry. Do not send a different choice; check your Mac.")
+            case .capacityExceeded:
+                return String(localized: "The Mac could not accept this answer because its decision history is full. Check your Mac.")
+            case .unknown:
+                return String(localized: "The Mac has no retained confirmation for this request. Check Claude on your Mac.")
+            case .alreadyAnswered:
+                switch receipt.state {
+                case .recorded, .delivering, .delivered:
+                    if let source = receipt.source {
+                        return String(localized: "Already answered by \(source.name). Your attempted answer was not used. \(stateText)")
+                    }
+                    return String(localized: "The request was already answered. Your attempted answer was not used. \(stateText)")
+                default:
+                    return String(localized: "Your attempted answer was not used. \(stateText)")
+                }
+            case .recorded: break
+            }
+        }
+        return stateText
+    }
+
+    private var stateText: String {
         switch receipt.state {
         case .pending: String(localized: "Pending on your Mac.")
         case .recorded: String(localized: "Answer recorded on your Mac. Hook delivery is not confirmed.")

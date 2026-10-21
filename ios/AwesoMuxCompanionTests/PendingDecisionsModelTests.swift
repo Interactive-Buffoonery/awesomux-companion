@@ -4,6 +4,204 @@ import XCTest
 
 @MainActor
 final class PendingDecisionsModelTests: XCTestCase {
+    func testUnchangedPollPreservesRowsWhileAnswerAuthorityIsWithheld() async {
+        let f = DecisionFixture()
+        await f.model.refresh()
+        let pending = f.model.pending
+        let gate = RequestGate("unchanged poll")
+        f.readGate = gate
+        let read = Task { await f.model.refresh() }
+        await fulfillment(of: [gate.started], timeout: 3)
+        XCTAssertEqual(f.model.pending, pending)
+        XCTAssertEqual(f.model.availability, .loading)
+        XCTAssertFalse(f.model.canAnswer(f.identity, choice: .allow))
+        gate.release()
+        await read.value
+        XCTAssertEqual(f.model.pending, pending)
+        XCTAssertTrue(f.model.canAnswer(f.identity, choice: .allow))
+        f.response = f.list(outcomes: [f.macWinner])
+        await f.model.refresh()
+        let outcomeGate = RequestGate("unchanged outcome poll")
+        f.readGate = outcomeGate
+        let outcomesRead = Task { await f.model.refresh() }
+        await fulfillment(of: [outcomeGate.started], timeout: 3)
+        XCTAssertEqual(f.model.outcomes, [f.macWinner])
+        outcomeGate.release()
+        await outcomesRead.value
+        XCTAssertEqual(f.model.outcomes, [f.macWinner])
+    }
+
+    func testRefusalReceiptsAreConfirmedEvenWhileMacRemainsPending() async {
+        for result: CompanionDecisionReceipt.Result in [.expired, .retryConflict, .capacityExceeded] {
+            let f = DecisionFixture()
+            f.receiptOverride = .init(identity: f.identity, result: result, state: .pending)
+            await f.model.refresh()
+            await f.model.answer(f.identity, choice: .allow)
+            XCTAssertEqual(f.model.receipts.first?.result, result)
+            XCTAssertTrue(f.model.pending.isEmpty)
+            XCTAssertNil(f.model.message)
+            XCTAssertFalse(f.model.canRetry(f.identity))
+            XCTAssertFalse(f.model.canAnswer(f.identity, choice: .deny))
+            XCTAssertEqual(f.sent.count, 1)
+        }
+    }
+
+    func testAnnouncementsDeduplicateOutcomesAndUncertaintyAndSuppressInactiveContent() async {
+        let f = DecisionFixture()
+        f.response = f.list(outcomes: [f.macWinner])
+        await f.model.refresh()
+        XCTAssertEqual(f.announcements.count, 1)
+        XCTAssertTrue(f.announcements[0].contains("Mac"))
+        await f.model.refresh()
+        XCTAssertEqual(f.announcements.count, 1)
+        f.response = f.list(outcomes: [.init(identity: f.identity, result: .alreadyAnswered, state: .delivered,
+            choice: .deny, source: .init(name: "Mac"))])
+        await f.model.refresh()
+        XCTAssertEqual(f.announcements.count, 2)
+        f.active = false
+        f.model.sceneChanged(active: false)
+        await f.model.refresh()
+        XCTAssertEqual(f.announcements.count, 2)
+
+        let uncertain = DecisionFixture()
+        uncertain.dropReply = true
+        await uncertain.model.refresh()
+        await uncertain.model.answer(uncertain.identity, choice: .allow)
+        XCTAssertEqual(uncertain.announcements.count, 1)
+        await uncertain.model.retry(uncertain.identity)
+        XCTAssertEqual(uncertain.announcements.count, 1)
+    }
+
+    func testAuthenticationAndExpiryAnnouncementsRequireActiveUnlockedScene() async {
+        let f = DecisionFixture()
+        await f.model.refresh()
+        f.auth.success = false
+        await f.model.answer(f.identity, choice: .allow)
+        XCTAssertEqual(f.announcements.count, 1)
+        f.time += 61
+        f.model.expire()
+        XCTAssertEqual(f.announcements.count, 2)
+        f.model.expire()
+        XCTAssertEqual(f.announcements.count, 2)
+
+        let inactive = DecisionFixture()
+        await inactive.model.refresh()
+        inactive.auth.success = false
+        inactive.auth.onAuthenticate = { inactive.active = false; inactive.model.sceneChanged(active: false) }
+        await inactive.model.answer(inactive.identity, choice: .allow)
+        XCTAssertTrue(inactive.announcements.isEmpty)
+        inactive.time += 61
+        inactive.model.expire()
+        XCTAssertTrue(inactive.announcements.isEmpty)
+    }
+
+    func testHistoryCapacityIsExplicitAndExpiryPrunesWithoutRollbackReopening() async {
+        let f = DecisionFixture()
+        let expires = f.pending.remoteExpiresAt
+        func batch() -> [CompanionPendingDecision] {
+            (0..<128).map { _ in
+                let id = CompanionDecisionIdentity(runtimeID: f.identity.runtimeID, workspaceID: f.identity.workspaceID,
+                    paneID: UUID(), targetVersion: UUID(), providerSessionID: "claude", invocationID: UUID(), revision: 1)
+                return .init(identity: id, tool: "Bash", summary: "bounded", remoteExpiresAt: expires, choices: [.allow, .deny])
+            }
+        }
+        let original = batch()
+        for requests in [original, batch(), batch(), batch()] {
+            f.response = f.list(pending: requests)
+            await f.model.refresh()
+            XCTAssertEqual(f.model.availability, .available)
+        }
+        f.response = f.list(pending: [f.pending])
+        await f.model.refresh()
+        XCTAssertEqual(f.model.availability, .capacity)
+        f.time += 700
+        f.wallTime += 700
+        let fresh = CompanionPendingDecision(identity: f.identity, tool: "Bash", summary: "fresh",
+            remoteExpiresAt: Date(timeIntervalSince1970: f.wallTime + 60), choices: [.allow, .deny])
+        f.response = f.list(pending: [fresh])
+        await f.model.refresh()
+        XCTAssertEqual(f.model.availability, .available)
+        XCTAssertEqual(f.model.pending.count, 1)
+        f.wallTime -= 3600
+        f.response = f.list(pending: original)
+        await f.model.refresh()
+        XCTAssertTrue(f.model.pending.isEmpty)
+        XCTAssertFalse(f.model.canAnswer(original[0].identity, choice: .allow))
+    }
+
+    func testCancelledResumedAuthenticationReadReleasesAnswerOwnership() async {
+        let f = DecisionFixture()
+        await f.model.refresh()
+        f.auth.onAuthenticate = { f.active = false; f.model.sceneChanged(active: false) }
+        await f.model.answer(f.identity, choice: .allow)
+        f.active = true
+        f.model.sceneChanged(active: true)
+        let gate = RequestGate("resumed authentication read")
+        f.readGate = gate
+        let resumed = Task { await f.model.resumeAuthenticatedAnswer() }
+        await fulfillment(of: [gate.started], timeout: 3)
+        resumed.cancel()
+        gate.release()
+        await resumed.value
+        XCTAssertFalse(f.model.isAnswering)
+        XCTAssertTrue(f.sent.isEmpty)
+        await f.model.refresh()
+        XCTAssertTrue(f.model.canAnswer(f.identity, choice: .deny))
+    }
+
+    func testCancelledPostSubmitReconciliationReleasesOwnershipWithoutNewChoice() async {
+        let f = DecisionFixture()
+        await f.model.refresh()
+        let gate = RequestGate("post-submit reconciliation")
+        f.onSend = { f.readGate = gate }
+        let answer = Task { await f.model.answer(f.identity, choice: .allow) }
+        await fulfillment(of: [gate.started], timeout: 3)
+        answer.cancel()
+        gate.release()
+        await answer.value
+        XCTAssertFalse(f.model.isAnswering)
+        XCTAssertEqual(f.sent.count, 1)
+        await f.model.refresh()
+        XCTAssertFalse(f.model.canAnswer(f.identity, choice: .deny))
+        XCTAssertEqual(f.model.outcomes.first?.state, .delivered)
+    }
+
+    func testAuthorizationChangeRetainsSamePairingRetryTupleAndDeadline() async {
+        let f = DecisionFixture()
+        await f.model.refresh()
+        f.dropReply = true
+        await f.model.answer(f.identity, choice: .allow)
+        let original = f.sent[0]
+        f.session = UUID()
+        f.model.connectionChanged(denied: true)
+        XCTAssertTrue(f.model.pending.isEmpty)
+        XCTAssertTrue(f.model.hasAttempt(f.identity))
+        await f.model.refresh()
+        XCTAssertFalse(f.model.canAnswer(f.identity, choice: .deny))
+        await f.model.retry(f.identity)
+        XCTAssertEqual(f.sent, [original, original])
+        f.time += 61
+        f.wallTime -= 3600
+        f.session = UUID()
+        f.model.connectionChanged()
+        await f.model.refresh()
+        XCTAssertTrue(f.model.pending.isEmpty)
+        XCTAssertFalse(f.model.canRetry(f.identity))
+    }
+
+    func testNewPairingClearsRetainedRetryHistory() async {
+        let f = DecisionFixture()
+        await f.model.refresh()
+        f.dropReply = true
+        await f.model.answer(f.identity, choice: .allow)
+        XCTAssertTrue(f.model.hasAttempt(f.identity))
+        f.pairing = UUID()
+        f.session = UUID()
+        f.model.connectionChanged()
+        XCTAssertFalse(f.model.hasAttempt(f.identity))
+        XCTAssertTrue(f.model.pending.isEmpty)
+    }
+
     func testDoubleTapAndOppositeChoiceDuringAuthenticationSendOnlyOnce() async {
         let f = DecisionFixture()
         await f.model.refresh()
@@ -303,6 +501,7 @@ final class DecisionFixture {
     var active = true
     var unlocked = true
     var session: UUID? = UUID()
+    var pairing: UUID? = UUID()
     var reads = 0
     var sent: [CompanionDecisionAnswer] = []
     var readFails = false
@@ -310,6 +509,8 @@ final class DecisionFixture {
     var sendGate: RequestGate?
     var lockEnabled = false
     var dropReply = false
+    var receiptOverride: CompanionDecisionReceipt?
+    var announcements: [String] = []
     var onRead: (() -> Void)?
     var onSend: (() -> Void)?
     let auth = DecisionTestAuthenticator()
@@ -321,12 +522,14 @@ final class DecisionFixture {
         choice: .deny, source: .init(name: "Mac"))
     lazy var response = list(pending: [pending])
     lazy var model = PendingDecisionsModel(
-        session: { [unowned self] in session }, isUnlocked: { [unowned self] in unlocked && active },
+        session: { [unowned self] in session }, pairing: { [unowned self] in pairing }, isUnlocked: { [unowned self] in unlocked && active },
         isLocked: { [unowned self] in lockEnabled }, authenticator: auth, now: { [unowned self] in Date(timeIntervalSince1970: wallTime) },
         uptime: { [unowned self] in time },
-        read: { [unowned self] _ in
+        announce: { [unowned self] in announcements.append($0) },
+        read: { [unowned self] _, canRead in
             reads += 1; onRead?()
             if let gate = readGate { readGate = nil; await gate.pause() }
+            guard canRead() else { throw CancellationError() }
             if readFails { throw MacClientFailure.unreachable }
             return response
         },
@@ -335,6 +538,7 @@ final class DecisionFixture {
             sent.append(answer); onSend?()
             if let gate = sendGate { sendGate = nil; await gate.pause() }
             if dropReply { throw MacClientFailure.closed }
+            if let receiptOverride { return APIResponse(decisionReceipt: receiptOverride) }
             let receipt = CompanionDecisionReceipt(identity: answer.identity, result: .recorded, state: .recorded,
                 choice: answer.choice, source: .init(name: "Test iPhone"))
             response = list(outcomes: [.init(identity: answer.identity, result: .alreadyAnswered, state: .delivered,

@@ -2,11 +2,12 @@ import AwesoMuxCompanionProtocol
 import Darwin
 import Foundation
 import Observation
+import UIKit
 
 /// Scene-local decision content. Nothing here is written to caches, widgets or notifications.
 @MainActor @Observable
 final class PendingDecisionsModel {
-    enum Availability { case idle, loading, available, disabled, unavailable, unsupported, denied }
+    enum Availability { case idle, loading, available, disabled, unavailable, unsupported, denied, capacity }
 
     private(set) var availability: Availability = .idle
     private(set) var pending: [CompanionPendingDecision] = []
@@ -31,25 +32,31 @@ final class PendingDecisionsModel {
     }
 
     private let session: () -> UUID?
+    private let pairing: () -> UUID?
     private let isUnlocked: () -> Bool
     private let isLocked: () -> Bool
     private let authenticator: any TerminalAuthenticating
     private let now: () -> Date
     private let uptime: () -> TimeInterval
-    private let read: (UUID) async throws -> APIResponse
+    private let announce: @MainActor (String) -> Void
+    private let read: (UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
     private let submit: (CompanionDecisionAnswer, UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
     private var active = false
     private var connection: UUID?
+    private var pairedConnection: UUID?
     private var generation = 0
     private var readGeneration = 0
     private var authenticatedAnswer: AuthenticatedAnswer?
     private var attempts: [CompanionDecisionIdentity: Attempt] = [:]
     private var deadlines: [CompanionDecisionIdentity: Deadline] = [:]
-    private var closed: Set<CompanionDecisionIdentity> = []
+    private var closed: [CompanionDecisionIdentity: Deadline] = [:]
+    @ObservationIgnored private var wallHighWater = Date.distantPast
+    private var announcedOutcomes: [CompanionDecisionIdentity: CompanionDecisionReceipt] = [:]
+    private var announcedEvents: [String: TimeInterval] = [:]
     private var lastRead: TimeInterval?
 
     init(
-        session: @escaping () -> UUID?, isUnlocked: @escaping () -> Bool,
+        session: @escaping () -> UUID?, pairing: (() -> UUID?)? = nil, isUnlocked: @escaping () -> Bool,
         isLocked: @escaping () -> Bool = { false },
         authenticator: any TerminalAuthenticating = DeviceOwnerAuthenticator(
             reason: String(localized: "Authenticate to answer this Claude permission request.")),
@@ -59,20 +66,25 @@ final class PendingDecisionsModel {
             mach_timebase_info(&timebase)
             return Double(mach_continuous_time()) * Double(timebase.numer) / Double(timebase.denom) / 1e9
         },
-        read: @escaping (UUID) async throws -> APIResponse,
+        announce: @escaping @MainActor (String) -> Void = { UIAccessibility.post(notification: .announcement, argument: $0) },
+        read: @escaping (UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse,
         submit: @escaping (CompanionDecisionAnswer, UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
     ) {
         self.session = session
+        self.pairing = pairing ?? session
         self.isUnlocked = isUnlocked
         self.isLocked = isLocked
         self.authenticator = authenticator
         self.now = now
         self.uptime = uptime
+        self.announce = announce
         self.read = read
         self.submit = submit
     }
 
-    private var canUseContent: Bool { active && isUnlocked() && session() != nil }
+    private var canUseContent: Bool {
+        active && isUnlocked() && session() != nil && connection == session() && pairedConnection == pairing()
+    }
 
     func sceneChanged(active: Bool, backgrounded: Bool = false) {
         self.active = active
@@ -87,14 +99,20 @@ final class PendingDecisionsModel {
     }
 
     private func synchronizeConnection() {
-        guard connection != session() else { return }
+        let changedPairing = pairedConnection != pairing()
+        guard changedPairing || connection != session() else { return }
         connection = session()
+        pairedConnection = pairing()
         invalidateAnswer()
         clearContent()
-        attempts.removeAll()
-        deadlines.removeAll()
-        closed.removeAll()
-        receipts.removeAll()
+        if changedPairing {
+            attempts.removeAll()
+            deadlines.removeAll()
+            closed.removeAll()
+            announcedOutcomes.removeAll()
+            announcedEvents.removeAll()
+            wallHighWater = .distantPast
+        }
         message = nil
         availability = .idle
     }
@@ -128,21 +146,49 @@ final class PendingDecisionsModel {
     }
 
     func expire() {
-        let count = pending.count
-        pending.removeAll { !isLive($0.identity) }
-        if pending.count < count {
+        observeTime()
+        let expired = pending.filter { !isLive($0.identity) }
+        if !expired.isEmpty {
+            pending.removeAll { !isLive($0.identity) }
             message = String(localized: "The remote answer window ended. Check your Mac.")
+            for request in expired {
+                announceEvent("expiry-\(historyKey(request.identity))", message!)
+            }
         }
-        // A read older than one foreground poll is never authority to start an answer.
         if let lastRead, uptime() - lastRead >= 6 {
-            pending.removeAll()
-            self.lastRead = nil
+            clearContent()
             availability = .unavailable
         }
-        // Keep tombstones until the scene model is discarded or pairing changes. Refuse
-        // new identities at the bound rather than allow a remembered answer to reopen.
+        pruneHistory()
+    }
+
+    private var effectiveNow: Date { max(now(), wallHighWater) }
+
+    private func observeTime() { wallHighWater = effectiveNow }
+
+    private func pruneHistory() {
+        // An immutable wire deadline cannot become live again after clock rollback:
+        // the high-water date survives pruning for this pairing.
+        func retained(_ deadline: Deadline) -> Bool {
+            effectiveNow < deadline.wall.addingTimeInterval(600) || uptime() < deadline.monotonic + 600
+        }
+        deadlines = deadlines.filter { retained($0.value) }
+        closed = closed.filter { retained($0.value) }
         attempts = attempts.filter { $0.value.retainUntil > uptime() }
-        receipts = receipts.filter { attempts[$0.identity] != nil }
+        let nextReceipts = stableReceipts()
+        if receipts != nextReceipts { receipts = nextReceipts }
+        announcedOutcomes = announcedOutcomes.filter { closed[$0.key] != nil }
+        announcedEvents = announcedEvents.filter { uptime() - $0.value < 600 }
+    }
+
+    private func markClosed(_ identity: CompanionDecisionIdentity) {
+        if closed[identity] == nil {
+            closed[identity] = deadlines[identity] ?? Deadline(wall: effectiveNow, monotonic: uptime())
+        }
+    }
+
+    private func stableReceipts() -> [CompanionDecisionReceipt] {
+        attempts.values.sorted { $0.answer.retryID.uuidString < $1.answer.retryID.uuidString }.compactMap(\.receipt)
     }
 
     func refresh() async {
@@ -157,17 +203,20 @@ final class PendingDecisionsModel {
         readGeneration += 1
         let readID = readGeneration
         let epoch = generation
-        pending.removeAll()
-        outcomes.removeAll()
-        lastRead = nil
+        observeTime()
+        pruneHistory()
         availability = .loading
         do {
-            let response = try await read(token)
+            let response = try await read(token, { [weak self] in
+                guard let self else { return false }
+                return self.current(token, epoch) && self.readGeneration == readID && self.canUseContent
+            })
             guard current(token, epoch), readID == readGeneration, canUseContent else {
                 if readID == readGeneration { clearContent() }
                 return false
             }
             guard response.remoteDecisionsEnabled == true else {
+                clearContent()
                 availability = response.remoteDecisionsEnabled == false ? .disabled : .unsupported
                 return false
             }
@@ -176,36 +225,45 @@ final class PendingDecisionsModel {
                   Set(requests.map(\.identity)).count == requests.count,
                   Set(results.map(\.identity)).count == results.count,
                   results.allSatisfy({ $0.state != .pending }),
-                  Set(requests.map(\.identity)).isDisjoint(with: results.map(\.identity)),
-                  closed.union(results.map(\.identity)).count <= 1024 else {
+                  Set(requests.map(\.identity)).isDisjoint(with: results.map(\.identity)) else {
                 throw MacClientFailure.invalidResponse
             }
-            for result in results { closed.insert(result.identity) }
+            let newIdentities = requests.filter { deadlines[$0.identity] == nil && $0.remoteExpiresAt > effectiveNow }
+            guard deadlines.count + newIdentities.count <= 512,
+                  Set(closed.keys).union(results.map(\.identity)).count <= 1024 else {
+                clearContent()
+                availability = .capacity
+                return false
+            }
+            for result in results { markClosed(result.identity) }
             for request in requests {
                 if let old = deadlines[request.identity] {
                     deadlines[request.identity] = Deadline(wall: min(old.wall, request.remoteExpiresAt),
-                        monotonic: min(old.monotonic, uptime() + max(0, request.remoteExpiresAt.timeIntervalSince(now()))))
-                } else if deadlines.count < 512 {
+                        monotonic: min(old.monotonic, uptime() + max(0, request.remoteExpiresAt.timeIntervalSince(effectiveNow))))
+                } else if request.remoteExpiresAt > effectiveNow {
                     deadlines[request.identity] = Deadline(wall: request.remoteExpiresAt,
-                        monotonic: uptime() + min(60, max(0, request.remoteExpiresAt.timeIntervalSince(now()))))
+                        monotonic: uptime() + min(60, max(0, request.remoteExpiresAt.timeIntervalSince(effectiveNow))))
                 }
             }
-            outcomes = results
-            pending = requests.filter { request in
-                isLive(request.identity) && !closed.contains(request.identity)
+            if outcomes != results { outcomes = results }
+            let nextPending = requests.filter { request in
+                isLive(request.identity) && closed[request.identity] == nil
                     && attempts[request.identity]?.receipt == nil && !request.choices.isEmpty
             }.map { request in
                 CompanionPendingDecision(identity: request.identity, tool: String(request.tool.prefix(100)),
                     summary: String(request.summary.prefix(2000)), remoteExpiresAt: request.remoteExpiresAt,
                     choices: request.choices)
             }
-            receipts = attempts.values.compactMap(\.receipt)
+            if pending != nextPending { pending = nextPending }
+            let nextReceipts = stableReceipts()
+            if receipts != nextReceipts { receipts = nextReceipts }
             lastRead = uptime()
-            availability = .available
+            availability = attempts.count >= 128 && requests.contains { attempts[$0.identity] == nil } ? .capacity : .available
+            announceChangedOutcomes(results)
             expire()
-            return true
+            return availability == .available
         } catch {
-            guard current(token, epoch), readID == readGeneration else { return false }
+            guard belongs(token, epoch), readID == readGeneration else { return false }
             clearContent()
             if (error as? MacClientFailure) == .api("unsupported_operation") {
                 availability = .unsupported
@@ -220,13 +278,13 @@ final class PendingDecisionsModel {
 
     func canAnswer(_ identity: CompanionDecisionIdentity, choice: CompanionDecisionChoice) -> Bool {
         canUseContent && !isAnswering && availability == .available && isFresh && isLive(identity)
-            && attempts[identity] == nil && !closed.contains(identity) && attempts.count < 128
+            && attempts[identity] == nil && closed[identity] == nil && attempts.count < 128
             && pending.contains { $0.identity == identity && $0.choices.contains(choice) }
     }
 
     func canRetry(_ identity: CompanionDecisionIdentity) -> Bool {
         canUseContent && !isAnswering && availability == .available && isFresh && isLive(identity)
-            && attempts[identity].map { $0.receipt == nil } == true && !closed.contains(identity)
+            && attempts[identity].map { $0.receipt == nil } == true && closed[identity] == nil
             && pending.contains { $0.identity == identity && $0.choices.contains(attempts[identity]!.answer.choice) }
     }
 
@@ -234,7 +292,7 @@ final class PendingDecisionsModel {
 
     private func isLive(_ identity: CompanionDecisionIdentity) -> Bool {
         guard let deadline = deadlines[identity] else { return false }
-        return now() < deadline.wall && uptime() < deadline.monotonic
+        return effectiveNow < deadline.wall && uptime() < deadline.monotonic
     }
 
     func answer(_ identity: CompanionDecisionIdentity, choice: CompanionDecisionChoice) async {
@@ -263,6 +321,7 @@ final class PendingDecisionsModel {
         guard success, !Task.isCancelled else {
             isAnswering = false
             message = authenticator.failureMessage ?? String(localized: "Authentication did not complete. No answer was sent.")
+            announceEvent("authentication-\(epoch)", message!)
             return
         }
         authenticatedAnswer = AuthenticatedAnswer(answer: answer, session: token, generation: epoch)
@@ -277,8 +336,14 @@ final class PendingDecisionsModel {
         let answer = authenticated.answer
         let token = authenticated.session
         let epoch = authenticated.generation
+        defer {
+            if belongs(token, epoch) {
+                isAnswering = false
+                if Task.isCancelled { clearContent() }
+            }
+        }
         guard current(token, epoch), await refreshCurrent(), current(token, epoch), canUseContent,
-              availability == .available, isLive(answer.identity), !closed.contains(answer.identity),
+              availability == .available, isLive(answer.identity), closed[answer.identity] == nil,
               pending.contains(where: { $0.identity == answer.identity && $0.choices.contains(answer.choice) }) else {
             if current(token, epoch) {
                 isAnswering = false
@@ -299,23 +364,61 @@ final class PendingDecisionsModel {
             })
             guard current(token, epoch), canUseContent else { finishLateAnswer(token, epoch); return }
             guard let receipt = response.decisionReceipt, receipt.identity == answer.identity,
-                  receipt.state != .pending,
-                  receipt.result != .recorded || (receipt.choice == answer.choice && receipt.source != nil) else {
-                throw MacClientFailure.invalidResponse
-            }
+                  validReceipt(receipt, for: answer) else { throw MacClientFailure.invalidResponse }
             attempts[answer.identity]?.receipt = receipt
-            closed.insert(answer.identity)
-            receipts = attempts.values.compactMap(\.receipt)
+            markClosed(answer.identity)
+            receipts = stableReceipts()
             message = nil
         } catch {
             guard current(token, epoch), canUseContent else { finishLateAnswer(token, epoch); return }
             message = String(localized: "The reply was not confirmed. Refresh status before retrying the same answer.")
+            announceEvent("uncertain-\(answer.retryID)", message!)
         }
         guard current(token, epoch) else { return }
         // A stable receipt is not a current delivery update. A failed read clears
         // actionable content while retaining only the in-memory retry tuple.
         _ = await refreshCurrent()
-        if current(token, epoch) { isAnswering = false }
+    }
+
+    private func validReceipt(_ receipt: CompanionDecisionReceipt, for answer: CompanionDecisionAnswer) -> Bool {
+        switch receipt.result {
+        case .expired, .retryConflict, .capacityExceeded: true
+        case .recorded: receipt.state != .pending && receipt.choice == answer.choice && receipt.source != nil
+        case .alreadyAnswered, .unknown: receipt.state != .pending
+        }
+    }
+
+    private func historyKey(_ identity: CompanionDecisionIdentity) -> String {
+        "\(identity.runtimeID)-\(identity.invocationID)-\(identity.revision)"
+    }
+
+    private func announceEvent(_ key: String, _ text: String) {
+        guard canUseContent, !Task.isCancelled, announcedEvents.count < 1024,
+              announcedEvents[key] == nil else { return }
+        announcedEvents[key] = uptime()
+        announce(text)
+    }
+
+    private func announceChangedOutcomes(_ results: [CompanionDecisionReceipt]) {
+        guard canUseContent, !Task.isCancelled else { return }
+        let changed = results.filter { announcedOutcomes[$0.identity] != $0 }
+        guard !changed.isEmpty else { return }
+        for result in changed { announcedOutcomes[result.identity] = result }
+        var sentences = changed.prefix(3).map { result in
+            let source = result.source.map { String($0.name.prefix(100)) } ?? String(localized: "not reported")
+            let state: String = switch result.state {
+            case .pending: String(localized: "pending")
+            case .recorded: String(localized: "answer recorded; hook delivery not confirmed")
+            case .delivering: String(localized: "answer delivery in progress")
+            case .delivered: String(localized: "delivered to the Claude hook; tool execution not confirmed")
+            case .cancelled: String(localized: "cancelled")
+            case .expired: String(localized: "expired")
+            case .unknown: String(localized: "outcome unknown; check your Mac")
+            }
+            return String(localized: "Request \(String(result.identity.invocationID.uuidString.prefix(8))): \(state). Answer source: \(source).")
+        }
+        if changed.count > 3 { sentences.append(String(localized: "More permission statuses changed. Review the list.")) }
+        announce(sentences.joined(separator: " "))
     }
 
     private func finishLateAnswer(_ token: UUID, _ epoch: Int) {
@@ -325,11 +428,11 @@ final class PendingDecisionsModel {
     }
 
     private func current(_ token: UUID, _ epoch: Int) -> Bool {
-        belongs(token, epoch) && !Task.isCancelled
+        belongs(token, epoch) && session() == token && pairedConnection == pairing() && !Task.isCancelled
     }
 
     private func belongs(_ token: UUID, _ epoch: Int) -> Bool {
-        session() == token && generation == epoch
+        connection == token && generation == epoch
     }
 
     func hasAttempt(_ identity: CompanionDecisionIdentity) -> Bool { attempts[identity] != nil }

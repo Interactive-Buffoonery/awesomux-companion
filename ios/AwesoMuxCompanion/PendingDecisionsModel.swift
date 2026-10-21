@@ -39,8 +39,8 @@ final class PendingDecisionsModel {
     private let now: () -> Date
     private let uptime: () -> TimeInterval
     private let announce: @MainActor (String) -> Void
-    private let read: (UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
-    private let submit: (CompanionDecisionAnswer, UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
+    private let read: @MainActor (UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
+    private let submit: @MainActor (CompanionDecisionAnswer, UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
     private var active = false
     private var connection: UUID?
     private var pairedConnection: UUID?
@@ -67,8 +67,8 @@ final class PendingDecisionsModel {
             return Double(mach_continuous_time()) * Double(timebase.numer) / Double(timebase.denom) / 1e9
         },
         announce: @escaping @MainActor (String) -> Void = { UIAccessibility.post(notification: .announcement, argument: $0) },
-        read: @escaping (UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse,
-        submit: @escaping (CompanionDecisionAnswer, UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
+        read: @escaping @MainActor (UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse,
+        submit: @escaping @MainActor (CompanionDecisionAnswer, UUID, @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
     ) {
         self.session = session
         self.pairing = pairing ?? session

@@ -14,7 +14,7 @@ public extension CompanionAPIResponse {
         }
     }
 
-    /// Terminal previews are optional viewport content, never document content.
+    /// Terminal previews are optional active-screen content, never document content.
     /// Kind, availability, and state strings remain open to future Mac values.
     struct Pane: Codable, Sendable {
         public let paneID: String

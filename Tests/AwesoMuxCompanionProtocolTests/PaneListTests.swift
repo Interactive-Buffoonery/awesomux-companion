@@ -12,19 +12,22 @@ struct PaneListTests {
     }
 
     @Test func orderedRosterRoundTripsWithoutDocumentContent() throws {
-        let response = CompanionAPIResponse(workspaces: [
+        let routes = CompanionRoutes(p: 1234, lan: "10.0.0.2", tailscale: nil)
+        let response = CompanionAPIResponse(routes: routes, workspaces: [
             .init(workspaceID: "workspace", name: "Work", panes: [
                 .init(paneID: "shell", kind: "terminal", title: "Shell", availability: "attached", state: "idle", lastOutputLine: "hello"),
                 .init(paneID: "split", kind: "terminal", title: "Agent", availability: "stale", state: "running"),
                 .init(paneID: "document", kind: "documentGroup", title: "Notes", availability: "attached"),
             ]),
             .init(workspaceID: "empty", name: "Empty", panes: []),
-        ])
+        ], terminalPreviewAllowed: true)
         let data = try CompanionProtocol.encoder().encode(response)
         let decoded = try CompanionProtocol.decoder().decode(CompanionAPIResponse.self, from: data)
         #expect(decoded.workspaces?.map(\.workspaceID) == ["workspace", "empty"])
         #expect(decoded.workspaces?.first?.panes.map(\.paneID) == ["shell", "split", "document"])
         #expect(decoded.workspaces?.first?.panes.first?.lastOutputLine == "hello")
+        #expect(decoded.routes == routes)
+        #expect(decoded.terminalPreviewAllowed == true)
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let workspaces = try #require(object["workspaces"] as? [[String: Any]])
         let panes = try #require(workspaces.first?["panes"] as? [[String: Any]])

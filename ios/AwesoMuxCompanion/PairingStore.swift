@@ -4,14 +4,23 @@ import Security
 /// What the phone keeps after a successful pairing. Stored as one Keychain item, this device only.
 struct PairingRecord: Codable, Equatable, Sendable {
     let macName: String
-    let host: String
+    /// v1 pairings: the one route the grant allows.
+    var host: String?
     let port: UInt16
     let macFingerprint: String
-    let transport: CompanionTransport
+    var transport: CompanionTransport?
+    /// v2 pairings, LAN first. The Mac may replace these through connection status; v1 pairings never gain any.
+    var routes: [CompanionRoute]?
     let connectionID: UUID
     let identityTag: String
     let identityStorage: PhoneIdentity.Storage
     let pairedAt: Date
+
+    var allRoutes: [CompanionRoute] {
+        if let routes { return routes }
+        guard let host, let transport else { return [] }
+        return [CompanionRoute(transport: transport, host: host)]
+    }
 }
 
 enum PairingStoreFailure: Error { case keychain(OSStatus), invalidItem }

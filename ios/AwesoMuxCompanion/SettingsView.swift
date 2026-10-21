@@ -16,7 +16,7 @@ struct SettingsView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(record.macName).font(.body.weight(.semibold)).foregroundStyle(Cat.text)
-                        MacStatusLine(store: store, transport: record.transport)
+                        MacStatusLine(store: store)
                     }
                     .accessibilityElement(children: .combine)
                     Button("Pair Again") { store.showingPairing = true; dismiss() }
@@ -102,10 +102,9 @@ struct SettingsView: View {
     }
 }
 
-/// "● Tailscale · checked in 1 min ago", shared by the Agents header and Settings.
+/// "● Tailscale · checked in 1 min ago", shared by the Agents header and Settings. Names the route in use.
 struct MacStatusLine: View {
     let store: CompanionStore
-    let transport: CompanionTransport
 
     var body: some View {
         HStack(spacing: 6) {
@@ -113,13 +112,13 @@ struct MacStatusLine: View {
                 .accessibilityHidden(true)
             Group {
                 if let updatedAt = store.snapshot?.updatedAt {
-                    if store.isConnected {
-                        Text("\(transport.title) · checked in \(updatedAt, format: .relative(presentation: .named))")
+                    if store.isConnected, let route = store.activeRoute {
+                        Text("\(route.transport.title) · checked in \(updatedAt, format: .relative(presentation: .named))")
                     } else {
-                        Text("\(transport.title) · offline, last checked in \(updatedAt, format: .relative(presentation: .named))")
+                        Text("Offline, last checked in \(updatedAt, format: .relative(presentation: .named))")
                     }
                 } else {
-                    Text("\(transport.title) · \(store.message == nil ? String(localized: "connecting…") : String(localized: "offline"))")
+                    Text(store.message == nil ? String(localized: "Connecting…") : String(localized: "Offline"))
                 }
             }
             .font(.footnote).foregroundStyle(Cat.subtext0)

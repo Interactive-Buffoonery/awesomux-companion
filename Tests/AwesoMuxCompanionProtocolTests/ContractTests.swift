@@ -215,3 +215,39 @@ func malformedPairingLinks(_ suffix: String) {
     #expect(throws: CompanionPairingLink.Failure.notAPairingLink) { try CompanionPairingLink("https://example.com") }
     #expect(throws: CompanionPairingLink.Failure.malformed) { try CompanionPairingLink(link.replacingOccurrences(of: "p=43123", with: "p=0")) }
 }
+
+private let linkV2 = "awesomuxcompanion://pair?v=2&lan=192.168.1.20&tailscale=100.100.20.30&p=43123&fp=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&s=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&n=Mac%20%26%20Desk"
+
+@Test func pairingLinkV2RoundTrip() throws {
+    let parsed = try CompanionPairingLinkV2(linkV2)
+    #expect(parsed.routes == CompanionRoutes(p: 43123, lan: "192.168.1.20", tailscale: "100.100.20.30"))
+    #expect(parsed.macName == "Mac & Desk")
+    #expect(try parsed.string() == linkV2)
+    let tailscaleOnly = try CompanionPairingLinkV2(linkV2.replacingOccurrences(of: "lan=192.168.1.20&", with: ""))
+    #expect(tailscaleOnly.routes.lan == nil)
+    #expect(try CompanionPairingLinkV2(tailscaleOnly.string()) == tailscaleOnly)
+    #expect(throws: CompanionPairingLink.Failure.unsupportedVersion) { try CompanionPairingLink(linkV2) }
+    #expect(throws: CompanionPairingLink.Failure.unsupportedVersion) { try CompanionPairingLinkV2(link) }
+}
+
+@Test(arguments: [
+    "", "lan=&", "lan=192.168.1.20&lan=192.168.1.21&",
+    "h=192.168.1.20&", "t=lan&", "other=1&",
+])
+func malformedPairingLinksV2(_ routes: String) {
+    let text = linkV2.replacingOccurrences(of: "lan=192.168.1.20&tailscale=100.100.20.30&", with: routes)
+    #expect(throws: CompanionPairingLink.Failure.malformed) { try CompanionPairingLinkV2(text) }
+}
+
+@Test func routesInConnectionStatus() throws {
+    let full = Data(#"{"schemaVersion":1,"connectionStatus":"connected","routes":{"v":2,"p":43123,"lan":"192.168.1.20","tailscale":"100.100.20.30"}}"#.utf8)
+    let response = try CompanionProtocol.decoder().decode(CompanionAPIResponse.self, from: full)
+    #expect(response.routes == CompanionRoutes(p: 43123, lan: "192.168.1.20", tailscale: "100.100.20.30"))
+    #expect(try object(CompanionProtocol.encoder().encode(response)) == object(full))
+    for routes in [#""lan""#, #"{"v":2,"p":"43123"}"#, #"{"v":2,"p":43123,"lan":7}"#] {
+        let data = Data(#"{"schemaVersion":1,"connectionStatus":"connected","routes":\#(routes)}"#.utf8)
+        let tolerant = try CompanionProtocol.decoder().decode(CompanionAPIResponse.self, from: data)
+        #expect(tolerant.routes == nil)
+        #expect(tolerant.connectionStatus == "connected")
+    }
+}

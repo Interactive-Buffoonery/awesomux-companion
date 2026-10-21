@@ -220,7 +220,7 @@ final class SessionSnapshotCacheTests: XCTestCase {
 
     private func store(defaults: UserDefaults, record: PairingRecord?, client: SessionClientStub,
                        removePairing: @escaping (PairingRecord) throws -> Void = { _ in }) -> CompanionStore {
-        CompanionStore(defaults: defaults, loadPairing: { record }, makeClient: { _ in client },
+        CompanionStore(defaults: defaults, loadPairing: { record }, makeClient: { _, _ in client },
                        removePairing: removePairing, liveActivity: nil, writeShared: { _ in }, clearShared: {})
     }
 

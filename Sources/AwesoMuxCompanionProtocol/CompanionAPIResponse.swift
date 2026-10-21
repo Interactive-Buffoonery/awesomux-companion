@@ -134,6 +134,8 @@ public struct CompanionAPIResponse: Codable, Sendable {
     public let connectionStatus: String?
     public let agents: [Agent]?
     public let attentionEvents: AttentionPage?
+    /// v2 grants only. Malformed route metadata decodes as `nil` so the rest of the response survives.
+    public let routes: CompanionRoutes?
 
     public init(
         schemaVersion: Int = CompanionProtocol.version,
@@ -144,7 +146,8 @@ public struct CompanionAPIResponse: Codable, Sendable {
         capturedAt: Date? = nil,
         connectionStatus: String? = nil,
         agents: [Agent]? = nil,
-        attentionEvents: AttentionPage? = nil
+        attentionEvents: AttentionPage? = nil,
+        routes: CompanionRoutes? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.requestID = requestID
@@ -155,5 +158,35 @@ public struct CompanionAPIResponse: Codable, Sendable {
         self.connectionStatus = connectionStatus
         self.agents = agents
         self.attentionEvents = attentionEvents
+        self.routes = routes
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        requestID = try container.decodeIfPresent(UUID.self, forKey: .requestID)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        profile = try container.decodeIfPresent(String.self, forKey: .profile)
+        appInstanceID = try container.decodeIfPresent(UUID.self, forKey: .appInstanceID)
+        capturedAt = try container.decodeIfPresent(Date.self, forKey: .capturedAt)
+        connectionStatus = try container.decodeIfPresent(String.self, forKey: .connectionStatus)
+        agents = try container.decodeIfPresent([Agent].self, forKey: .agents)
+        attentionEvents = try container.decodeIfPresent(AttentionPage.self, forKey: .attentionEvents)
+        routes = (try? container.decodeIfPresent(CompanionRoutes.self, forKey: .routes)) ?? nil
+    }
+}
+
+/// The current route set: `v` is always 2, the port is shared, and at least one route is present.
+public struct CompanionRoutes: Codable, Equatable, Sendable {
+    public let v: Int
+    public let p: UInt16
+    public let lan: String?
+    public let tailscale: String?
+
+    public init(p: UInt16, lan: String?, tailscale: String?) {
+        v = 2
+        self.p = p
+        self.lan = lan
+        self.tailscale = tailscale
     }
 }

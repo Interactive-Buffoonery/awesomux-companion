@@ -94,8 +94,10 @@ struct PairingView: View {
                 .padding(.top, 24)
             Text("Pair with “\(link.macName)”?")
                 .font(.title2.weight(.semibold)).foregroundStyle(Cat.text).multilineTextAlignment(.center)
-            Text("\(link.host) · \(link.transport.title)")
-                .font(.body.monospacedDigit()).foregroundStyle(Cat.subtext0)
+            ForEach(link.routes, id: \.host) { route in
+                Text("\(route.host) · \(route.transport.title)")
+            }
+            .font(.body.monospacedDigit()).foregroundStyle(Cat.subtext0)
             if let current = store.record {
                 Text("This replaces the pairing with “\(current.macName)”.")
                     .font(.subheadline).foregroundStyle(Cat.subtext0).multilineTextAlignment(.center)

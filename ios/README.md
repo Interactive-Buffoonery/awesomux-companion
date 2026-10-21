@@ -149,9 +149,24 @@ because there is no shipping terminal view. Keep transport, phone identity and
 background refresh outside the container: this is local screen protection, not
 cryptographic proof of user presence to the Mac.
 
+`project.yml` supplies the Face ID usage text through the app's
+`INFOPLIST_KEY_NSFaceIDUsageDescription` build setting. The source plist contains no
+second copy. The scene bridge uses the model's synchronous security-change hook
+for lock, activity and authentication-failure updates.
+
 `TerminalLockModelTests` uses an injected monotonic clock, isolated preferences and
-controlled authentication completions. `TerminalLockRenderingTests` hosts the real
-gate and scene cover in test windows and keeps screenshot attachments in the
-xcresult. Those renderings do not verify the actual iOS app switcher, biometric or
-passcode UI, accessibility focus, or device lifecycle timing. Verify those on a
+controlled authentication completions without needing a window scene.
+`TerminalLockRenderingTests` is an app-hosted integration test: it renders the gate
+and checks the cover above a sheet using the host's active scene and owned windows.
+It keeps screenshot attachments
+in the xcresult and restores those windows without posting synthetic lifecycle
+notifications to the rest of the app.
+
+A fresh roster clears notification selections for panes that have exited. A
+selection for an existing pane waits for unlock and yields to list rendering before
+scrolling and starting the highlight timer. Store tests cover stale selection
+cleanup; cold-list scrolling still needs interaction verification.
+
+Unit renderings do not verify the actual iOS app switcher, biometric or passcode
+UI, accessibility focus, or device lifecycle timing. Verify those separately on a
 device, including sheets, backgrounding during authentication and a grace return.

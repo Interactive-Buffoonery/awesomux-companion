@@ -5,7 +5,6 @@ import UserNotifications
 @main
 struct GlanceApp: App {
     @UIApplicationDelegateAdaptor private var appDelegate: AppDelegate
-    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let text = Cat.uiColor(mocha: "#cdd6f4", latte: "#4c4f69", mochaHC: "#ffffff", latteHC: "#0a0a14")
@@ -18,26 +17,39 @@ struct GlanceApp: App {
             #if SNAPSHOT_DIAGNOSTICS
             SnapshotDiagnosticsView()
             #else
-            let store = appDelegate.store
-            Group {
-                if store.record == nil || store.showingPairing || store.pairingStep != .idle {
-                    PairingView(store: store)
-                } else {
-                    AgentsView(store: store)
-                }
-            }
-            .tint(Cat.accent)
-            .onOpenURL { url in
-                store.openPairingLink(url.absoluteString, review: true)
-            }
-            .task(id: scenePhase) {
-                switch scenePhase {
-                case .active: await store.poll()
-                case .background: AppDelegate.scheduleRefresh()
-                default: break
-                }
-            }
+            ProtectedCompanionRoot(store: appDelegate.store)
             #endif
+        }
+    }
+}
+
+/// WindowGroup creates one root and one authentication session per scene.
+private struct ProtectedCompanionRoot: View {
+    let store: CompanionStore
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var terminalLock = TerminalLockModel()
+
+    var body: some View {
+        TerminalLockContainer(
+            model: terminalLock,
+            protectsContent: store.record != nil && !store.showingPairing && store.pairingStep == .idle
+        ) {
+            if store.record == nil || store.showingPairing || store.pairingStep != .idle {
+                PairingView(store: store)
+            } else {
+                AgentsView(store: store)
+            }
+        }
+        .tint(Cat.accent)
+        .onOpenURL { url in
+            store.openPairingLink(url.absoluteString, review: true)
+        }
+        .task(id: scenePhase) {
+            switch scenePhase {
+            case .active: await store.poll()
+            case .background: AppDelegate.scheduleRefresh()
+            default: break
+            }
         }
     }
 }

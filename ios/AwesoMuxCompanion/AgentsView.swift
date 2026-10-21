@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AgentsView: View {
     @Bindable var store: CompanionStore
+    @Environment(TerminalLockModel.self) private var terminalLock
 
     var body: some View {
         NavigationStack {
@@ -46,13 +47,17 @@ struct AgentsView: View {
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
                 .background(Cat.page)
-                .onChange(of: store.focusedPaneID) { _, paneID in
-                    guard let paneID else { return }
+                .task(id: visibleFocusedPaneID) {
+                    guard let paneID = visibleFocusedPaneID else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled, visibleFocusedPaneID == paneID else { return }
                     withAnimation { proxy.scrollTo(paneID, anchor: .center) }
-                }
-                .task(id: store.focusedPaneID) {
-                    guard store.focusedPaneID != nil else { return }
-                    try? await Task.sleep(for: .seconds(3))
+                    do {
+                        try await Task.sleep(for: .seconds(3))
+                    } catch {
+                        return
+                    }
+                    guard !terminalLock.isLocked, store.focusedPaneID == paneID else { return }
                     store.focusedPaneID = nil
                 }
             }
@@ -73,6 +78,12 @@ struct AgentsView: View {
         if store.isSnapshotCached { return String(localized: "Cached · stale until your Mac answers") }
         if !store.reachable { return String(localized: "Stale · last known agents") }
         return nil
+    }
+
+    private var visibleFocusedPaneID: String? {
+        guard !terminalLock.isLocked, let paneID = store.focusedPaneID,
+              store.snapshot?.agents.contains(where: { $0.id == paneID }) == true else { return nil }
+        return paneID
     }
 
     @ViewBuilder private func agentSections(_ snapshot: GlanceSnapshot) -> some View {

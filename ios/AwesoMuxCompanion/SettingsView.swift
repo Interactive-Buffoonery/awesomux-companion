@@ -4,6 +4,7 @@ import UserNotifications
 
 struct SettingsView: View {
     @Bindable var store: CompanionStore
+    @Environment(TerminalLockModel.self) private var terminalLock
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -47,6 +48,13 @@ struct SettingsView: View {
                 }
                 Toggle("Live Activity", isOn: $store.liveActivityEnabled).foregroundStyle(Cat.text)
             } header: { Text("Alerts").foregroundStyle(Cat.subtext0) }
+            .listRowBackground(Cat.card)
+            Section {
+                TerminalProtectionToggle(model: terminalLock).foregroundStyle(Cat.text)
+                if let message = terminalLock.authenticationFailureMessage {
+                    Text(message).font(.callout).foregroundStyle(Cat.subtext0)
+                }
+            } header: { Text("Privacy").foregroundStyle(Cat.subtext0) }
             .listRowBackground(Cat.card)
             Section {
                 LabeledContent("Version", value: Self.version).foregroundStyle(Cat.text)

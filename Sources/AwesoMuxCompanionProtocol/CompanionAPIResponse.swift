@@ -125,6 +125,11 @@ public struct CompanionAPIResponse: Codable, Sendable {
         }
     }
 
+    public let pendingDecisions: [CompanionPendingDecision]?
+    public let decisionOutcomes: [CompanionDecisionReceipt]?
+    public let decisionReceipt: CompanionDecisionReceipt?
+    public let remoteDecisionsEnabled: Bool?
+
     public let schemaVersion: Int
     public let requestID: UUID?
     public let error: String?
@@ -153,8 +158,16 @@ public struct CompanionAPIResponse: Codable, Sendable {
         routes: CompanionRoutes? = nil,
         alertPreferences: CompanionAlertPreferences? = nil,
         workspaces: [Workspace]? = nil,
-        terminalPreviewAllowed: Bool? = nil
+        terminalPreviewAllowed: Bool? = nil,
+        pendingDecisions: [CompanionPendingDecision]? = nil,
+        decisionOutcomes: [CompanionDecisionReceipt]? = nil,
+        decisionReceipt: CompanionDecisionReceipt? = nil,
+        remoteDecisionsEnabled: Bool? = nil
     ) {
+        self.pendingDecisions = pendingDecisions
+        self.decisionOutcomes = decisionOutcomes
+        self.decisionReceipt = decisionReceipt
+        self.remoteDecisionsEnabled = remoteDecisionsEnabled
         self.schemaVersion = schemaVersion
         self.requestID = requestID
         self.error = error
@@ -172,6 +185,10 @@ public struct CompanionAPIResponse: Codable, Sendable {
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        pendingDecisions = try? container.decodeIfPresent([CompanionPendingDecision].self, forKey: .pendingDecisions)
+        decisionOutcomes = try? container.decodeIfPresent([CompanionDecisionReceipt].self, forKey: .decisionOutcomes)
+        decisionReceipt = try? container.decodeIfPresent(CompanionDecisionReceipt.self, forKey: .decisionReceipt)
+        remoteDecisionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .remoteDecisionsEnabled)
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
         requestID = try container.decodeIfPresent(UUID.self, forKey: .requestID)
         error = try container.decodeIfPresent(String.self, forKey: .error)

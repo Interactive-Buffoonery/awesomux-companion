@@ -13,9 +13,10 @@ final class PaneRosterTests: XCTestCase {
 
     private func store(_ client: PaneClientFixture, record: PairingRecord = panePairing(),
                        makeClient: ((PairingRecord, CompanionRoute) throws -> any CompanionSessionClient)? = nil,
+                       removePairing: @escaping (PairingRecord) throws -> Void = { _ in },
                        writeShared: @escaping (GlanceSnapshot) -> Void = { _ in }) -> CompanionStore {
         CompanionStore(defaults: defaults, loadPairing: { record }, makeClient: makeClient ?? { _, _ in client },
-                       removePairing: { _ in }, liveActivity: nil, writeShared: writeShared, clearShared: {})
+                       removePairing: removePairing, liveActivity: nil, writeShared: writeShared, clearShared: {})
     }
 
     func testProjectionPreservesHostOrderAndRejectsUnknownOrUnavailablePreviews() {
@@ -356,6 +357,77 @@ final class PaneRosterTests: XCTestCase {
         await original.unpair()
         let recreated = store(client)
         XCTAssertEqual(recreated.panes.previewIntent, .followHost, "Unpair clears the preference")
+    }
+
+    func testFailedUnpairPreservesOptOutInSameProcessUntilConfirmedEnable() async {
+        await checkFailedUnpairSuppression(recreate: false)
+    }
+
+    func testFailedUnpairPreservesOptOutAfterRecreationUntilConfirmedEnable() async {
+        await checkFailedUnpairSuppression(recreate: true)
+    }
+
+    private func checkFailedUnpairSuppression(recreate: Bool) async {
+        let client = PaneClientFixture()
+        let pairing = panePairing()
+        var removalFails = true
+        var removalAttempts = 0
+        let remove: (PairingRecord) throws -> Void = { record in
+            XCTAssertEqual(record, pairing)
+            removalAttempts += 1
+            if removalFails { throw PairingStoreFailure.keychain(-1) }
+        }
+        var current = store(client, record: pairing, removePairing: remove)
+        current.resumePanes()
+        await current.refreshPanes()
+        XCTAssertEqual(previews(current), ["Build complete"])
+        client.errors["set_terminal_preview"] = .unreachable
+        await current.setTerminalPreview(false)
+        client.errors["unpair"] = .unreachable
+        await current.unpair()
+        XCTAssertEqual(removalAttempts, 1)
+        XCTAssertEqual(client.calls.filter { $0.operation == "unpair" }.count, 1)
+        XCTAssertEqual(current.record, pairing, "Failed local deletion retains the original identity and record")
+        XCTAssertEqual(current.panes.previewIntent, .keepOff)
+        XCTAssertNotNil(current.message)
+        current.suspendPanes()
+        if recreate { current = store(client, record: pairing, removePairing: remove) }
+        client.errors = [:]
+        XCTAssertEqual(client.allowed, true, "Neither failed request changed the host permission")
+        current.resumePanes()
+        await current.refreshPanes()
+        XCTAssertEqual(current.panes.previewIntent, .keepOff)
+        XCTAssertEqual(previews(current), [])
+        XCTAssertFalse(current.panes.permission.allowsPreview)
+        await current.setTerminalPreview(true)
+        XCTAssertEqual(previews(current), ["Build complete"])
+        current.suspendPanes()
+        current = store(client, record: pairing, removePairing: remove)
+        XCTAssertEqual(current.panes.previewIntent, .followHost, "Confirmed enable clears persisted suppression")
+        current.resumePanes()
+        await current.refreshPanes()
+        await current.setTerminalPreview(false)
+        removalFails = false
+        await current.unpair()
+        XCTAssertNil(current.record)
+        XCTAssertEqual(current.panes.previewIntent, .followHost)
+        XCTAssertEqual(store(client, record: pairing).panes.previewIntent, .followHost,
+                       "Successful retry removes the old pairing's preference")
+    }
+
+    func testReplacementClearsSuppressionWithoutUnpairingFirst() async {
+        let client = PaneClientFixture()
+        let current = store(client)
+        current.resumePanes()
+        await current.refreshPanes()
+        await current.setTerminalPreview(false)
+        current.replacePairing(with: panePairing(connectionID: UUID(), identityTag: "replacement-phone"))
+        XCTAssertEqual(current.panes.previewIntent, .followHost)
+        XCTAssertEqual(store(client).panes.previewIntent, .followHost,
+                       "Successful replacement discards the prior pairing's stored preference")
+        client.allowed = true
+        await current.refreshPanes()
+        XCTAssertEqual(previews(current), ["Build complete"])
     }
 
     func testOldPairingMutationCannotBlockOrReleaseReplacementWorker() async {
@@ -768,5 +840,8 @@ final class PaneClientFixture: CompanionSessionClient {
         return APIResponse(terminalPreviewAllowed: receiptOverride ?? allowed)
     }
 
-    func unpair(connectionID: UUID) async throws {}
+    func unpair(connectionID: UUID) async throws {
+        calls.append(Call(operation: "unpair", connectionID: connectionID, allowed: nil))
+        if let error = errors["unpair"] { throw error }
+    }
 }

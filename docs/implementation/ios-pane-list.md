@@ -293,3 +293,55 @@ explicitly deferred. Evidence remains synthetic client/app-hosted SwiftUI;
 real paired LAN/Tailscale, physical authentication/privacy timing, production
 consent touches and cold-notification scrolling remain unverified. No push,
 PR, GitHub comment or merge. Fresh focused Codex/Claude reviews are parent-owned.
+
+## Codex r3 failed-unpair checkpoint
+
+Verified the reported path before editing: `unpair()` clears connection state
+before awaiting remote revocation/local removal. Local removal failure retains
+`record`, so clearing its suppression in `forgetConnection()` lets unchanged Mac
+permission expose previews again in the same process or after recreation.
+Separate active state invalidation from discarding the pairing preference.
+Retain both persisted and in-memory suppression while the original record stays
+installed. Discard it only after successful local removal or installation of an
+already saved replacement pairing. Add same-process and recreation regressions
+with remote unpair failure and local deletion failure without identity removal;
+verify later explicit confirmed enable, successful retry and replacement reset.
+Run the full iOS suite and fresh renderings through the owned simulator lease.
+
+## Codex r3 failed-unpair receipt
+
+Verified and fixed the remaining failed-unpair finding. Active connection reset
+now preserves the pairing's in-memory intent and persisted suppression. A
+separate preference discard runs only after successful local removal or
+installation of a saved replacement pairing; confirmed enabling still clears it.
+
+`testFailedUnpairPreservesOptOutInSameProcessUntilConfirmedEnable` and
+`testFailedUnpairPreservesOptOutAfterRecreationUntilConfirmedEnable` simulate
+failed opt-out, remote unpair failure and local removal failure without deleting
+the identity. Both verify the original record survives, host permission remains
+true and recovered reads cannot show previews. Each then confirms enabling,
+checks persistence clears, and verifies successful local unpair retry clears the
+preference. `testReplacementClearsSuppressionWithoutUnpairingFirst` covers direct
+successful replacement. Earlier worker, permission, identity, focus and empty
+roster regressions remain passing. No finding was dismissed.
+
+Validation:
+`heavy-gate --simulator-session E3C31483-F771-4D58-9D3D-5BBCA699BB9A -- sh /tmp/companion-p9-evidence/r3-final-job.sh`.
+The iOS build and **78 tests passed**, zero failures, including 34 pane roster
+tests and actual SwiftUI rendering. No compiler warnings; the existing nonfatal
+Xcode host-build metadata diagnostic remains. The protocol package is unchanged
+and was not rerun. `git diff --check` passed. Heavy-gate shut down the owned
+simulator; no automation daemon or publication. Parent owns fresh reviews.
+
+Final evidence is `/tmp/companion-p9-evidence/r3-final.xcresult`,
+`r3-final-tests.log`, `r3-final-job.sh`, `r3-final-xcodegen.log`,
+`r3-final-attachments/manifest.json` and `r3-final-screenshots/`. The manifest
+`r3-source-manifest.json` records final commit/source/docs/binary/screenshot
+hashes; `r3-handoff.txt` identifies this final artifact. Previous r2 evidence is
+historical. Fresh screenshots use current fixture time and show previews on,
+removed after opt-out, and the lock covering content.
+
+Evidence limitations remain: synthetic responses and app-hosted SwiftUI, no real
+paired LAN/Tailscale, physical authentication/privacy timing, production consent
+touches or cold notification scroll. VoiceOver R3 remains deferred. Device-panel
+opening remains unavailable inside the lease without terminal ACP transport.

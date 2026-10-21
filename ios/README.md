@@ -196,7 +196,8 @@ and read `get_connection_status` again before showing previews. An unsuccessful
 change clears prior preview text. Suppression persists for this pairing across
 read errors, scene transitions and app relaunches. It is a non-content preference
 scoped to the connection ID, Mac fingerprint and phone identity. Only a confirmed
-enable clears it; replacing or removing the pairing resets it.
+enable clears it; successfully replacing or removing the pairing resets it.
+An unsuccessful unpair preserves suppression while its pairing remains installed.
 A store-owned worker drains the latest accepted choice even if its caller is
 cancelled or its scene suspends. New choices suppress immediately and wait for
 older writes to settle. Polling cannot release ownership between queued choices.

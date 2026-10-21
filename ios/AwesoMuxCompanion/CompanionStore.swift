@@ -248,6 +248,7 @@ final class CompanionStore {
             try removePairing(record)
             defaults.removeObject(forKey: Keys.revokedConnectionID)
             self.record = nil
+            discardPreviewSuppression()
             message = nil
         } catch {
             message = String(localized: "This iPhone couldn’t finish unpairing. Choose Unpair This iPhone to try again.")
@@ -272,17 +273,24 @@ final class CompanionStore {
     /// Installs a pairing after its record has been saved successfully.
     func replacePairing(with next: PairingRecord) {
         forgetConnection()
+        discardPreviewSuppression()
         record = next
+    }
+
+    private func discardPreviewSuppression() {
+        defaults.removeObject(forKey: Keys.previewSuppression)
+        panes.previewIntent = .followHost
     }
 
     private func forgetConnection() {
         revision += 1
         invalidatePaneRead()
+        let previewIntent = panes.previewIntent
         panes.reset()
+        panes.previewIntent = previewIntent
         previewChoice = nil
         previewMutationID = nil
         previewMutationTask = nil
-        defaults.removeObject(forKey: Keys.previewSuppression)
         focusedPaneID = nil
         refreshTask?.cancel(); refreshTask = nil
         cache.clear()

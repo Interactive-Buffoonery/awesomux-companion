@@ -1,0 +1,431 @@
+import AwesoMuxCompanionProtocol
+import XCTest
+@testable import AwesoMuxCompanion
+
+@MainActor
+final class PaneRosterTests: XCTestCase {
+    private lazy var defaults: UserDefaults = {
+        let suite = "PaneRosterTests.\(UUID().uuidString)"
+        addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        return UserDefaults(suiteName: suite)!
+    }()
+
+    private func store(_ client: PaneClientFixture, record: PairingRecord = panePairing(),
+                       makeClient: ((PairingRecord, CompanionRoute) throws -> any CompanionSessionClient)? = nil,
+                       writeShared: @escaping (GlanceSnapshot) -> Void = { _ in }) -> CompanionStore {
+        CompanionStore(defaults: defaults, loadPairing: { record }, makeClient: makeClient ?? { _, _ in client },
+                       removePairing: { _ in }, liveActivity: nil, writeShared: writeShared, clearShared: {})
+    }
+
+    func testProjectionPreservesHostOrderAndRejectsUnknownOrUnavailablePreviews() {
+        let projected = PaneRoster.project([
+            .init(workspaceID: "b", name: "Second alphabetically", panes: [
+                .init(paneID: "shell", kind: "terminal", title: "Shell", availability: "attached", state: "thinking", lastOutputLine: "safe fixture"),
+                .init(paneID: "docs", kind: "documentGroup", title: "Notes", availability: "attached", lastOutputLine: "must not show"),
+                .init(paneID: "future", kind: "futureKind", title: "Future", availability: "attached", lastOutputLine: "must not show"),
+                .init(paneID: "stale", kind: "terminal", title: "Old", availability: "stale", lastOutputLine: "must not show"),
+                .init(paneID: "unknown", kind: "terminal", title: "Unknown", availability: "future", lastOutputLine: "must not show")
+            ]),
+            .init(workspaceID: "a", name: "First alphabetically", panes: []),
+            .init(workspaceID: "b", name: "Duplicate", panes: [])
+        ], previews: true)
+        XCTAssertEqual(projected.map(\.id), ["b", "a"])
+        XCTAssertEqual(projected[0].panes.map(\.id), ["shell", "docs", "future", "stale", "unknown"])
+        XCTAssertEqual(projected[0].panes.compactMap(\.preview), ["safe fixture"])
+        XCTAssertEqual(projected[0].panes.map(\.status), ["Working", "Documents", "Unsupported pane", "Stale", "Status unavailable"])
+        XCTAssertEqual(PaneRoster.project(paneWorkspaces(), previews: false).flatMap(\.panes).compactMap(\.preview), [])
+    }
+
+    func testForegroundReadsV1PermissionAndRosterWithoutRequiringPermissionEcho() async {
+        let client = PaneClientFixture()
+        let store = store(client)
+        store.resumePanes()
+        await store.refreshPanes()
+        XCTAssertEqual(client.calls.map(\.operation), ["get_connection_status", "list_panes"])
+        XCTAssertEqual(store.panes.permission, .enabled)
+        XCTAssertEqual(previews(store), ["Build complete"])
+        XCTAssertEqual(store.panes.state.workspaces.map(\.id), ["workspace", "empty"])
+    }
+
+    func testBackgroundRefreshNeverRequestsPanesAndNeverPersistsPreviews() async throws {
+        let client = PaneClientFixture()
+        var shared: [GlanceSnapshot] = []
+        let store = store(client, writeShared: { shared.append($0) })
+        await store.refresh()
+        XCTAssertEqual(client.calls.map(\.operation), ["get_attention_events", "list_agents"])
+        XCTAssertTrue(store.reachable)
+        XCTAssertEqual(store.panes.state, .idle)
+        store.resumePanes()
+        await store.refreshPanes()
+        XCTAssertEqual(shared.count, 1)
+        XCTAssertFalse(String(decoding: try XCTUnwrap(shared.first).encoded(), as: UTF8.self).contains("Build complete"))
+        XCTAssertFalse(defaults.dictionaryRepresentation().values.contains { value in
+            guard let data = value as? Data else { return false }
+            return String(decoding: data, as: UTF8.self).contains("Build complete")
+        })
+    }
+
+    func testOlderHostMissingPermissionHidesPreviewsAndUnsupportedRosterKeepsAgents() async {
+        let client = PaneClientFixture()
+        client.allowed = nil
+        let store = store(client)
+        await store.refresh()
+        store.resumePanes()
+        await store.refreshPanes()
+        XCTAssertEqual(store.panes.permission, .unsupported)
+        XCTAssertEqual(previews(store), [])
+        client.errors["list_panes"] = .api("unsupported_operation")
+        await store.refreshPanes()
+        XCTAssertEqual(store.panes.state, .unsupported)
+        XCTAssertTrue(store.isConnected)
+        XCTAssertNil(store.message)
+        XCTAssertEqual(store.snapshot?.agents.map(\.id), ["agent"])
+        client.errors = [:]
+        client.workspaces = nil
+        await store.refreshPanes()
+        XCTAssertEqual(store.panes.state, .unsupported)
+    }
+
+    func testRosterFailureClearsContentWithoutChangingAgentConnection() async {
+        let client = PaneClientFixture()
+        let store = store(client)
+        await store.refresh()
+        store.resumePanes()
+        await store.refreshPanes()
+        client.errors["list_panes"] = .closed
+        await store.refreshPanes()
+        guard case .failed = store.panes.state else { return XCTFail("Expected pane-only failure") }
+        XCTAssertEqual(previews(store), [])
+        XCTAssertTrue(store.isConnected)
+        XCTAssertNil(store.message)
+    }
+
+    func testOptOutDropsOldInFlightRosterAndReplacesPreviewContent() async {
+        let client = PaneClientFixture()
+        let store = store(client)
+        store.resumePanes()
+        await store.refreshPanes()
+        let gate = RequestGate("old roster")
+        client.holdNext["list_panes"] = gate
+        let oldRead = Task { await store.refreshPanes() }
+        await fulfillment(of: [gate.started], timeout: 3)
+        await store.setTerminalPreview(false)
+        XCTAssertEqual(store.panes.permission, .disabled)
+        XCTAssertEqual(previews(store), [])
+        gate.release()
+        await oldRead.value
+        XCTAssertEqual(store.panes.permission, .disabled)
+        XCTAssertEqual(previews(store), [])
+        client.allowed = true
+        client.workspaces = [.init(workspaceID: "workspace", name: "Changed", panes: [
+            .init(paneID: "shell", kind: "terminal", title: "Shell", availability: "attached")
+        ])]
+        await store.refreshPanes()
+        XCTAssertEqual(previews(store), [], "Missing preview must replace, never merge, earlier output")
+    }
+
+    func testInvalidatedPermissionDenialCannotRevokeCurrentPairing() async {
+        let client = PaneClientFixture()
+        let store = store(client)
+        store.resumePanes()
+        await store.refreshPanes()
+        let gate = RequestGate("stale denial")
+        client.holdNext["list_panes"] = gate
+        client.errors["list_panes"] = .api("permission_denied")
+        let oldRead = Task { await store.refreshPanes() }
+        await fulfillment(of: [gate.started], timeout: 3)
+        client.errors = [:]
+        await store.setTerminalPreview(false)
+        gate.release()
+        await oldRead.value
+        XCTAssertEqual(store.panes.permission, .disabled)
+        guard case .loaded = store.panes.state else { return XCTFail("Stale denial revoked current pairing") }
+    }
+
+    func testOldAgentAuthorizationReplyCannotRevokeNewPermissionEpoch() async {
+        let client = PaneClientFixture()
+        let store = store(client)
+        await store.refresh()
+        store.resumePanes()
+        await store.refreshPanes()
+        let gate = RequestGate("old agent denial")
+        client.holdNext["list_agents"] = gate
+        client.errors["list_agents"] = .api("permission_denied")
+        let read = Task { await store.refresh() }
+        await fulfillment(of: [gate.started], timeout: 3)
+        client.errors = [:]
+        await store.setTerminalPreview(false)
+        gate.release()
+        await read.value
+        XCTAssertEqual(store.panes.permission, .disabled)
+        XCTAssertTrue(store.isConnected)
+        XCTAssertNotNil(store.snapshot)
+    }
+
+    func testOptInWaitsForReceiptAndStatusReadback() async {
+        let client = PaneClientFixture()
+        client.allowed = false
+        let store = store(client)
+        store.resumePanes()
+        await store.refreshPanes()
+        let gate = RequestGate("readback")
+        client.holdNext["get_connection_status"] = gate
+        let mutation = Task { await store.setTerminalPreview(true) }
+        await fulfillment(of: [gate.started], timeout: 3)
+        XCTAssertEqual(store.panes.permission, .updating(true))
+        XCTAssertEqual(previews(store), [])
+        XCTAssertEqual(client.calls.last?.operation, "get_connection_status")
+        gate.release()
+        await mutation.value
+        XCTAssertEqual(store.panes.permission, .enabled)
+        XCTAssertEqual(previews(store), ["Build complete"])
+        XCTAssertEqual(client.calls.filter { $0.operation == "set_terminal_preview" }.map(\.allowed), [true])
+    }
+
+    func testFailedOptOutClearsImmediatelyAndLaterPollCannotImplicitlyEnable() async {
+        let client = PaneClientFixture()
+        let store = store(client)
+        store.resumePanes()
+        await store.refreshPanes()
+        let gate = RequestGate("failed opt-out")
+        client.holdNext["set_terminal_preview"] = gate
+        client.errors["set_terminal_preview"] = .unreachable
+        let mutation = Task { await store.setTerminalPreview(false) }
+        await fulfillment(of: [gate.started], timeout: 3)
+        XCTAssertEqual(store.panes.permission, .updating(false))
+        XCTAssertEqual(previews(store), [])
+        gate.release()
+        await mutation.value
+        guard case .failed = store.panes.permission else { return XCTFail("Expected failed permission") }
+        await store.refreshPanes()
+        XCTAssertEqual(previews(store), [])
+        guard case .failed = store.panes.permission else { return XCTFail("Must retain deliberate change failure") }
+    }
+
+    func testMismatchedAndUnsupportedMutationNeverEnablePreview() async {
+        for error in [MacClientFailure.invalidResponse, .api("unsupported_operation")] {
+            let client = PaneClientFixture()
+            client.allowed = false
+            let store = store(client)
+            store.resumePanes()
+            await store.refreshPanes()
+            if error == .invalidResponse { client.receiptOverride = false }
+            else { client.errors["set_terminal_preview"] = error }
+            await store.setTerminalPreview(true)
+            XCTAssertFalse(store.panes.permission.allowsPreview)
+            XCTAssertEqual(previews(store), [])
+        }
+    }
+
+    func testSuccessfulReceiptWithDisagreeingStatusDoesNotEnablePreview() async {
+        let client = PaneClientFixture()
+        client.allowed = false
+        client.mutationStatusOverride = false
+        let store = store(client)
+        store.resumePanes()
+        await store.refreshPanes()
+        await store.setTerminalPreview(true)
+        guard case .failed = store.panes.permission else { return XCTFail("Status readback must agree") }
+        XCTAssertEqual(previews(store), [])
+    }
+
+    func testMacPermissionChangeRemovesPreviouslyVisiblePreview() async {
+        let client = PaneClientFixture()
+        let store = store(client)
+        store.resumePanes()
+        await store.refreshPanes()
+        client.allowed = false
+        await store.refreshPanes()
+        XCTAssertEqual(store.panes.permission, .disabled)
+        XCTAssertEqual(previews(store), [])
+    }
+
+    func testBackgroundInvalidatesUnstructuredPaneReadAndLatePermissionReceipt() async {
+        for operation in ["list_panes", "set_terminal_preview"] {
+            let client = PaneClientFixture()
+            let store = store(client)
+            store.resumePanes()
+            await store.refreshPanes()
+            let gate = RequestGate(operation)
+            client.holdNext[operation] = gate
+            let work = Task {
+                if operation == "list_panes" { await store.refreshPanes() }
+                else { await store.setTerminalPreview(false) }
+            }
+            await fulfillment(of: [gate.started], timeout: 3)
+            let before = store.panes.generation
+            store.suspendPanes()
+            XCTAssertGreaterThan(store.panes.generation, before)
+            XCTAssertEqual(store.panes.state, .idle)
+            gate.release()
+            await work.value
+            XCTAssertEqual(store.panes.state, .idle)
+            XCTAssertEqual(store.panes.permission, .unknown)
+            store.resumePanes()
+            await store.refreshPanes()
+            XCTAssertEqual(store.panes.permission, operation == "list_panes" ? .enabled : .disabled)
+        }
+    }
+
+    func testUnpairInvalidatesLatePaneRead() async {
+        let client = PaneClientFixture()
+        let store = store(client)
+        store.resumePanes()
+        let gate = RequestGate("unpair while reading")
+        client.holdNext["list_panes"] = gate
+        let read = Task { await store.refreshPanes() }
+        await fulfillment(of: [gate.started], timeout: 3)
+        await store.unpair()
+        XCTAssertNil(store.record)
+        gate.release()
+        await read.value
+        XCTAssertEqual(store.panes.state, .idle)
+        XCTAssertEqual(previews(store), [])
+    }
+
+    func testRevocationFromAgentOrPaneRequestClearsAllContentAndLatchesUntilPairing() async {
+        for operation in ["list_agents", "list_panes", "set_terminal_preview"] {
+            let client = PaneClientFixture()
+            let store = store(client)
+            await store.refresh()
+            store.resumePanes()
+            await store.refreshPanes()
+            client.errors[operation] = .api("permission_denied")
+            if operation == "list_agents" { await store.refresh() }
+            else if operation == "list_panes" { await store.refreshPanes() }
+            else { await store.setTerminalPreview(false) }
+            XCTAssertEqual(store.panes.state, .revoked)
+            XCTAssertNil(store.snapshot)
+            XCTAssertFalse(store.reachable)
+            XCTAssertNil(SessionSnapshotCache(defaults: defaults).restore(for: store.record))
+            client.errors = [:]
+            await store.refresh()
+            await store.refreshPanes()
+            XCTAssertEqual(store.panes.state, .revoked)
+        }
+    }
+
+    func testColdNotificationFocusSurvivesAgentRefreshThenUsesBothRosters() async {
+        let client = PaneClientFixture()
+        let store = store(client)
+        store.focusedPaneID = "shell"
+        await store.refresh()
+        XCTAssertEqual(store.focusedPaneID, "shell")
+        store.resumePanes()
+        await store.refreshPanes()
+        XCTAssertEqual(store.focusedPaneID, "shell")
+        store.focusedPaneID = "agent"
+        await store.refreshPanes()
+        XCTAssertEqual(store.focusedPaneID, "agent")
+        store.focusedPaneID = "exited"
+        await store.refreshPanes()
+        XCTAssertNil(store.focusedPaneID)
+    }
+
+    func testPaneReadsAndConsentUsePairedDirectRoutesAndStopAtAPIDenial() async {
+        let lan = PaneClientFixture()
+        lan.errors = ["get_connection_status": .unreachable, "list_panes": .unreachable, "set_terminal_preview": .unreachable]
+        let tailscale = PaneClientFixture()
+        let record = panePairing(routes: [.init(transport: .lan, host: "lan.invalid"),
+                                          .init(transport: .tailscale, host: "100.64.0.1")])
+        var hosts: [String] = []
+        let store = store(tailscale, record: record, makeClient: { _, route in
+            hosts.append(route.host)
+            return route.transport == .lan ? lan : tailscale
+        })
+        store.resumePanes()
+        await store.refreshPanes()
+        await store.setTerminalPreview(false)
+        XCTAssertEqual(hosts, ["lan.invalid", "100.64.0.1"])
+        XCTAssertEqual(store.activeRoute?.transport, .tailscale)
+        XCTAssertTrue((lan.calls + tailscale.calls).allSatisfy { $0.connectionID == record.connectionID })
+        XCTAssertEqual(tailscale.calls.filter { $0.operation == "set_terminal_preview" }.map(\.allowed), [false])
+        let denied = PaneClientFixture()
+        denied.errors["get_connection_status"] = .api("permission_denied")
+        var deniedHosts: [String] = []
+        let revoked = self.store(denied, record: record, makeClient: { _, route in
+            deniedHosts.append(route.host)
+            return denied
+        })
+        revoked.resumePanes()
+        await revoked.refreshPanes()
+        XCTAssertEqual(deniedHosts, ["lan.invalid"])
+        XCTAssertEqual(revoked.panes.state, .revoked)
+    }
+
+    private func previews(_ store: CompanionStore) -> [String] {
+        store.panes.state.workspaces.flatMap(\.panes).compactMap(\.preview)
+    }
+}
+
+func panePairing(routes: [CompanionRoute]? = nil) -> PairingRecord {
+    PairingRecord(macName: "Fixture Mac", host: routes == nil ? "fixture.invalid" : nil, port: 1234,
+                  macFingerprint: "fixture-pin", transport: routes == nil ? .lan : nil, routes: routes,
+                  connectionID: UUID(uuidString: "00000000-0000-0000-0000-000000000009")!, identityTag: "fixture-only",
+                  identityStorage: .keychain, pairedAt: Date(timeIntervalSince1970: 1_700_000_000))
+}
+
+func paneWorkspaces() -> [APIResponse.Workspace] {
+    [.init(workspaceID: "workspace", name: "awesoMux", panes: [
+        .init(paneID: "shell", kind: "terminal", title: "Build", availability: "attached", state: "running", lastOutputLine: "Build complete"),
+        .init(paneID: "notes", kind: "documentGroup", title: "Notes", availability: "attached"),
+        .init(paneID: "detached", kind: "terminal", title: "Remote shell", availability: "unavailable")
+    ]), .init(workspaceID: "empty", name: "Personal", panes: [])]
+}
+
+@MainActor
+final class RequestGate {
+    let started: XCTestExpectation
+    private var continuation: CheckedContinuation<Void, Never>?
+    init(_ name: String) { started = XCTestExpectation(description: name) }
+    func pause() async {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            started.fulfill()
+        }
+    }
+    func release() { continuation?.resume(); continuation = nil }
+}
+
+@MainActor
+final class PaneClientFixture: CompanionSessionClient {
+    struct Call { let operation: String; let connectionID: UUID; let allowed: Bool? }
+    var calls: [Call] = []
+    var allowed: Bool? = true
+    var receiptOverride: Bool?
+    var mutationStatusOverride: Bool?
+    var workspaces: [APIResponse.Workspace]? = paneWorkspaces()
+    var errors: [String: MacClientFailure] = [:]
+    var holdNext: [String: RequestGate] = [:]
+
+    func call(_ operation: String, connectionID: UUID, limit: Int?, cursor: String?) async throws -> APIResponse {
+        calls.append(Call(operation: operation, connectionID: connectionID, allowed: nil))
+        let response: APIResponse
+        switch operation {
+        case "get_connection_status": response = APIResponse(terminalPreviewAllowed: allowed)
+        case "list_panes": response = APIResponse(workspaces: workspaces)
+        case "get_attention_events":
+            response = APIResponse(attentionEvents: .init(events: [], nextCursor: "cursor", cursorStatus: "initial", hasMore: false, currentStateRecoveryRequired: false))
+        default:
+            response = APIResponse(capturedAt: Date(timeIntervalSince1970: 1_700_000_000), agents: [
+                .init(paneID: "agent", workspaceID: "workspace", workspaceName: "awesoMux", provider: "Codex",
+                      executionLocation: "local", availability: "attached", state: "running")
+            ])
+        }
+        let error = errors[operation]
+        if let gate = holdNext.removeValue(forKey: operation) { await gate.pause() }
+        if let error { throw error }
+        return response
+    }
+
+    func setTerminalPreview(_ allowed: Bool, connectionID: UUID) async throws -> APIResponse {
+        calls.append(Call(operation: "set_terminal_preview", connectionID: connectionID, allowed: allowed))
+        let error = errors["set_terminal_preview"]
+        if let gate = holdNext.removeValue(forKey: "set_terminal_preview") { await gate.pause() }
+        if let error { throw error }
+        self.allowed = mutationStatusOverride ?? allowed
+        return APIResponse(terminalPreviewAllowed: receiptOverride ?? allowed)
+    }
+
+    func unpair(connectionID: UUID) async throws {}
+}

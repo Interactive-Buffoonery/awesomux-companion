@@ -37,12 +37,15 @@ private struct ProtectedCompanionRoot: View {
             if store.record == nil || store.showingPairing || store.pairingStep != .idle {
                 PairingView(store: store)
             } else {
-                AgentsView(store: store)
+                CompanionTabs(store: store)
             }
         }
         .tint(Cat.accent)
         .onOpenURL { url in
             store.openPairingLink(url.absoluteString, review: true)
+        }
+        .onChange(of: scenePhase) {
+            if scenePhase != .active { store.suspendPanes() }
         }
         .task(id: scenePhase) {
             switch scenePhase {

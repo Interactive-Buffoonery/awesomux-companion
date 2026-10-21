@@ -86,7 +86,19 @@ struct MacClient: Sendable {
     // MARK: Local agent API
 
     func call(_ operation: String, connectionID: UUID, limit: Int? = nil, cursor: String? = nil) async throws -> APIResponse {
-        let request = CompanionAPIRequest(operation: operation, connectionID: connectionID, limit: limit, cursor: cursor)
+        try await exchange(CompanionAPIRequest(operation: operation, connectionID: connectionID, limit: limit, cursor: cursor))
+    }
+
+    func setTerminalPreview(_ allowed: Bool, connectionID: UUID) async throws -> APIResponse {
+        try await exchange(Self.previewRequest(allowed, connectionID: connectionID))
+    }
+
+    static func previewRequest(_ allowed: Bool, connectionID: UUID) -> CompanionAPIRequest {
+        CompanionAPIRequest(operation: CompanionOperation.setTerminalPreview.rawValue, connectionID: connectionID,
+                            terminalPreviewAllowed: allowed)
+    }
+
+    private func exchange(_ request: CompanionAPIRequest) async throws -> APIResponse {
         let connection = try await FramedConnection.open(client: self)
         defer { connection.cancel() }
         try await connection.send(CompanionProtocol.encoder().encode(request))

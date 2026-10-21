@@ -193,12 +193,15 @@ Terminal previews are off unless the Mac explicitly reports permission. Sessions
 and Settings offer a per-phone consent switch; enabling explains that terminal
 text may contain secrets. Changes use `set_terminal_preview`, verify its receipt,
 and read `get_connection_status` again before showing previews. An unsuccessful
-change clears prior preview text. Local suppression survives read errors and
-background returns until an explicitly confirmed enable or pairing replacement.
-Permission writes retain one owner across scene transitions; newer choices wait
-for the previous write to settle before sending, and only the latest queued
-choice can send. While a write is unresolved, polling cannot release ownership. Permission and pairing epochs reject late
-responses, including stale authorization errors. Returning to foreground reads
+change clears prior preview text. Suppression persists for this pairing across
+read errors, scene transitions and app relaunches. It is a non-content preference
+scoped to the connection ID, Mac fingerprint and phone identity. Only a confirmed
+enable clears it; replacing or removing the pairing resets it.
+A store-owned worker drains the latest accepted choice even if its caller is
+cancelled or its scene suspends. New choices suppress immediately and wait for
+older writes to settle. Polling cannot release ownership between queued choices.
+A replacement pairing has independent ownership; late old completions are fenced.
+Permission and pairing epochs reject late responses. The active poll reads
 permission again for both v1 and v2 pairings. Older Macs keep the Agents tab and
 show an update message for unsupported pane lists.
 

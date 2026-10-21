@@ -209,3 +209,87 @@ routing here has state/task-key coverage, not an interaction-tested cold scroll.
 The final run also includes recovery-oriented authorization error text; prior
 `fix.xcresult` is the preceding 69-test pass before that copy adjustment. The
 source manifest records the final-fix artifact and its committed sources.
+
+## R2 / Claude r2 implementation checkpoint
+
+Verified before editing: the latest accepted choice is owned by its waiting
+caller, whose lifecycle/cancellation guard can drop an opt-out queued before
+suspension. A store-owned worker will drain the latest accepted choice through
+receipt/readback, independent of caller lifetime and scene state. Ownership stays
+continuous until the queue settles; pairing replacement detaches that worker and
+uses an ID fence so its late completion cannot release a new pairing's owner.
+No queued write is automatically replayed across process death.
+
+Persist only a suppression preference, keyed by connection ID, Mac fingerprint
+and phone identity tag. Write it before an explicit permission change; restore
+it for the same pairing at initialization. Confirmed enable clears it; unpair or
+pairing replacement clears it. Neither previews nor rosters enter defaults.
+Repeated authorization denials should publish an offline shared snapshot only
+on the connected-to-offline transition, respecting Live Activity enablement.
+
+Add controlled regressions for suspension after enqueue, cancellation of the
+waiting caller, store recreation after failed/successful opt-out and confirmed
+enable, identity scoping, repeated denials, and a held old-pairing mutation while
+the replacement pairing reads and changes consent. Preserve earlier recovery,
+focus and empty-state tests. Rerun the iOS suite and SwiftUI rendering under the
+owned heavy-gate simulator lease, then refresh exact evidence hashes and receipt.
+
+## R2 / Claude r2 final receipt
+
+The earlier R2 receipt is superseded by this worker fix. No new finding was
+dismissed; F1 is the same accepted-choice loss found by Codex r2.
+
+- F1/R2: `drainPreviewChoices` owns delivery rather than a waiting caller.
+  `testQueuedOptOutDrainsWhenSuspendedAfterAcceptance` and
+  `testQueuedOptOutDrainsWhenWaitingCallerIsCancelled` hold enable before its
+  host mutation, accept opt-out, suspend or cancel its caller, then settle both.
+  The host ends disabled and no updating state is abandoned. Both tests also
+  hold the queued opt-out after the enable settles and prove polling cannot
+  enter during that handoff (F3). Existing lifecycle/recovery tests still pass.
+- F2: suppression is persisted before writes and restored only for the same
+  connection ID, Mac fingerprint and phone identity tag. The recreation test
+  covers failed opt-out and successful opt-out followed by Mac re-enable, and
+  verifies that explicit receipt/readback-confirmed enable clears persistence.
+  Identity-scope tests cover each identity field and clearing on unpair. No
+  terminal content or pending network operation is persisted.
+- F4: authorization failures publish the shared offline snapshot only when it
+  was connected, and only sync Live Activity when enabled. The repeated-denial
+  test counts one offline write across repeated pane and agent/status denials,
+  preserves agent metadata and then recovers. Existing C1 behavior is retained.
+- F5: pairing reset detaches mutation ownership. An ID fence prevents old work
+  from releasing or publishing into a new owner. The old-pairing mutation test
+  holds an enable, unpairs and installs a replacement fixture pairing, reads
+  its roster and holds its opt-out, then settles the old request first. The
+  replacement owner remains intact and ends disabled. This uses the same
+  persisted-record installation method as successful production pairing;
+  actual Keychain/network pairing is not exercised.
+
+Final validation command:
+`heavy-gate --simulator-session E3C31483-F771-4D58-9D3D-5BBCA699BB9A -- sh /tmp/companion-p9-evidence/r2-final-job.sh`.
+
+The iOS build and **75 tests passed**, zero failures, including 31 pane roster
+and fresh actual SwiftUI rendering tests. No compiler warnings. The existing
+Xcode host-build metadata diagnostic remains nonfatal. The unchanged protocol
+package retains its earlier 33-test pass; it was not rerun for iOS-only changes.
+`git diff --check` passed. All builds, tests and screenshot capture/export used
+the owned simulator lease; heavy-gate shut it down and released the lease.
+No automation daemon was started. Device-panel opening was unavailable inside
+the job because this session has no terminal ACP transport; no separate
+lease-less device open was attempted.
+
+Final evidence under `/tmp/companion-p9-evidence/`:
+
+- `r2-final-job.sh`, `r2-final-xcodegen.log`, `r2-final-tests.log`,
+  `r2-final.xcresult` and `r2-final-attachments/manifest.json`.
+- `r2-final-screenshots/`: preview off/on, after opt-out and locked SwiftUI list.
+  Current-time fixture, visually inspected; no preview remains after opt-out.
+- `r2-source-manifest.json`: final commit, source/docs, built code and screenshot
+  hashes. `r2-handoff.txt` identifies the final artifact for parent review.
+- `r2-worker.xcresult` is the preceding 75-test pass before strengthening the
+  held queued-write polling assertion; use `r2-final.xcresult` for final sources.
+
+Earlier R1/C1-C3 fixes remain covered. R3 VoiceOver pane-type omission stays
+explicitly deferred. Evidence remains synthetic client/app-hosted SwiftUI;
+real paired LAN/Tailscale, physical authentication/privacy timing, production
+consent touches and cold-notification scrolling remain unverified. No push,
+PR, GitHub comment or merge. Fresh focused Codex/Claude reviews are parent-owned.

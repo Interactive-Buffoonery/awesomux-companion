@@ -266,6 +266,158 @@ final class PaneRosterTests: XCTestCase {
         XCTAssertEqual(store.panes.previewIntent, .keepOff)
     }
 
+    func testQueuedOptOutDrainsWhenSuspendedAfterAcceptance() async {
+        await checkQueuedOptOut(suspend: true, cancelWaiter: false)
+    }
+
+    func testQueuedOptOutDrainsWhenWaitingCallerIsCancelled() async {
+        await checkQueuedOptOut(suspend: false, cancelWaiter: true)
+    }
+
+    private func checkQueuedOptOut(suspend: Bool, cancelWaiter: Bool) async {
+        let client = PaneClientFixture()
+        client.allowed = false
+        let store = store(client)
+        store.resumePanes()
+        await store.refreshPanes()
+        let gate = RequestGate("enable held before queued opt-out")
+        client.holdNext["set_terminal_preview"] = gate
+        let enable = Task { await store.setTerminalPreview(true) }
+        await fulfillment(of: [gate.started], timeout: 3)
+        let disable = Task { await store.setTerminalPreview(false) }
+        await waitForPermission(.updating(false), store: store)
+        if suspend { store.suspendPanes() }
+        if cancelWaiter { disable.cancel() }
+        let latest = RequestGate("queued opt-out held after older write settles")
+        client.holdNext["set_terminal_preview"] = latest
+        gate.release()
+        await fulfillment(of: [latest.started], timeout: 3)
+        let beforePoll = client.calls.count
+        await store.refreshPanes()
+        XCTAssertEqual(client.calls.count, beforePoll, "No polling handoff between queued writes")
+        if !suspend { XCTAssertEqual(store.panes.permission, .updating(false)) }
+        latest.release()
+        await enable.value
+        await disable.value
+        XCTAssertEqual(client.calls.filter { $0.operation == "set_terminal_preview" }.map(\.allowed), [true, false])
+        XCTAssertEqual(client.allowed, false, "Accepted opt-out must reach the host without its caller or scene")
+        if suspend {
+            XCTAssertEqual(store.panes.permission, .unknown)
+            XCTAssertEqual(store.panes.state, .idle)
+            store.resumePanes()
+        }
+        await store.refreshPanes()
+        XCTAssertEqual(store.panes.permission, .disabled, "No abandoned updating state")
+        XCTAssertEqual(previews(store), [])
+    }
+
+    func testOptOutSuppressionSurvivesRecreationUntilConfirmedEnable() async {
+        for fails in [true, false] {
+            let client = PaneClientFixture()
+            var current = store(client)
+            current.resumePanes()
+            await current.refreshPanes()
+            if fails { client.errors["set_terminal_preview"] = .unreachable }
+            await current.setTerminalPreview(false)
+            current.suspendPanes()
+            client.errors = [:]
+            client.allowed = true // Mac re-enables, or the failed request never applied.
+            current = store(client)
+            XCTAssertEqual(current.panes.previewIntent, .keepOff)
+            current.resumePanes()
+            await current.refreshPanes()
+            XCTAssertEqual(previews(current), [])
+            XCTAssertFalse(current.panes.permission.allowsPreview)
+            await current.setTerminalPreview(true)
+            XCTAssertEqual(current.panes.previewIntent, .followHost)
+            current.suspendPanes()
+            current = store(client)
+            current.resumePanes()
+            await current.refreshPanes()
+            XCTAssertEqual(previews(current), ["Build complete"], "Confirmed enable clears persisted suppression")
+        }
+    }
+
+    func testSuppressionIsScopedToConnectionAndBothIdentities() async {
+        let client = PaneClientFixture()
+        let original = store(client)
+        original.resumePanes()
+        await original.refreshPanes()
+        await original.setTerminalPreview(false)
+        client.allowed = true
+        for record in [panePairing(connectionID: UUID()), panePairing(macFingerprint: "other-mac"),
+                       panePairing(identityTag: "other-phone")] {
+            let different = store(client, record: record)
+            different.resumePanes()
+            await different.refreshPanes()
+            XCTAssertEqual(different.panes.previewIntent, .followHost)
+            XCTAssertEqual(previews(different), ["Build complete"])
+        }
+        await original.unpair()
+        let recreated = store(client)
+        XCTAssertEqual(recreated.panes.previewIntent, .followHost, "Unpair clears the preference")
+    }
+
+    func testOldPairingMutationCannotBlockOrReleaseReplacementWorker() async {
+        let old = PaneClientFixture()
+        old.allowed = false
+        let next = PaneClientFixture()
+        let store = store(old, makeClient: { record, _ in record.identityTag == "fixture-only" ? old : next })
+        store.resumePanes()
+        await store.refreshPanes()
+        let oldGate = RequestGate("old pairing enable held")
+        old.holdNext["set_terminal_preview"] = oldGate
+        let oldEnable = Task { await store.setTerminalPreview(true) }
+        await fulfillment(of: [oldGate.started], timeout: 3)
+        await store.unpair()
+        store.replacePairing(with: panePairing(connectionID: UUID(), identityTag: "new-phone"))
+        await store.refreshPanes()
+        XCTAssertEqual(previews(store), ["Build complete"], "New pairing reads must not await the old grant")
+        let nextGate = RequestGate("new pairing opt-out held")
+        next.holdNext["set_terminal_preview"] = nextGate
+        let nextDisable = Task { await store.setTerminalPreview(false) }
+        await fulfillment(of: [nextGate.started], timeout: 3)
+        oldGate.release()
+        await oldEnable.value
+        XCTAssertEqual(store.panes.permission, .updating(false))
+        let before = next.calls.count
+        await store.refreshPanes()
+        XCTAssertEqual(next.calls.count, before, "Old completion must not release the new worker")
+        nextGate.release()
+        await nextDisable.value
+        XCTAssertEqual(old.allowed, true)
+        XCTAssertEqual(next.allowed, false)
+        XCTAssertEqual(store.panes.permission, .disabled)
+        XCTAssertEqual(store.panes.previewIntent, .keepOff)
+        XCTAssertEqual(previews(store), [])
+    }
+
+    func testRepeatedAuthorizationDenialsWriteOfflineSnapshotOnlyOnce() async {
+        let client = PaneClientFixture()
+        var shared: [GlanceSnapshot] = []
+        let store = store(client, writeShared: { shared.append($0) })
+        store.liveActivityEnabled = false
+        await store.refresh()
+        store.resumePanes()
+        await store.refreshPanes()
+        let before = shared.count
+        client.errors["list_panes"] = .api("permission_denied")
+        for _ in 0..<3 { await store.refreshPanes() }
+        client.errors["list_agents"] = .api("permission_denied")
+        await store.refresh()
+        client.errors["get_connection_status"] = .api("permission_denied")
+        await store.refreshPanes()
+        XCTAssertEqual(shared.count, before + 1)
+        XCTAssertEqual(shared.last?.connected, false)
+        XCTAssertEqual(store.snapshot?.agents.count, 1)
+        XCTAssertEqual(previews(store), [])
+        client.errors = [:]
+        await store.refresh()
+        await store.refreshPanes()
+        XCTAssertTrue(store.isConnected)
+        XCTAssertEqual(previews(store), ["Build complete"])
+    }
+
     func testPairingResetClearsLocalIntentButSceneSuspensionDoesNot() async {
         var roster = PaneRoster()
         roster.previewIntent = .keepOff
@@ -543,10 +695,12 @@ final class PaneRosterTests: XCTestCase {
     }
 }
 
-func panePairing(routes: [CompanionRoute]? = nil) -> PairingRecord {
+func panePairing(routes: [CompanionRoute]? = nil,
+                 connectionID: UUID = UUID(uuidString: "00000000-0000-0000-0000-000000000009")!,
+                 macFingerprint: String = "fixture-pin", identityTag: String = "fixture-only") -> PairingRecord {
     PairingRecord(macName: "Fixture Mac", host: routes == nil ? "fixture.invalid" : nil, port: 1234,
-                  macFingerprint: "fixture-pin", transport: routes == nil ? .lan : nil, routes: routes,
-                  connectionID: UUID(uuidString: "00000000-0000-0000-0000-000000000009")!, identityTag: "fixture-only",
+                  macFingerprint: macFingerprint, transport: routes == nil ? .lan : nil, routes: routes,
+                  connectionID: connectionID, identityTag: identityTag,
                   identityStorage: .keychain, pairedAt: Date(timeIntervalSince1970: 1_700_000_000))
 }
 

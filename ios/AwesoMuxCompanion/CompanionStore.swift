@@ -65,13 +65,25 @@ final class CompanionStore {
     /// Bumped whenever the pairing changes so reads that straddle the change are dropped.
     @ObservationIgnored private var revision = 0
     @ObservationIgnored private var permissionRevision = 0
-    @ObservationIgnored private var previewMutationTask: Task<Bool, Never>?
+    @ObservationIgnored private var previewMutationTask: Task<Void, Never>?
+    @ObservationIgnored private var previewMutationID: UUID?
     @ObservationIgnored private var previewChoice: PreviewChoice?
 
     private struct PreviewChoice: Equatable {
         let id = UUID()
         let allowed: Bool
         let pairingRevision: Int
+    }
+    private struct PreviewSuppression: Codable, Equatable {
+        let connectionID: UUID
+        let macFingerprint: String
+        let identityTag: String
+
+        init(_ record: PairingRecord) {
+            connectionID = record.connectionID
+            macFingerprint = record.macFingerprint
+            identityTag = record.identityTag
+        }
     }
     @ObservationIgnored private var panePollID: UUID?
     @ObservationIgnored private var paneReadTask: Task<Void, Never>?
@@ -91,6 +103,7 @@ final class CompanionStore {
 
     private enum Keys {
         static let liveActivity = "liveActivityEnabled"
+        static let previewSuppression = "terminalPreviewSuppression"
         static let unpairMessage = "unpairMessage"
         static let revokedConnectionID = "revokedConnectionID"
     }
@@ -126,6 +139,11 @@ final class CompanionStore {
         unpairMessage = defaults.string(forKey: Keys.unpairMessage)
         do {
             record = try loadPairing()
+            if let record, let data = defaults.data(forKey: Keys.previewSuppression),
+               let suppression = try? JSONDecoder().decode(PreviewSuppression.self, from: data),
+               suppression == PreviewSuppression(record) {
+                panes.previewIntent = .keepOff
+            }
             snapshot = cache.restore(for: record)
             isSnapshotCached = snapshot != nil
         } catch {
@@ -189,9 +207,8 @@ final class CompanionStore {
                 connectionID: connectionID, identityTag: created.tag, identityStorage: created.storage, pairedAt: .now)
             try PairingStore.save(next)
             let previous = record
-            forgetConnection()
+            replacePairing(with: next)
             if let previous, previous.identityTag != next.identityTag { revoke(previous) }
-            record = next
             unpairMessage = nil
             defaults.removeObject(forKey: Keys.revokedConnectionID)
             message = nil
@@ -252,11 +269,20 @@ final class CompanionStore {
         }
     }
 
+    /// Installs a pairing after its record has been saved successfully.
+    func replacePairing(with next: PairingRecord) {
+        forgetConnection()
+        record = next
+    }
+
     private func forgetConnection() {
         revision += 1
         invalidatePaneRead()
         panes.reset()
         previewChoice = nil
+        previewMutationID = nil
+        previewMutationTask = nil
+        defaults.removeObject(forKey: Keys.previewSuppression)
         focusedPaneID = nil
         refreshTask?.cancel(); refreshTask = nil
         cache.clear()
@@ -473,32 +499,40 @@ final class CompanionStore {
     }
 
     func setTerminalPreview(_ allowed: Bool) async {
-        guard panes.lifecycle == .active, !isUnpairing, record != nil,
+        guard panes.lifecycle == .active, !isUnpairing, let record,
               panes.permission.canChange || previewMutationTask != nil else { return }
-        let choice = PreviewChoice(allowed: allowed, pairingRevision: revision)
-        previewChoice = choice
+        previewChoice = PreviewChoice(allowed: allowed, pairingRevision: revision)
+        // Persist suppression before contacting the host, including an enable awaiting confirmation.
+        defaults.set(try? JSONEncoder().encode(PreviewSuppression(record)), forKey: Keys.previewSuppression)
         panes.previewIntent = .keepOff
         invalidatePaneRead()
         permissionRevision += 1
         panes.clearPreviews()
         panes.permission = .updating(allowed)
 
-        // The task owns the write until it settles, even when its initiating scene suspends.
-        while let pending = previewMutationTask {
-            _ = await pending.value
-            guard previewChoice == choice, revision == choice.pairingRevision else { return }
-        }
-        guard previewChoice == choice, revision == choice.pairingRevision,
-              panes.lifecycle == .active, !Task.isCancelled, let record else { return }
-        let task = Task {
-            let confirmed = await changeTerminalPreview(choice, record: record)
-            previewMutationTask = nil
-            return confirmed
-        }
+        if let previewMutationTask { return await previewMutationTask.value }
+        let owner = UUID()
+        previewMutationID = owner
+        let task = Task { await drainPreviewChoices(owner: owner) }
         previewMutationTask = task
-        let confirmed = await task.value
-        guard confirmed, previewChoice == choice, revision == choice.pairingRevision else { return }
-        await refreshPanes()
+        await task.value
+    }
+
+    private func drainPreviewChoices(owner: UUID) async {
+        var confirmed = false
+        while previewMutationID == owner, let choice = previewChoice,
+              choice.pairingRevision == revision, let record {
+            confirmed = await changeTerminalPreview(choice, record: record)
+            if previewMutationID != owner { return }
+            if previewChoice == choice {
+                previewChoice = nil
+                break
+            }
+        }
+        guard previewMutationID == owner else { return }
+        previewMutationID = nil
+        previewMutationTask = nil
+        if confirmed { await refreshPanes() }
     }
 
     private func changeTerminalPreview(_ choice: PreviewChoice, record: PairingRecord) async -> Bool {
@@ -517,7 +551,10 @@ final class CompanionStore {
             guard isCurrent() else { return false }
             guard status.terminalPreviewAllowed == choice.allowed else { throw MacClientFailure.invalidResponse }
             // An explicit, confirmed enable is the only way to release this pairing's local suppression.
-            if choice.allowed { panes.previewIntent = .followHost }
+            if choice.allowed {
+                defaults.removeObject(forKey: Keys.previewSuppression)
+                panes.previewIntent = .followHost
+            }
             publish(PaneRoster.permission(status.terminalPreviewAllowed))
             return true
         } catch {
@@ -569,11 +606,11 @@ final class CompanionStore {
         reachable = false
         activeRoute = nil
         message = Self.readMessage(for: error, macName: record?.macName ?? "Mac")
-        if let snapshot {
+        if let snapshot, snapshot.connected {
             let offline = snapshot.offline()
             self.snapshot = offline
             writeShared(offline)
-            Task { await liveActivity?.sync(offline, connected: false) }
+            if liveActivityEnabled { Task { await liveActivity?.sync(offline, connected: false) } }
         }
     }
 

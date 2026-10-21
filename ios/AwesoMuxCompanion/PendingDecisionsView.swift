@@ -43,6 +43,7 @@ struct PendingDecisionsSection: View {
                         Text("An answer may have reached your Mac. A retry sends only the original answer.")
                             .font(.callout)
                         Button("Retry Same Answer") { Task { await model.retry(request.identity) } }
+                            .buttonStyle(.borderless)
                             .disabled(!model.canRetry(request.identity))
                             .accessibilityHint("Authenticates again, checks the Mac, and retries the same choice and request identifier.")
                     } else {
@@ -51,6 +52,7 @@ struct PendingDecisionsSection: View {
                             Button(choice == .allow ? "Allow Once" : "Deny Once") {
                                 Task { await model.answer(request.identity, choice: choice) }
                             }
+                            .buttonStyle(.borderless)
                             .disabled(!model.canAnswer(request.identity, choice: choice))
                             .accessibilityHint("Authenticates before answering this Claude permission request.")
                         }

@@ -37,7 +37,7 @@ struct TerminalLockGate: View {
                         .multilineTextAlignment(.center)
                     Button("Unlock") { Task { await model.unlock() } }
                         .buttonStyle(.borderedProminent)
-                    .foregroundStyle(Cat.crust)
+                        .foregroundStyle(Cat.crust)
                         .disabled(model.isAuthenticating || !model.isActive)
                     if model.isAuthenticating {
                         ProgressView("Authenticating…")
@@ -93,11 +93,6 @@ private struct ScenePrivacyBridge: UIViewRepresentable {
     }
 
     func updateUIView(_ view: ScenePrivacyAnchor, context: Context) {
-        // Read observable state here so asynchronous authentication also updates
-        // the scene window, including while a navigation sheet is presented.
-        _ = model.isLocked
-        _ = model.isActive
-        _ = model.authenticationFailureMessage
         view.protectsContent = protectsContent
         view.updateCover()
     }

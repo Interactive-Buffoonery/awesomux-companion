@@ -35,6 +35,25 @@ final class TerminalLockModelTests: XCTestCase {
         XCTAssertEqual(fixture.model.authenticationFailureMessage, fixture.auth.failureMessage)
     }
 
+    func testFailureAndRetryNotifyPrivacyObserverSynchronously() async {
+        let fixture = Fixture()
+        fixture.model.becomeActive()
+        var messages: [String?] = []
+        fixture.model.securityDidChange = { messages.append(fixture.model.authenticationFailureMessage) }
+        defer { fixture.model.securityDidChange = nil }
+        let request = await fixture.start { await fixture.model.unlock() }
+        fixture.auth.finish(false)
+        await request.value
+        let failure = fixture.model.authenticationFailureMessage
+        XCTAssertNotNil(failure)
+        XCTAssertEqual(messages, [failure])
+
+        let retry = await fixture.start { await fixture.model.unlock() }
+        XCTAssertEqual(messages, [failure, nil])
+        fixture.auth.finish(false)
+        await retry.value
+    }
+
     func testGraceExpiresAtFifteenSecondsAndNotBefore() async {
         for duration in [14.999, 15, 16] {
             let fixture = Fixture()

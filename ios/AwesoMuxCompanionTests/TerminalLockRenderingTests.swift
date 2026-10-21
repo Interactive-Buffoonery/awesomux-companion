@@ -6,7 +6,8 @@ import XCTest
 @MainActor
 final class TerminalLockRenderingTests: XCTestCase {
     func testLockedGateAndSynchronousScenePrivacyCover() async throws {
-        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive }))
         let previousKeyWindow = scene.windows.first(where: { $0.isKeyWindow })
         let suite = "TerminalLockRendering.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -16,7 +17,7 @@ final class TerminalLockRenderingTests: XCTestCase {
         model.becomeActive()
         let host = UIHostingController(rootView: Text("Sensitive agent content"))
         let window = UIWindow(windowScene: scene)
-        window.frame = scene.coordinateSpace.bounds
+        window.frame = scene.effectiveGeometry.coordinateSpace.bounds
         window.rootViewController = host
         window.makeKeyAndVisible()
         let anchor = ScenePrivacyAnchor(model: model, protectsContent: true)
@@ -26,7 +27,6 @@ final class TerminalLockRenderingTests: XCTestCase {
             host.dismiss(animated: false)
             window.isHidden = true
             window.rootViewController = nil
-            NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
             previousKeyWindow?.makeKey()
         }
         let sheet = UIViewController()
@@ -57,7 +57,7 @@ final class TerminalLockRenderingTests: XCTestCase {
 
         // Assert before yielding the main actor. This is cover installation
         // evidence, not an actual operating-system app-switcher snapshot.
-        NotificationCenter.default.post(name: UIScene.willDeactivateNotification, object: scene)
+        model.becomeInactive()
         XCTAssertFalse(cover.isHidden)
         XCTAssertNotNil(cover.rootViewController)
         XCTAssertFalse(model.isActive)
@@ -71,6 +71,9 @@ final class TerminalLockRenderingTests: XCTestCase {
         anchor.detach()
         XCTAssertTrue(window.isUserInteractionEnabled)
         XCTAssertFalse(window.accessibilityElementsHidden)
+        await withCheckedContinuation { (completion: CheckedContinuation<Void, Never>) in
+            host.dismiss(animated: false) { completion.resume() }
+        }
     }
 
     private func attach(_ window: UIWindow, name: String) {

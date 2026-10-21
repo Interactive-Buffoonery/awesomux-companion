@@ -59,7 +59,9 @@ final class TerminalLockModel {
     }
     @ObservationIgnored var securityDidChange: (() -> Void)?
     private(set) var isAuthenticating = false
-    private(set) var authenticationFailureMessage: String?
+    private(set) var authenticationFailureMessage: String? {
+        didSet { if oldValue != authenticationFailureMessage { securityDidChange?() } }
+    }
     var authenticationFailed: Bool { authenticationFailureMessage != nil }
 
     private let defaults: UserDefaults
@@ -99,6 +101,8 @@ final class TerminalLockModel {
     }
 
     func enterForeground() {
+        // Only enterBackground records backgroundedAt, and it invalidates authentication.
+        // Applying the grace period here cannot revive a pre-background success.
         if let backgroundedAt, now() - backgroundedAt >= Self.gracePeriod {
             isLocked = isEnabled
         }

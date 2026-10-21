@@ -25,3 +25,9 @@ the helper lifetime with a return reserve. Remote expiry leaves the local Mac
 window intact. Outcomes and retries remain bounded through hook expiry plus
 ten minutes; exhaustion refuses work. Revalidate current workspace assignment,
 identity, device grant and lease before commit and each actual hook write.
+
+Optional response decision fields tolerate future values: if any element of
+`pendingDecisions` or `decisionOutcomes`, or the `decisionReceipt`, cannot be
+decoded, that entire optional field is omitted (`nil`). Other status, agent and
+pane fields survive. Never act on a partly decoded decision or unknown choice.
+Decision enums and incoming `CompanionDecisionAnswer` decoding remain strict.

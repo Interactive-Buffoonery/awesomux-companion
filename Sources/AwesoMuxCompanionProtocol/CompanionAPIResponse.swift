@@ -185,9 +185,9 @@ public struct CompanionAPIResponse: Codable, Sendable {
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        pendingDecisions = try container.decodeIfPresent([CompanionPendingDecision].self, forKey: .pendingDecisions)
-        decisionOutcomes = try container.decodeIfPresent([CompanionDecisionReceipt].self, forKey: .decisionOutcomes)
-        decisionReceipt = try container.decodeIfPresent(CompanionDecisionReceipt.self, forKey: .decisionReceipt)
+        pendingDecisions = try? container.decodeIfPresent([CompanionPendingDecision].self, forKey: .pendingDecisions)
+        decisionOutcomes = try? container.decodeIfPresent([CompanionDecisionReceipt].self, forKey: .decisionOutcomes)
+        decisionReceipt = try? container.decodeIfPresent(CompanionDecisionReceipt.self, forKey: .decisionReceipt)
         remoteDecisionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .remoteDecisionsEnabled)
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
         requestID = try container.decodeIfPresent(UUID.self, forKey: .requestID)

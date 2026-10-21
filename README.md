@@ -20,3 +20,7 @@ compatible. TLS, credentials, authorization, and display policy stay in the apps
 The phone uses the local package through `ios/project.yml`. The Mac pins an exact
 package release and commits `Package.resolved`; plain semantic-version tags are
 reserved for the package. See [ADR-0001](docs/adr/0001-shared-companion-protocol-package.md).
+
+The [alert preference contract](docs/protocol/alert-preferences.md) defines shared
+per-pairing filter types and get/set envelopes for awesoMux #791. Host enforcement
+and phone settings are separate changes.

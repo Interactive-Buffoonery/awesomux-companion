@@ -136,6 +136,7 @@ public struct CompanionAPIResponse: Codable, Sendable {
     public let attentionEvents: AttentionPage?
     /// v2 grants only. Malformed route metadata decodes as `nil` so the rest of the response survives.
     public let routes: CompanionRoutes?
+    public let alertPreferences: CompanionAlertPreferences?
 
     public init(
         schemaVersion: Int = CompanionProtocol.version,
@@ -147,7 +148,8 @@ public struct CompanionAPIResponse: Codable, Sendable {
         connectionStatus: String? = nil,
         agents: [Agent]? = nil,
         attentionEvents: AttentionPage? = nil,
-        routes: CompanionRoutes? = nil
+        routes: CompanionRoutes? = nil,
+        alertPreferences: CompanionAlertPreferences? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.requestID = requestID
@@ -159,6 +161,7 @@ public struct CompanionAPIResponse: Codable, Sendable {
         self.agents = agents
         self.attentionEvents = attentionEvents
         self.routes = routes
+        self.alertPreferences = alertPreferences
     }
 
     public init(from decoder: any Decoder) throws {
@@ -172,6 +175,7 @@ public struct CompanionAPIResponse: Codable, Sendable {
         connectionStatus = try container.decodeIfPresent(String.self, forKey: .connectionStatus)
         agents = try container.decodeIfPresent([Agent].self, forKey: .agents)
         attentionEvents = try container.decodeIfPresent(AttentionPage.self, forKey: .attentionEvents)
+        alertPreferences = try container.decodeIfPresent(CompanionAlertPreferences.self, forKey: .alertPreferences)
         routes = (try? container.decodeIfPresent(CompanionRoutes.self, forKey: .routes)) ?? nil
     }
 }

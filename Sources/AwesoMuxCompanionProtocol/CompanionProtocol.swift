@@ -30,6 +30,8 @@ public enum CompanionOperation: String, Codable, CaseIterable, Sendable {
     case unpair
     case listAgents = "list_agents"
     case attentionEvents = "get_attention_events"
+    case getAlertPreferences = "get_alert_preferences"
+    case setAlertPreferences = "set_alert_preferences"
 }
 
 public struct CompanionAPIRequest: Codable, Sendable {
@@ -40,9 +42,10 @@ public struct CompanionAPIRequest: Codable, Sendable {
     public let limit: Int?
     public let cursor: String?
     public let includeCommandEvents: Bool?
+    public let alertPreferences: CompanionAlertPreferences?
 
     public init(operation: String, connectionID: UUID, limit: Int? = nil, cursor: String? = nil,
-                includeCommandEvents: Bool? = nil, requestID: UUID = UUID()) {
+                includeCommandEvents: Bool? = nil, alertPreferences: CompanionAlertPreferences? = nil, requestID: UUID = UUID()) {
         schemaVersion = CompanionProtocol.version
         self.requestID = requestID
         self.operation = operation
@@ -50,6 +53,7 @@ public struct CompanionAPIRequest: Codable, Sendable {
         self.limit = limit
         self.cursor = cursor
         self.includeCommandEvents = includeCommandEvents
+        self.alertPreferences = alertPreferences
     }
 }
 

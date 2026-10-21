@@ -54,6 +54,47 @@ import Testing
         }
     }
 
+    // A snapshot byte count is bounded independently of the small JSON frame
+    // carrying it; aggregate chunk accounting belongs to the stream consumer.
+    @Test(arguments: [-1, Stream.maximumSnapshotBytes + 1, Int.max])
+    func invalidSnapshotEndCountCannotBeEncoded(_ count: Int) {
+        #expect(throws: Stream.Failure.invalidControl) {
+            try Stream.encode(.snapshotEnd(.init(bytes: count)), generation: 1)
+        }
+    }
+
+    @Test(arguments: [-1, Stream.maximumSnapshotBytes + 1, Int.max])
+    func invalidSnapshotEndCountCannotBeDecoded(_ count: Int) {
+        let wire = Data([Stream.FrameType.snapshotEnd.rawValue, 0, 0, 0, 1])
+            + Data("{\"bytes\":\(count)}".utf8)
+        #expect(throws: Stream.Failure.invalidControl) { try Stream.decode(wire) }
+    }
+
+    @Test(arguments: [0, Stream.maximumSnapshotBytes])
+    func snapshotEndCountBoundariesRoundTrip(_ count: Int) throws {
+        let frame = Stream.Frame.snapshotEnd(.init(bytes: count))
+        let decoded = try Stream.decode(Stream.encode(frame, generation: 1))
+        #expect(decoded.frame == frame)
+    }
+
+    @Test func paneTargetVersionCanBeUsedInWatchRequest() throws {
+        let pane = CompanionAPIResponse.Pane(
+            paneID: Self.id.uuidString.lowercased(), kind: "terminal", title: "Shell", availability: "available",
+            targetVersion: Self.id.uuidString.lowercased())
+        let paneID: UUID = try #require(UUID(uuidString: pane.paneID))
+        let targetVersion: UUID = try #require(pane.targetVersion.flatMap(UUID.init(uuidString:)))
+        let request = CompanionAPIRequest(
+            operation: CompanionOperation.watchTerminal.rawValue, connectionID: Self.id,
+            paneID: paneID, targetVersion: targetVersion, streamVersion: 1)
+        let decoded = try CompanionProtocol.decoder().decode(
+            CompanionAPIRequest.self, from: CompanionProtocol.encoder().encode(request))
+        #expect(decoded.targetVersion == Self.id)
+        let begin = Stream.SnapshotBegin(
+            paneID: pane.paneID, targetVersion: try #require(pane.targetVersion),
+            grid: .init(rows: 24, cols: 80), leader: nil, scrollbackBound: Stream.maximumSnapshotBytes)
+        #expect(UUID(uuidString: begin.targetVersion) == decoded.targetVersion)
+    }
+
     @Test func malformedFramesAreRejected() {
         #expect(throws: Stream.Failure.unknownType(0x7f)) { try Stream.decode(Data([0x7f, 0, 0, 0, 1, 0x7b, 0x7d])) }
         #expect(throws: Stream.Failure.tooShort) { try Stream.decode(Data([Stream.FrameType.output.rawValue, 0, 0, 0, 1, 0])) }

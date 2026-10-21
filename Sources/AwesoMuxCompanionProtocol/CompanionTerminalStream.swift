@@ -210,7 +210,9 @@ public enum CompanionTerminalStream {
         switch frame {
         case .snapshotBegin(let value): try control(value)
         case .snapshot(let sequence, let bytes): try payload(sequence, bytes)
-        case .snapshotEnd(let value): try control(value)
+        case .snapshotEnd(let value):
+            guard (0...maximumSnapshotBytes).contains(value.bytes) else { throw Failure.invalidControl }
+            try control(value)
         case .output(let sequence, let bytes): try payload(sequence, bytes)
         case .grid(let value): try control(value)
         case .leader(let value): try control(value)
@@ -222,6 +224,8 @@ public enum CompanionTerminalStream {
         return data
     }
 
+    /// Decodes one frame. Stream owners enforce generation/sequence ordering,
+    /// aggregate snapshot bytes, and pending queue limits across frames.
     public static func decode(_ data: Data) throws -> (frame: Frame, generation: UInt32) {
         guard data.count >= headerBytes else { throw Failure.tooShort }
         guard data.count <= maximumFrameBytes else { throw Failure.tooLarge }
@@ -244,7 +248,10 @@ public enum CompanionTerminalStream {
         case .snapshot:
             let (sequence, bytes) = try payload()
             frame = .snapshot(sequence: sequence, bytes: bytes)
-        case .snapshotEnd: frame = .snapshotEnd(try control(SnapshotEnd.self))
+        case .snapshotEnd:
+            let value = try control(SnapshotEnd.self)
+            guard (0...maximumSnapshotBytes).contains(value.bytes) else { throw Failure.invalidControl }
+            frame = .snapshotEnd(value)
         case .output:
             let (sequence, bytes) = try payload()
             frame = .output(sequence: sequence, bytes: bytes)

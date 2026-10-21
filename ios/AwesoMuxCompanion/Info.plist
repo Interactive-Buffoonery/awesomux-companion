@@ -39,8 +39,6 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>awesoMux uses the camera to scan the pairing code your Mac shows.</string>
-	<key>NSFaceIDUsageDescription</key>
-	<string>awesoMux uses Face ID to unlock your agents and terminals.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>awesoMux connects to your Mac on this network to show your agents.</string>
 	<key>NSSupportsLiveActivities</key>

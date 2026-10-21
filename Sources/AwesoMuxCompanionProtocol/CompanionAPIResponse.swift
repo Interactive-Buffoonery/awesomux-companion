@@ -144,6 +144,10 @@ public struct CompanionAPIResponse: Codable, Sendable {
     /// v2 grants only. Malformed route metadata decodes as `nil` so the rest of the response survives.
     public let routes: CompanionRoutes?
     public let alertPreferences: CompanionAlertPreferences?
+    /// Present on connection status when the Mac can stream terminals.
+    public let terminalStream: CompanionTerminalStream.Capabilities?
+    /// Present on an accepted `watch_terminal` reply; stream frames follow.
+    public let terminalStreamAccepted: CompanionTerminalStream.Accepted?
 
     public init(
         schemaVersion: Int = CompanionProtocol.version,
@@ -162,7 +166,9 @@ public struct CompanionAPIResponse: Codable, Sendable {
         pendingDecisions: [CompanionPendingDecision]? = nil,
         decisionOutcomes: [CompanionDecisionReceipt]? = nil,
         decisionReceipt: CompanionDecisionReceipt? = nil,
-        remoteDecisionsEnabled: Bool? = nil
+        remoteDecisionsEnabled: Bool? = nil,
+        terminalStream: CompanionTerminalStream.Capabilities? = nil,
+        terminalStreamAccepted: CompanionTerminalStream.Accepted? = nil
     ) {
         self.pendingDecisions = pendingDecisions
         self.decisionOutcomes = decisionOutcomes
@@ -181,6 +187,8 @@ public struct CompanionAPIResponse: Codable, Sendable {
         self.alertPreferences = alertPreferences
         self.workspaces = workspaces
         self.terminalPreviewAllowed = terminalPreviewAllowed
+        self.terminalStream = terminalStream
+        self.terminalStreamAccepted = terminalStreamAccepted
     }
 
     public init(from decoder: any Decoder) throws {
@@ -202,6 +210,8 @@ public struct CompanionAPIResponse: Codable, Sendable {
         routes = (try? container.decodeIfPresent(CompanionRoutes.self, forKey: .routes)) ?? nil
         workspaces = try container.decodeIfPresent([Workspace].self, forKey: .workspaces)
         terminalPreviewAllowed = try container.decodeIfPresent(Bool.self, forKey: .terminalPreviewAllowed)
+        terminalStream = (try? container.decodeIfPresent(CompanionTerminalStream.Capabilities.self, forKey: .terminalStream)) ?? nil
+        terminalStreamAccepted = (try? container.decodeIfPresent(CompanionTerminalStream.Accepted.self, forKey: .terminalStreamAccepted)) ?? nil
     }
 }
 

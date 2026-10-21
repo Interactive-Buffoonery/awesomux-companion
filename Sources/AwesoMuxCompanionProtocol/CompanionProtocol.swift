@@ -36,6 +36,7 @@ public enum CompanionOperation: String, Codable, CaseIterable, Sendable {
     case attentionEvents = "get_attention_events"
     case getAlertPreferences = "get_alert_preferences"
     case setAlertPreferences = "set_alert_preferences"
+    case watchTerminal = "watch_terminal"
 }
 
 public struct CompanionAPIRequest: Codable, Sendable {
@@ -49,10 +50,16 @@ public struct CompanionAPIRequest: Codable, Sendable {
     public let alertPreferences: CompanionAlertPreferences?
     public let terminalPreviewAllowed: Bool?
     public let decisionAnswer: CompanionDecisionAnswer?
+    public let paneID: UUID?
+    public let targetVersion: UUID?
+    public let streamVersion: Int?
+    public let grid: CompanionTerminalStream.Grid?
 
     public init(operation: String, connectionID: UUID, limit: Int? = nil, cursor: String? = nil,
                 includeCommandEvents: Bool? = nil, alertPreferences: CompanionAlertPreferences? = nil,
-                terminalPreviewAllowed: Bool? = nil, decisionAnswer: CompanionDecisionAnswer? = nil, requestID: UUID = UUID()) {
+                terminalPreviewAllowed: Bool? = nil, decisionAnswer: CompanionDecisionAnswer? = nil,
+                paneID: UUID? = nil, targetVersion: UUID? = nil, streamVersion: Int? = nil,
+                grid: CompanionTerminalStream.Grid? = nil, requestID: UUID = UUID()) {
         schemaVersion = CompanionProtocol.version
         self.requestID = requestID
         self.operation = operation
@@ -63,6 +70,10 @@ public struct CompanionAPIRequest: Codable, Sendable {
         self.alertPreferences = alertPreferences
         self.terminalPreviewAllowed = terminalPreviewAllowed
         self.decisionAnswer = decisionAnswer
+        self.paneID = paneID
+        self.targetVersion = targetVersion
+        self.streamVersion = streamVersion
+        self.grid = grid
     }
 }
 

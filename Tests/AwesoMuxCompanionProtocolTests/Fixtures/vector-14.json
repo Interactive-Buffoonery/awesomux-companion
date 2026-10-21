@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "requestID": "01234567-89ab-cdef-0123-456789abcdef",
+  "profile": "development",
+  "appInstanceID": "01234567-89ab-cdef-0123-456789abcdef",
+  "capturedAt": "2026-01-01T00:00:00Z",
+  "terminalStreamAccepted": { "role": "watch", "streamVersion": 1 }
+}

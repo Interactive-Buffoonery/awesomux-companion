@@ -49,6 +49,7 @@ struct SettingsView: View {
                 Toggle("Live Activity", isOn: $store.liveActivityEnabled).foregroundStyle(Cat.text)
             } header: { Text("Alerts").foregroundStyle(Cat.subtext0) }
             .listRowBackground(Cat.card)
+            if store.record != nil { TerminalPreviewSection(store: store) }
             Section {
                 TerminalProtectionToggle(model: terminalLock).foregroundStyle(Cat.text)
                 if let message = terminalLock.authenticationFailureMessage {

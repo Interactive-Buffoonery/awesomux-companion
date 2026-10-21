@@ -18,12 +18,20 @@ enum PairingStep: Equatable {
 protocol CompanionSessionClient: Sendable {
     func call(_ operation: String, connectionID: UUID, limit: Int?, cursor: String?) async throws -> APIResponse
     func unpair(connectionID: UUID) async throws
+    func setTerminalPreview(_ allowed: Bool, connectionID: UUID) async throws -> APIResponse
+}
+
+extension CompanionSessionClient {
+    func setTerminalPreview(_ allowed: Bool, connectionID: UUID) async throws -> APIResponse {
+        throw MacClientFailure.api("unsupported_operation")
+    }
 }
 
 extension MacClient: CompanionSessionClient {}
 
 @MainActor @Observable
 final class CompanionStore {
+    private(set) var panes = PaneRoster()
     private(set) var record: PairingRecord?
     private(set) var snapshot: GlanceSnapshot?
     private(set) var isSnapshotCached = false
@@ -56,6 +64,29 @@ final class CompanionStore {
     @ObservationIgnored private var routesCheckedAt = Date.distantPast
     /// Bumped whenever the pairing changes so reads that straddle the change are dropped.
     @ObservationIgnored private var revision = 0
+    @ObservationIgnored private var permissionRevision = 0
+    @ObservationIgnored private var previewMutationTask: Task<Void, Never>?
+    @ObservationIgnored private var previewMutationID: UUID?
+    @ObservationIgnored private var previewChoice: PreviewChoice?
+
+    private struct PreviewChoice: Equatable {
+        let id = UUID()
+        let allowed: Bool
+        let pairingRevision: Int
+    }
+    private struct PreviewSuppression: Codable, Equatable {
+        let connectionID: UUID
+        let macFingerprint: String
+        let identityTag: String
+
+        init(_ record: PairingRecord) {
+            connectionID = record.connectionID
+            macFingerprint = record.macFingerprint
+            identityTag = record.identityTag
+        }
+    }
+    @ObservationIgnored private var panePollID: UUID?
+    @ObservationIgnored private var paneReadTask: Task<Void, Never>?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var pairingTask: Task<Void, Never>?
     @ObservationIgnored private var lastSharedWrite = Date.distantPast
@@ -72,6 +103,7 @@ final class CompanionStore {
 
     private enum Keys {
         static let liveActivity = "liveActivityEnabled"
+        static let previewSuppression = "terminalPreviewSuppression"
         static let unpairMessage = "unpairMessage"
         static let revokedConnectionID = "revokedConnectionID"
     }
@@ -107,6 +139,11 @@ final class CompanionStore {
         unpairMessage = defaults.string(forKey: Keys.unpairMessage)
         do {
             record = try loadPairing()
+            if let record, let data = defaults.data(forKey: Keys.previewSuppression),
+               let suppression = try? JSONDecoder().decode(PreviewSuppression.self, from: data),
+               suppression == PreviewSuppression(record) {
+                panes.previewIntent = .keepOff
+            }
             snapshot = cache.restore(for: record)
             isSnapshotCached = snapshot != nil
         } catch {
@@ -170,9 +207,8 @@ final class CompanionStore {
                 connectionID: connectionID, identityTag: created.tag, identityStorage: created.storage, pairedAt: .now)
             try PairingStore.save(next)
             let previous = record
-            forgetConnection()
+            replacePairing(with: next)
             if let previous, previous.identityTag != next.identityTag { revoke(previous) }
-            record = next
             unpairMessage = nil
             defaults.removeObject(forKey: Keys.revokedConnectionID)
             message = nil
@@ -212,6 +248,7 @@ final class CompanionStore {
             try removePairing(record)
             defaults.removeObject(forKey: Keys.revokedConnectionID)
             self.record = nil
+            discardPreviewSuppression()
             message = nil
         } catch {
             message = String(localized: "This iPhone couldn’t finish unpairing. Choose Unpair This iPhone to try again.")
@@ -233,8 +270,28 @@ final class CompanionStore {
         }
     }
 
+    /// Installs a pairing after its record has been saved successfully.
+    func replacePairing(with next: PairingRecord) {
+        forgetConnection()
+        discardPreviewSuppression()
+        record = next
+    }
+
+    private func discardPreviewSuppression() {
+        defaults.removeObject(forKey: Keys.previewSuppression)
+        panes.previewIntent = .followHost
+    }
+
     private func forgetConnection() {
         revision += 1
+        invalidatePaneRead()
+        let previewIntent = panes.previewIntent
+        panes.reset()
+        panes.previewIntent = previewIntent
+        previewChoice = nil
+        previewMutationID = nil
+        previewMutationTask = nil
+        focusedPaneID = nil
         refreshTask?.cancel(); refreshTask = nil
         cache.clear()
         clients = [:]; activeRoute = nil; snapshot = nil; reachable = false; isSnapshotCached = false
@@ -249,8 +306,14 @@ final class CompanionStore {
 
     func poll() async {
         lanFailed = false
+        let pollID = UUID()
+        panePollID = pollID
+        resumePanes()
+        defer { if panePollID == pollID { suspendPanes() } }
         while !Task.isCancelled {
             await refresh()
+            guard !Task.isCancelled else { return }
+            await refreshPanes()
             do { try await Task.sleep(for: .seconds(5)) } catch { return }
         }
     }
@@ -294,14 +357,7 @@ final class CompanionStore {
     /// read that recovery requires succeeds.
     private func readFeed(record: PairingRecord, revision started: Int) async throws -> GlanceSnapshot {
         func call(_ operation: String, limit: Int? = nil, cursor: String? = nil) async throws -> APIResponse {
-            let (response, route) = try await firstAnswering(orderedRoutes(record)) { route in
-                try await client(for: route, record: record)
-                    .call(operation, connectionID: record.connectionID, limit: limit, cursor: cursor)
-            }
-            guard revision == started else { throw CancellationError() }
-            activeRoute = route
-            if route.transport == .tailscale { lanFailed = true }
-            return response
+            try await sessionCall(operation, record: record, revision: started, limit: limit, cursor: cursor)
         }
         if record.routes != nil, Date.now.timeIntervalSince(routesCheckedAt) > Self.routesCheckInterval {
             updateRoutes(try await call("get_connection_status").routes, record: record)
@@ -345,9 +401,7 @@ final class CompanionStore {
     private func apply(_ next: GlanceSnapshot) async {
         let previous = snapshot
         snapshot = next; reachable = true; message = nil; isSnapshotCached = false
-        if let focusedPaneID, !next.agents.contains(where: { $0.id == focusedPaneID }) {
-            self.focusedPaneID = nil
-        }
+        reconcilePaneFocus()
         if previous?.agents != next.agents || previous?.connected != next.connected || previous?.hostName != next.hostName
             || SharedSnapshot.read()?.connected != next.connected
             // Refresh well inside the widget's freshness window so a quiet, healthy Mac never ages out.
@@ -355,6 +409,217 @@ final class CompanionStore {
             writeShared(next); lastSharedWrite = .now
         }
         if liveActivityEnabled { await liveActivity?.sync(next, connected: next.connected) }
+    }
+
+    // MARK: Foreground pane content
+
+    func resumePanes() {
+        panes.lifecycle = .active
+        if previewMutationTask != nil, let previewChoice, previewChoice.pairingRevision == revision {
+            panes.permission = .updating(previewChoice.allowed)
+        }
+    }
+
+    func suspendPanes() {
+        panePollID = nil
+        invalidatePaneRead()
+        panes.suspend()
+    }
+
+    private func invalidatePaneRead() {
+        panes.invalidate()
+        paneReadTask?.cancel()
+        paneReadTask = nil
+    }
+
+    private func acceptsPaneRead(_ generation: Int, revision started: Int) -> Bool {
+        panes.generation == generation && revision == started && panes.lifecycle == .active
+            && !Task.isCancelled
+    }
+
+    /// Only active polling calls this; background refresh remains agent-only.
+    func refreshPanes() async {
+        guard panes.lifecycle == .active, !isUnpairing, let record else { return }
+        guard previewMutationTask == nil else { return }
+        if let paneReadTask { return await paneReadTask.value }
+        let generation = panes.generation
+        let started = revision
+        let task = Task {
+            do {
+                // v1 pairings need permission readback too, independently of route discovery.
+                let status = try await sessionCall("get_connection_status", record: record, revision: started, paneGeneration: generation)
+                guard acceptsPaneRead(generation, revision: started) else { return }
+                if panes.previewIntent == .keepOff, status.terminalPreviewAllowed == true {
+                    panes.permission = .failed(String(localized: "Previews stay hidden on this iPhone. Turn them off on your Mac or confirm enabling them again."))
+                } else {
+                    panes.permission = PaneRoster.permission(status.terminalPreviewAllowed)
+                }
+                panes.clearPreviews()
+                if panes.state == .idle { panes.state = .loading }
+                let response = try await sessionCall("list_panes", record: record, revision: started, paneGeneration: generation)
+                guard acceptsPaneRead(generation, revision: started) else { return }
+                guard let workspaces = response.workspaces else {
+                    panes.state = .unsupported
+                    panes.permission = .unsupported
+                    reconcilePaneFocus()
+                    return
+                }
+                panes.state = .loaded(PaneRoster.project(workspaces, previews: panes.permission.allowsPreview))
+                reconcilePaneFocus()
+            } catch {
+                guard acceptsPaneRead(generation, revision: started) else { return }
+                if (error as? MacClientFailure) == .api("unsupported_operation") {
+                    panes.state = .unsupported
+                    panes.permission = .unsupported
+                    reconcilePaneFocus()
+                } else {
+                    panes.state = .failed(String(localized: "Can't load sessions. Check your Mac and try again."))
+                    panes.permission = .unknown
+                }
+            }
+        }
+        paneReadTask = task
+        await task.value
+        if panes.generation == generation { paneReadTask = nil }
+    }
+
+    var focusedPaneDestination: FocusedPaneDestination? {
+        guard let focusedPaneID else { return nil }
+        if snapshot?.agents.contains(where: { $0.id == focusedPaneID }) == true {
+            return FocusedPaneDestination(paneID: focusedPaneID, destination: .agents)
+        }
+        if panes.state.workspaces.contains(where: { $0.panes.contains(where: { $0.id == focusedPaneID }) }) {
+            return FocusedPaneDestination(paneID: focusedPaneID, destination: .sessions)
+        }
+        return nil
+    }
+
+    private func reconcilePaneFocus() {
+        switch panes.state {
+        case .loaded, .unsupported: break
+        default: return
+        }
+        guard !isSnapshotCached, let snapshot else { return }
+        if let focusedPaneID, !snapshot.agents.contains(where: { $0.id == focusedPaneID }),
+           !panes.state.workspaces.contains(where: { $0.panes.contains(where: { $0.id == focusedPaneID }) }) {
+            self.focusedPaneID = nil
+        }
+    }
+
+    func setTerminalPreview(_ allowed: Bool) async {
+        guard panes.lifecycle == .active, !isUnpairing, let record,
+              panes.permission.canChange || previewMutationTask != nil else { return }
+        previewChoice = PreviewChoice(allowed: allowed, pairingRevision: revision)
+        // Persist suppression before contacting the host, including an enable awaiting confirmation.
+        defaults.set(try? JSONEncoder().encode(PreviewSuppression(record)), forKey: Keys.previewSuppression)
+        panes.previewIntent = .keepOff
+        invalidatePaneRead()
+        permissionRevision += 1
+        panes.clearPreviews()
+        panes.permission = .updating(allowed)
+
+        if let previewMutationTask { return await previewMutationTask.value }
+        let owner = UUID()
+        previewMutationID = owner
+        let task = Task { await drainPreviewChoices(owner: owner) }
+        previewMutationTask = task
+        await task.value
+    }
+
+    private func drainPreviewChoices(owner: UUID) async {
+        var confirmed = false
+        while previewMutationID == owner, let choice = previewChoice,
+              choice.pairingRevision == revision, let record {
+            confirmed = await changeTerminalPreview(choice, record: record)
+            if previewMutationID != owner { return }
+            if previewChoice == choice {
+                previewChoice = nil
+                break
+            }
+        }
+        guard previewMutationID == owner else { return }
+        previewMutationID = nil
+        previewMutationTask = nil
+        if confirmed { await refreshPanes() }
+    }
+
+    private func changeTerminalPreview(_ choice: PreviewChoice, record: PairingRecord) async -> Bool {
+        func isCurrent() -> Bool { revision == choice.pairingRevision && previewChoice == choice }
+        func publish(_ permission: TerminalPreviewPermission) {
+            if panes.lifecycle == .active { panes.permission = permission }
+        }
+        do {
+            let receipt = try await sessionCall("set_terminal_preview", record: record, revision: choice.pairingRevision,
+                                                previewAllowed: choice.allowed)
+            guard isCurrent() else { return false }
+            permissionRevision += 1
+            invalidatePaneRead()
+            guard receipt.terminalPreviewAllowed == choice.allowed else { throw MacClientFailure.invalidResponse }
+            let status = try await sessionCall("get_connection_status", record: record, revision: choice.pairingRevision)
+            guard isCurrent() else { return false }
+            guard status.terminalPreviewAllowed == choice.allowed else { throw MacClientFailure.invalidResponse }
+            // An explicit, confirmed enable is the only way to release this pairing's local suppression.
+            if choice.allowed {
+                defaults.removeObject(forKey: Keys.previewSuppression)
+                panes.previewIntent = .followHost
+            }
+            publish(PaneRoster.permission(status.terminalPreviewAllowed))
+            return true
+        } catch {
+            guard isCurrent() else { return false }
+            panes.clearPreviews()
+            if (error as? MacClientFailure) == .api("unsupported_operation") {
+                publish(.unsupported)
+            } else {
+                publish(.failed(String(localized: "Couldn't confirm preview permission. Try again when your Mac is available.")))
+            }
+            return false
+        }
+    }
+
+    private func sessionCall(_ operation: String, record: PairingRecord, revision started: Int,
+                             limit: Int? = nil, cursor: String? = nil, previewAllowed: Bool? = nil, paneGeneration: Int? = nil) async throws -> APIResponse {
+        let permissionStarted = permissionRevision
+        func checkCurrent() throws {
+            try Task.checkCancellation()
+            guard revision == started, permissionRevision == permissionStarted,
+                  paneGeneration.map({ acceptsPaneRead($0, revision: started) }) ?? true else { throw CancellationError() }
+        }
+        try checkCurrent()
+        do {
+            let (response, route) = try await firstAnswering(orderedRoutes(record)) { route in
+                try checkCurrent()
+                let client = try client(for: route, record: record)
+                if let previewAllowed {
+                    return try await client.setTerminalPreview(previewAllowed, connectionID: record.connectionID)
+                }
+                return try await client.call(operation, connectionID: record.connectionID, limit: limit, cursor: cursor)
+            }
+            try checkCurrent()
+            activeRoute = route
+            if route.transport == .tailscale { lanFailed = true }
+            return response
+        } catch {
+            try checkCurrent()
+            if error.isCompanionAuthorizationFailure { handleAuthorizationFailure(error) }
+            throw error
+        }
+    }
+
+    private func handleAuthorizationFailure(_ error: Error) {
+        permissionRevision += 1
+        invalidatePaneRead()
+        panes.state = .failed(Self.readMessage(for: error, macName: record?.macName ?? "Mac"))
+        panes.permission = .unknown
+        reachable = false
+        activeRoute = nil
+        message = Self.readMessage(for: error, macName: record?.macName ?? "Mac")
+        if let snapshot, snapshot.connected {
+            let offline = snapshot.offline()
+            self.snapshot = offline
+            writeShared(offline)
+            if liveActivityEnabled { Task { await liveActivity?.sync(offline, connected: false) } }
+        }
     }
 
     // MARK: Routes
@@ -456,10 +721,10 @@ final class CompanionStore {
 
     private static func readMessage(for error: Error, macName: String) -> String {
         switch error {
-        case MacClientFailure.handshakeRejected, MacClientFailure.api("permission_denied"),
+        case MacClientFailure.denied, MacClientFailure.handshakeRejected, MacClientFailure.api("permission_denied"),
              MacClientFailure.api("credential_unavailable"), MacClientFailure.api("access_disabled"),
              is PhoneIdentity.Failure:
-            String(localized: "\(macName) no longer recognizes this iPhone. Pair again in Settings.")
+            String(localized: "\(macName) couldn't authorize this read. Try again, or pair again in Settings if it continues.")
         case MacClientFailure.invalidResponse, MacClientFailure.oversizedFrame:
             String(localized: "\(macName) sent an update this app can't read.")
         case MacClientFailure.api(let code):

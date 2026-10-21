@@ -108,7 +108,7 @@ final class SessionSnapshotCacheTests: XCTestCase {
         }
     }
 
-    func testFreshRosterClearsMissingNotificationPaneAndKeepsExistingPane() async {
+    func testAgentRefreshPreservesNotificationSelectionUntilPaneRosterArrives() async {
         await withDefaults { defaults in
             let record = pairing()
             SessionSnapshotCache(defaults: defaults).save(snapshot(), for: record)
@@ -118,7 +118,7 @@ final class SessionSnapshotCacheTests: XCTestCase {
             XCTAssertEqual(store.focusedPaneID, "exited-pane")
 
             await store.refresh()
-            XCTAssertNil(store.focusedPaneID)
+            XCTAssertEqual(store.focusedPaneID, "exited-pane")
 
             store.focusedPaneID = "pane"
             await store.refresh()

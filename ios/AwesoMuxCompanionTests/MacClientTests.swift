@@ -1,7 +1,22 @@
+import AwesoMuxCompanionProtocol
 import XCTest
 @testable import AwesoMuxCompanion
 
 final class MacClientTests: XCTestCase {
+    func testPreviewRequestUsesOnlySelfPermissionAndExistingFrameContract() throws {
+        let id = UUID()
+        for allowed in [true, false] {
+            let request = MacClient.previewRequest(allowed, connectionID: id)
+            let data = try CompanionProtocol.encoder().encode(request)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(Set(object.keys), ["schemaVersion", "requestID", "operation", "connectionID", "terminalPreviewAllowed"])
+            XCTAssertEqual(object["operation"] as? String, "set_terminal_preview")
+            XCTAssertEqual(object["connectionID"] as? String, id.uuidString)
+            XCTAssertEqual(object["terminalPreviewAllowed"] as? Bool, allowed)
+            XCTAssertEqual(try MacClient.frameRequest(data).dropFirst(4), data)
+        }
+    }
+
     func testEmptyRequestUsesClientFailure() {
         XCTAssertThrowsError(try MacClient.frameRequest(Data())) { error in
             XCTAssertEqual(error as? MacClientFailure, .invalidResponse)

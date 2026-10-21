@@ -98,10 +98,21 @@ struct MacClient: Sendable {
                             terminalPreviewAllowed: allowed)
     }
 
-    private func exchange(_ request: CompanionAPIRequest) async throws -> APIResponse {
+    func answerDecision(_ answer: CompanionDecisionAnswer, connectionID: UUID,
+                        canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse {
+        try await exchange(Self.decisionRequest(answer, connectionID: connectionID), canSend: canSend)
+    }
+
+    static func decisionRequest(_ answer: CompanionDecisionAnswer, connectionID: UUID) -> CompanionAPIRequest {
+        CompanionAPIRequest(operation: CompanionOperation.answerDecision.rawValue,
+                            connectionID: connectionID, decisionAnswer: answer)
+    }
+
+    private func exchange(_ request: CompanionAPIRequest,
+                          canSend: (@MainActor @Sendable () -> Bool)? = nil) async throws -> APIResponse {
         let connection = try await FramedConnection.open(client: self)
         defer { connection.cancel() }
-        try await connection.send(CompanionProtocol.encoder().encode(request))
+        try await connection.send(CompanionProtocol.encoder().encode(request), canSend: canSend)
         let data = try await withTimeout(Self.requestTimeout) {
             try await connection.receiveFrame(maximum: Self.maximumResponseBytes)
         }
@@ -194,11 +205,16 @@ private final class FramedConnection: @unchecked Sendable {
 
     func cancel() { connection.cancel() }
 
-    func send(_ payload: Data) async throws {
+    @MainActor
+    func send(_ payload: Data, canSend: (@MainActor @Sendable () -> Bool)? = nil) async throws {
         let frame = try MacClient.frameRequest(payload)
         let connection = connection
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                guard !Task.isCancelled, canSend?() ?? true else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
                 connection.send(content: frame, completion: .contentProcessed { error in
                     continuation.resume(with: error.map { .failure(Self.failure($0)) } ?? .success(()))
                 })

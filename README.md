@@ -1,6 +1,6 @@
 # awesoMux Companion
 
-A read-only iPhone companion for awesoMux: which agents need you, are working,
+An iPhone companion for awesoMux: which agents need you, are working,
 or are done, shown in the app, a widget, a Live Activity, and notifications.
 Built from eD!'s awesomux-ios project.
 
@@ -24,3 +24,7 @@ reserved for the package. See [ADR-0001](docs/adr/0001-shared-companion-protocol
 The [alert preference contract](docs/protocol/alert-preferences.md) defines shared
 per-pairing filter types and get/set envelopes for awesoMux #791. Host enforcement
 and phone settings are separate changes.
+
+Inline once-only Claude permission answers are implemented behind the Mac's
+production-disabled decision gate. See the [iOS behavior and limits](ios/README.md#inline-claude-permission-answers-issue-22-first-layer)
+and the [pending-decision contract](docs/pending-decisions.md).

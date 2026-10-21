@@ -217,3 +217,55 @@ terminal renderer, relay access, document content, saved previews or widget
 previews. Simulator fixture screenshots demonstrate SwiftUI rendering; actual
 paired networking, physical biometric/passcode flows and VoiceOver need separate
 verification. Accessibility polish remains deferred.
+
+## Inline Claude permission answers (issue #22, first layer)
+
+Agents includes once-only Allow and Deny for requests issued by the Mac's
+permission core over the existing paired LAN/Tailscale connection. Requests
+show a bounded, plain-text untrusted summary, workspace and pane names joined
+by exact IDs (or the IDs when names are unavailable), and the invocation ID and
+revision. Outcomes retain the same request context and name the winning source.
+There are no notification or lock-screen actions in this layer.
+
+**Production remote decisions remain disabled.** The phone first reads
+`get_connection_status`; a false `remoteDecisionsEnabled` shows the disabled
+state without calling the currently denied production list. Missing capability
+metadata is unsupported, not permission to answer. An enabled Mac must also
+return a complete fresh pending/outcome list under a separate Mac-approved
+Decide grant for the selected workspaces. Pairing and agent attention never
+create decision authority. ADR-0038's real Claude native-prompt race acceptance
+is still required before any provider/version can be enabled on the Mac.
+
+Every answer and explicit retry uses a new device-owner authentication context,
+even with Lock App off or an already unlocked app. Authentication failure sends
+nothing. The phone re-reads the Mac after authentication and checks the exact
+identity, supported choice, expiry, active scene and unlocked gate again before
+sending. A background transition, pairing replacement or lock invalidates late
+authentication. Temporary inactivity caused by the authentication sheet withholds
+success until active and then performs the fresh read. The mutual TLS client
+rechecks the scene/pairing gate after connecting, immediately before enqueueing
+the decision frame.
+
+Reads retain normal route failover. A decision write uses one route; a dropped
+reply never causes automatic replay on a second route. The phone reconciles
+using a fresh list. Only a still-pending exact request offers Retry Same Answer,
+which requires authentication again and preserves identity, choice and retry
+UUID. No new or conflicting choice can replace a possibly sent answer. There
+is no offline queue. Original receipts and fresh outcomes are displayed
+separately: recorded means the Mac accepted an answer, delivered means the hook
+acknowledged it, and neither proves that Claude executed a tool. Expired,
+cancelled and unknown states are inert.
+
+Decision summaries and outcomes live only in the scene model. Inactivity,
+locking, backgrounding, stale/failed reads and pairing changes clear displayed
+content. Decisions never enter the agent cache, App Group, widgets, Live Activity
+or notifications. Fixed wall and sleep-aware monotonic deadlines prevent repeated
+reads or clock rollback from extending a remote window. In-memory retry tuples
+expire after ten minutes; identity/deadline tombstones are bounded and refuse
+new work rather than reopen old requests. Foreground polling refreshes every
+five seconds; content becomes non-actionable after six seconds without a fresh
+read. Model tests control clocks, authentication and asynchronous completions;
+store tests cover production gate discovery, route handling and authority at
+send. App-hosted fixture renderings exercise request context and status copy;
+physical authentication, live paired networking, native Claude races and
+VoiceOver still need separate acceptance.

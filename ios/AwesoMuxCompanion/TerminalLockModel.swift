@@ -50,8 +50,8 @@ final class TerminalLockModel {
     static let preferenceKey = "terminalProtectionEnabled"
     static let gracePeriod: TimeInterval = 15
 
-    private(set) var isEnabled: Bool
-    private(set) var isLocked: Bool {
+    private(set) var isEnabled = false
+    private(set) var isLocked = false {
         didSet { if oldValue != isLocked { securityDidChange?() } }
     }
     private(set) var isActive = false {
@@ -71,6 +71,10 @@ final class TerminalLockModel {
     private var generation = 0
     private var pendingSuccess: (generation: Int, disabling: Bool)?
 
+    private var storedPreference: Bool {
+        defaults.object(forKey: Self.preferenceKey) as? Bool ?? false
+    }
+
     init(
         defaults: UserDefaults = .standard,
         now: @escaping () -> TimeInterval = {
@@ -83,7 +87,7 @@ final class TerminalLockModel {
         self.defaults = defaults
         self.now = now
         self.authenticator = authenticator
-        let enabled = defaults.object(forKey: Self.preferenceKey) as? Bool ?? false
+        let enabled = storedPreference
         isEnabled = enabled
         isLocked = enabled
     }
@@ -119,7 +123,7 @@ final class TerminalLockModel {
     }
 
     func synchronizePreference() {
-        let enabled = defaults.object(forKey: Self.preferenceKey) as? Bool ?? false
+        let enabled = storedPreference
         guard enabled != isEnabled else { return }
         invalidateAuthentication()
         isEnabled = enabled

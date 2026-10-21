@@ -22,6 +22,15 @@ final class TerminalLockModelTests: XCTestCase {
         }
     }
 
+    func testSuccessfulUnlockPreservesOptInAcrossPreferenceSynchronization() async {
+        let fixture = Fixture()
+        await fixture.unlock()
+        fixture.model.synchronizePreference()
+        XCTAssertTrue(fixture.model.isEnabled)
+        XCTAssertFalse(fixture.model.isLocked)
+        XCTAssertEqual(fixture.defaults.object(forKey: TerminalLockModel.preferenceKey) as? Bool, true)
+    }
+
     func testLegacyExplicitEnableRemainsLocked() {
         let fixture = Fixture(enabled: true)
         XCTAssertTrue(fixture.model.isEnabled)

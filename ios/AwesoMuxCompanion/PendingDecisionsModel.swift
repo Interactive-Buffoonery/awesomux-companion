@@ -15,6 +15,7 @@ final class PendingDecisionsModel {
     private(set) var receipts: [CompanionDecisionReceipt] = []
     private(set) var message: String?
     private(set) var isAnswering = false
+    private(set) var isReading = false
 
     private struct Deadline {
         let wall: Date
@@ -126,6 +127,7 @@ final class PendingDecisionsModel {
 
     private func clearContent() {
         readGeneration += 1
+        isReading = false
         pending.removeAll()
         outcomes.removeAll()
         receipts.removeAll()
@@ -177,7 +179,6 @@ final class PendingDecisionsModel {
         attempts = attempts.filter { $0.value.retainUntil > uptime() }
         let nextReceipts = stableReceipts()
         if receipts != nextReceipts { receipts = nextReceipts }
-        announcedOutcomes = announcedOutcomes.filter { closed[$0.key] != nil }
         announcedEvents = announcedEvents.filter { uptime() - $0.value < 600 }
     }
 
@@ -205,7 +206,9 @@ final class PendingDecisionsModel {
         let epoch = generation
         observeTime()
         pruneHistory()
-        availability = .loading
+        isReading = true
+        if availability == .idle { availability = .loading }
+        defer { if readID == readGeneration { isReading = false } }
         do {
             let response = try await read(token, { [weak self] in
                 guard let self else { return false }
@@ -277,13 +280,13 @@ final class PendingDecisionsModel {
     }
 
     func canAnswer(_ identity: CompanionDecisionIdentity, choice: CompanionDecisionChoice) -> Bool {
-        canUseContent && !isAnswering && availability == .available && isFresh && isLive(identity)
+        canUseContent && !isAnswering && !isReading && availability == .available && isFresh && isLive(identity)
             && attempts[identity] == nil && closed[identity] == nil && attempts.count < 128
             && pending.contains { $0.identity == identity && $0.choices.contains(choice) }
     }
 
     func canRetry(_ identity: CompanionDecisionIdentity) -> Bool {
-        canUseContent && !isAnswering && availability == .available && isFresh && isLive(identity)
+        canUseContent && !isAnswering && !isReading && availability == .available && isFresh && isLive(identity)
             && attempts[identity].map { $0.receipt == nil } == true && closed[identity] == nil
             && pending.contains { $0.identity == identity && $0.choices.contains(attempts[identity]!.answer.choice) }
     }
@@ -410,6 +413,8 @@ final class PendingDecisionsModel {
 
     private func announceChangedOutcomes(_ results: [CompanionDecisionReceipt]) {
         guard canUseContent, !Task.isCancelled else { return }
+        let listed = Set(results.map(\.identity))
+        announcedOutcomes = announcedOutcomes.filter { listed.contains($0.key) }
         let changed = results.filter { announcedOutcomes[$0.identity] != $0 }
         guard !changed.isEmpty else { return }
         for result in changed { announcedOutcomes[result.identity] = result }

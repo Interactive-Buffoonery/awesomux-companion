@@ -13,11 +13,13 @@ final class PendingDecisionsModelTests: XCTestCase {
         let read = Task { await f.model.refresh() }
         await fulfillment(of: [gate.started], timeout: 3)
         XCTAssertEqual(f.model.pending, pending)
-        XCTAssertEqual(f.model.availability, .loading)
+        XCTAssertEqual(f.model.availability, .available)
+        XCTAssertTrue(f.model.isReading)
         XCTAssertFalse(f.model.canAnswer(f.identity, choice: .allow))
         gate.release()
         await read.value
         XCTAssertEqual(f.model.pending, pending)
+        XCTAssertFalse(f.model.isReading)
         XCTAssertTrue(f.model.canAnswer(f.identity, choice: .allow))
         f.response = f.list(outcomes: [f.macWinner])
         await f.model.refresh()
@@ -29,6 +31,44 @@ final class PendingDecisionsModelTests: XCTestCase {
         outcomeGate.release()
         await outcomesRead.value
         XCTAssertEqual(f.model.outcomes, [f.macWinner])
+    }
+
+    func testSettledEmptyDisabledAndDeniedStatusStayVisibleDuringPoll() async {
+        for status: PendingDecisionsModel.Availability in [.available, .disabled, .denied] {
+            let f = DecisionFixture()
+            f.response = status == .disabled ? APIResponse(remoteDecisionsEnabled: false) : f.list()
+            await f.model.refresh()
+            if status == .denied { f.model.connectionChanged(denied: true) }
+            XCTAssertEqual(f.model.availability, status)
+            let gate = RequestGate("settled status poll")
+            f.readGate = gate
+            let read = Task { await f.model.refresh() }
+            await fulfillment(of: [gate.started], timeout: 3)
+            XCTAssertEqual(f.model.availability, status)
+            XCTAssertTrue(f.model.isReading)
+            XCTAssertTrue(f.model.pending.isEmpty)
+            gate.release()
+            await read.value
+            XCTAssertFalse(f.model.isReading)
+        }
+    }
+
+    func testListedOutcomeAnnouncementSurvivesClosedHistoryExpiry() async {
+        let f = DecisionFixture()
+        f.response = f.list(outcomes: [f.macWinner])
+        await f.model.refresh()
+        XCTAssertEqual(f.announcements.count, 1)
+        f.time += 610
+        f.wallTime += 610
+        await f.model.refresh()
+        await f.model.refresh()
+        XCTAssertEqual(f.model.outcomes, [f.macWinner])
+        XCTAssertEqual(f.announcements.count, 1)
+        f.response = f.list()
+        await f.model.refresh()
+        f.response = f.list(outcomes: [f.macWinner])
+        await f.model.refresh()
+        XCTAssertEqual(f.announcements.count, 2)
     }
 
     func testRefusalReceiptsAreConfirmedEvenWhileMacRemainsPending() async {

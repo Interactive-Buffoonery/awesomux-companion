@@ -67,7 +67,7 @@ struct TerminalProtectionToggle: View {
             get: { model.isEnabled },
             set: { enabled in Task { await model.setEnabled(enabled) } }))
             .disabled(model.isAuthenticating || !model.isActive)
-            .accessibilityHint("Turning protection off requires device authentication.")
+            .accessibilityHint("Turning Lock App off requires device authentication.")
     }
 }
 

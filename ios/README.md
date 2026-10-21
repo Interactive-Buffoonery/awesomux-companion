@@ -136,11 +136,11 @@ default becomes off; an explicitly saved on or off choice is preserved. Previous
 builds wrote on only when the user enabled the setting. Pairing stays available
 without unlocking. With Lock App enabled, authentication failure or cancellation
 leaves the gate closed. Devices without a passcode stay locked and show
-instructions to set a passcode in iOS Settings. Enabling protection locks immediately.
+instructions to set a passcode in iOS Settings. Enabling Lock App locks immediately.
 
 The grace clock advances during device sleep. Background returns under 15 seconds keep an already unlocked session; returns at
 15 seconds or later lock again. Every inactive scene gets an opaque
-privacy window above app navigation and sheets, even with protection disabled.
+privacy window above app navigation and sheets, even with Lock App disabled.
 Backgrounding cancels pending authentication and rejects late results. Temporary
 inactivity during the system authentication prompt withholds success until active.
 Polling, notifications, widgets and Live Activities run independently of this

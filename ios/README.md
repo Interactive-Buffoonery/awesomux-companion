@@ -184,15 +184,20 @@ Only active foreground polling requests `list_panes`; background refresh still
 reads agents and attention events. These reads use the same paired mutual TLS
 client and direct LAN/Tailscale routes. Pane failures have their own display state
 and do not mark a successful agent refresh offline. An authorization denial
-clears pane content, agent caches and shared snapshots until pairing succeeds
-again. Transport failures clear the pane list; they cannot establish whether a
+clears pane content and marks existing agent/widget metadata offline, preserving
+the cache. The next valid poll can recover: a changed Mac lease or a temporary
+Keychain failure can also cause a denial. Transport failures clear the pane list; they cannot establish whether a
 phone was revoked or its Mac is offline.
 
 Terminal previews are off unless the Mac explicitly reports permission. Sessions
 and Settings offer a per-phone consent switch; enabling explains that terminal
 text may contain secrets. Changes use `set_terminal_preview`, verify its receipt,
 and read `get_connection_status` again before showing previews. An unsuccessful
-change clears prior preview text. Permission and pairing epochs reject late
+change clears prior preview text. Local suppression survives read errors and
+background returns until an explicitly confirmed enable or pairing replacement.
+Permission writes retain one owner across scene transitions; newer choices wait
+for the previous write to settle before sending, and only the latest queued
+choice can send. While a write is unresolved, polling cannot release ownership. Permission and pairing epochs reject late
 responses, including stale authorization errors. Returning to foreground reads
 permission again for both v1 and v2 pairings. Older Macs keep the Agents tab and
 show an update message for unsupported pane lists.

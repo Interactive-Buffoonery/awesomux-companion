@@ -55,7 +55,7 @@ permission status for v1 and v2; roster need not echo permission. Synchronous
 scene inactivity invalidates the pane generation, including unstructured reads.
 Keep notification focus until a loaded pane roster can reconcile both lists.
 
-## Implementation and validation receipt
+## Original implementation receipt at 3bf284f (superseded below)
 
 Implemented `CompanionStore`-owned foreground reads plus pure `PaneRoster` state;
 Sessions/Agents tabs; grouped native rows; consent in Sessions and Settings;
@@ -113,3 +113,99 @@ notification scrolling; physical Face ID/passcode/app-switcher behavior; manual
 VoiceOver, large Dynamic Type and dark-mode inspection. Accessibility polish is
 deferred. Live terminal Watch/p10 and iPad layout/p11 remain outside scope.
 The parent owns fresh review-all and Claude review. No PR, push, comments or merge.
+
+## Review-fix checkpoint before edits
+
+Read `/tmp/companion-p9-review-all-r1.md` completely. R1 and R2 are verified in
+source: display permission resets discard failed opt-out suppression, and the
+unowned async mutation can outlive suspension. Keep a separate in-memory local
+preview intent across read errors and scene transitions; only a new confirmed
+enable or pairing reset releases it. Give permission writes an independent task
+owner across suspension. New choices suppress immediately, wait for the prior
+write to settle, and only the latest queued choice may send. Cancellation does
+not imply undoing a server mutation.
+
+Verified C1 against merged host `cfd459bf`: `commitCompanion` rejects changed
+lease revisions with permission_denied; the request handler may return that code
+without proving persistent revocation. Replace the permanent revoked latch with
+recoverable pane failure plus offline agent metadata, preserving agent/widget
+caches. Keychain failures recover through the same next-poll path. C2 is verified:
+only idle should enter loading; empty/unsupported/error state remains during a
+read. C3 is verified: reconcile unsupported panes with a known agent roster and
+route notifications only to known panes. Use a stable ID+destination task key so
+unrelated agent updates do not override a person's selected tab. C4 duplicates R1.
+Mac-disclosed preview consent remains sufficient. R3 pane type in VoiceOver is
+explicitly deferred and nonblocking; do not expand that scope.
+
+Validation: deterministic held-response tests for both recovery sequences, owned
+mutation ordering across suspend/resume, transient authorization recovery, stable
+empty/unsupported reads and old-host notification routing; rerun iOS tests and
+SwiftUI screenshots under the owned heavy-gate simulator session. Update fixture
+time, source/binary hashes, receipts and this report. Parent owns fresh reviews.
+
+
+## Review-fix receipt
+
+Verified and addressed all blockers forwarded by the parent:
+
+- R1/C4: pure `PaneRoster.previewIntent` retains local suppression independently
+  of transient permission UI state. `testUnresolvedOptOutSurvivesReadFailureAndSuspendRecoveryUntilConfirmedEnable`
+  exercises failed opt-out, read error or suspend/resume, successful recovery
+  while the host still permits content, and explicit confirmed enable. Old text
+  stays absent until that enable. Pairing reset/unpair clears the intent.
+- R2: one `previewMutationTask` owns a write through receipt/readback regardless
+  of scene suspension. New choices suppress immediately and await that owner;
+  only the latest queued choice may send. Completion clears task ownership
+  before releasing waiters. `testPendingEnableOwnsMutationAcrossSuspensionBeforeNewOptOutCanSend`
+  holds enable before its host mutation, suspends/resumes, proves no newer wire
+  write/poll can proceed, then confirms queued opt-out after the old enable
+  settles. Host fixture ends false; even a later ambiguous true observation
+  cannot release local suppression. Cancellation is not treated as server undo.
+- C1: removed permanent revoked state and destructive cache reset on denial.
+  Source verification used host commit `cfd459bf`, `commitCompanion` revision
+  checks and the network handler's permission-denied reply. The authorization
+  regression preserves disk/shared agent metadata offline and recovers for
+  agent, pane and permission endpoints. A separate test exercises temporary
+  Keychain failure plus repeated genuine denials: no pane preview is published
+  while denied, and a later valid response recovers.
+- C2: only idle becomes loading. A controlled repeated poll holds list_panes and
+  asserts that loaded-empty, unsupported and failed state remain stable. This
+  keeps empty-state consent/navigation from being torn down during polling.
+- C3: unsupported rosters reconcile focus only after agent metadata is known.
+  Unknown targets have no navigation destination. Tabs key notification work by
+  known pane ID plus destination, so unrelated agent updates keep the same key
+  and do not reselect a tab. Tests cover cold/stale old-host targets, a known
+  agent with changing status, and an unknown target during a failed pane read.
+- R3 is deferred, nonblocking: unavailable terminal/document rows omit pane kind
+  in their combined VoiceOver text. No actual VoiceOver output is claimed.
+- No forwarded correctness finding was dismissed. C4 duplicates R1. The proposed
+  redundant phone opt-in for a newly Mac-approved pairing is intentionally not
+  added: the host's disclosed approval and explicit status readback remain the
+  consent contract. A local deliberate opt-out now requires confirmed enabling
+  on this phone before content is displayed again.
+
+Final fix validation ran through:
+`heavy-gate --simulator-session E3C31483-F771-4D58-9D3D-5BBCA699BB9A -- sh /tmp/companion-p9-evidence/final-fix-job.sh`.
+
+- Shipping iOS build plus **69 tests passed**, zero failures, including 25 roster
+  tests, actual SwiftUI opt-in/opt-out/locked renderings and existing regression
+  suites. No Swift compiler warnings in this run. The standard Xcode host-build
+  metadata diagnostic remains in its log; it did not fail the test run.
+- Exact command/log/results: `/tmp/companion-p9-evidence/final-fix-job.sh`,
+  `final-fix-tests.log`, `final-fix.xcresult` and `final-fix-xcodegen.log`.
+- Fresh attachments: `final-fix-attachments/manifest.json`; named screenshots under
+  `final-fix-screenshots/`. Fixture capture time now uses the current run time.
+- Final source and executable/dylib hashes: `fix-source-manifest.json`.
+- The unchanged protocol package retains the earlier 33-test pass; it was not
+  rerun for these iOS-only fixes. `git diff --check` passed.
+- Owned simulator was shut down by heavy-gate. No automation daemon, push, PR,
+  comments or merge. Parent owns fresh focused Codex and Claude reviews.
+
+Evidence limits are unchanged: synthetic app-hosted SwiftUI/client responses,
+not real paired LAN/Tailscale, live Mac permission races, production touch/dialog
+navigation, physical biometric/app-switcher behavior or VoiceOver. Notification
+routing here has state/task-key coverage, not an interaction-tested cold scroll.
+
+The final run also includes recovery-oriented authorization error text; prior
+`fix.xcresult` is the preceding 69-test pass before that copy adjustment. The
+source manifest records the final-fix artifact and its committed sources.

@@ -1,5 +1,6 @@
 import AwesoMuxCompanionProtocol
 import XCTest
+import Observation
 @testable import AwesoMuxCompanion
 
 @MainActor
@@ -202,6 +203,98 @@ final class PaneRosterTests: XCTestCase {
         guard case .failed = store.panes.permission else { return XCTFail("Must retain deliberate change failure") }
     }
 
+    func testUnresolvedOptOutSurvivesReadFailureAndSuspendRecoveryUntilConfirmedEnable() async {
+        for suspend in [false, true] {
+            let client = PaneClientFixture()
+            let store = store(client)
+            store.resumePanes()
+            await store.refreshPanes()
+            client.errors["set_terminal_preview"] = .unreachable
+            await store.setTerminalPreview(false)
+            XCTAssertEqual(store.panes.previewIntent, .keepOff)
+            if suspend {
+                store.suspendPanes()
+                store.resumePanes()
+            } else {
+                client.errors["list_panes"] = .unreachable
+                await store.refreshPanes()
+                XCTAssertEqual(store.panes.permission, .unknown)
+            }
+            client.errors = [:]
+            await store.refreshPanes()
+            XCTAssertEqual(client.allowed, true, "The failed opt-out never reached the host")
+            XCTAssertEqual(previews(store), [])
+            XCTAssertEqual(store.panes.previewIntent, .keepOff)
+            XCTAssertFalse(store.panes.permission.allowsPreview)
+            await store.setTerminalPreview(true)
+            XCTAssertEqual(store.panes.previewIntent, .followHost)
+            XCTAssertEqual(previews(store), ["Build complete"])
+        }
+    }
+
+    func testPendingEnableOwnsMutationAcrossSuspensionBeforeNewOptOutCanSend() async {
+        let client = PaneClientFixture()
+        client.allowed = false
+        let store = store(client)
+        store.resumePanes()
+        await store.refreshPanes()
+        let oldWrite = RequestGate("enable held before host mutation")
+        client.holdNext["set_terminal_preview"] = oldWrite
+        let enabling = Task { await store.setTerminalPreview(true) }
+        await fulfillment(of: [oldWrite.started], timeout: 3)
+        store.suspendPanes()
+        store.resumePanes()
+        XCTAssertEqual(store.panes.permission, .updating(true))
+        let callsBeforeRead = client.calls.count
+        await store.refreshPanes()
+        XCTAssertEqual(client.calls.count, callsBeforeRead, "Polling must not release mutation ownership")
+        let disabling = Task { await store.setTerminalPreview(false) }
+        await waitForPermission(.updating(false), store: store)
+        XCTAssertEqual(client.calls.filter { $0.operation == "set_terminal_preview" }.map(\.allowed), [true])
+        XCTAssertEqual(previews(store), [])
+        oldWrite.release()
+        await enabling.value
+        await disabling.value
+        XCTAssertEqual(client.calls.filter { $0.operation == "set_terminal_preview" }.map(\.allowed), [true, false])
+        XCTAssertEqual(client.allowed, false)
+        XCTAssertEqual(store.panes.permission, .disabled)
+        XCTAssertEqual(previews(store), [])
+        // Even an ambiguous older server write observed later cannot release local opt-out intent.
+        client.allowed = true
+        await store.refreshPanes()
+        XCTAssertEqual(previews(store), [])
+        XCTAssertEqual(store.panes.previewIntent, .keepOff)
+    }
+
+    func testPairingResetClearsLocalIntentButSceneSuspensionDoesNot() async {
+        var roster = PaneRoster()
+        roster.previewIntent = .keepOff
+        roster.suspend()
+        XCTAssertEqual(roster.previewIntent, .keepOff)
+        roster.reset()
+        XCTAssertEqual(roster.previewIntent, .followHost)
+        let client = PaneClientFixture()
+        let store = store(client)
+        store.resumePanes()
+        await store.refreshPanes()
+        await store.setTerminalPreview(false)
+        XCTAssertEqual(store.panes.previewIntent, .keepOff)
+        await store.unpair()
+        XCTAssertEqual(store.panes.previewIntent, .followHost)
+    }
+
+    private func waitForPermission(_ expected: TerminalPreviewPermission, store: CompanionStore) async {
+        let ready = expectation(description: "Permission reached \(expected)")
+        @Sendable func observe() {
+            Task { @MainActor in
+                if store.panes.permission == expected { ready.fulfill(); return }
+                withObservationTracking { _ = store.panes.permission } onChange: { observe() }
+            }
+        }
+        observe()
+        await fulfillment(of: [ready], timeout: 3)
+    }
+
     func testMismatchedAndUnsupportedMutationNeverEnablePreview() async {
         for error in [MacClientFailure.invalidResponse, .api("unsupported_operation")] {
             let client = PaneClientFixture()
@@ -283,26 +376,58 @@ final class PaneRosterTests: XCTestCase {
         XCTAssertEqual(previews(store), [])
     }
 
-    func testRevocationFromAgentOrPaneRequestClearsAllContentAndLatchesUntilPairing() async {
+    func testAuthorizationFailureClearsPreviewsPreservesOfflineAgentsAndRecovers() async {
         for operation in ["list_agents", "list_panes", "set_terminal_preview"] {
             let client = PaneClientFixture()
-            let store = store(client)
+            var shared: [GlanceSnapshot] = []
+            let store = store(client, writeShared: { shared.append($0) })
             await store.refresh()
             store.resumePanes()
             await store.refreshPanes()
+            let original = store.snapshot
             client.errors[operation] = .api("permission_denied")
             if operation == "list_agents" { await store.refresh() }
             else if operation == "list_panes" { await store.refreshPanes() }
             else { await store.setTerminalPreview(false) }
-            XCTAssertEqual(store.panes.state, .revoked)
-            XCTAssertNil(store.snapshot)
+            guard case .failed = store.panes.state else { return XCTFail("Expected recoverable pane error") }
+            XCTAssertEqual(previews(store), [])
+            XCTAssertEqual(store.snapshot, original?.offline())
+            XCTAssertEqual(shared.last, original?.offline())
             XCTAssertFalse(store.reachable)
-            XCTAssertNil(SessionSnapshotCache(defaults: defaults).restore(for: store.record))
+            XCTAssertEqual(SessionSnapshotCache(defaults: defaults).restore(for: store.record), original?.offline())
             client.errors = [:]
             await store.refresh()
             await store.refreshPanes()
-            XCTAssertEqual(store.panes.state, .revoked)
+            XCTAssertTrue(store.isConnected)
+            guard case .loaded = store.panes.state else { return XCTFail("Next valid response must recover") }
+            XCTAssertEqual(previews(store), operation == "set_terminal_preview" ? [] : ["Build complete"])
         }
+    }
+
+    func testRepeatedDenialsNeverPublishTerminalContentAndIdentityReadCanRecover() async {
+        let client = PaneClientFixture()
+        var identityUnavailable = false
+        let store = store(client, makeClient: { _, _ in
+            if identityUnavailable { throw PhoneIdentity.Failure.keychain(-1) }
+            return client
+        })
+        identityUnavailable = true
+        store.resumePanes()
+        await store.refreshPanes()
+        XCTAssertEqual(previews(store), [])
+        identityUnavailable = false
+        await store.refresh()
+        await store.refreshPanes()
+        XCTAssertEqual(previews(store), ["Build complete"])
+        client.errors["list_panes"] = .api("permission_denied")
+        for _ in 0..<3 {
+            await store.refreshPanes()
+            XCTAssertEqual(previews(store), [])
+            XCTAssertFalse(store.panes.permission.allowsPreview)
+        }
+        client.errors = [:]
+        await store.refreshPanes()
+        XCTAssertEqual(previews(store), ["Build complete"])
     }
 
     func testColdNotificationFocusSurvivesAgentRefreshThenUsesBothRosters() async {
@@ -318,6 +443,66 @@ final class PaneRosterTests: XCTestCase {
         await store.refreshPanes()
         XCTAssertEqual(store.focusedPaneID, "agent")
         store.focusedPaneID = "exited"
+        await store.refreshPanes()
+        XCTAssertNil(store.focusedPaneID)
+    }
+
+    func testRepeatedPollKeepsEmptyUnsupportedAndFailedRosterStableWhileReading() async {
+        for initial in ["empty", "unsupported", "failed"] {
+            let client = PaneClientFixture()
+            let store = store(client)
+            if initial == "empty" { client.workspaces = [] }
+            if initial == "unsupported" { client.errors["list_panes"] = .api("unsupported_operation") }
+            if initial == "failed" { client.errors["list_panes"] = .unreachable }
+            store.resumePanes()
+            await store.refreshPanes()
+            let previous = store.panes.state
+            let gate = RequestGate("stable \(initial)")
+            client.holdNext["list_panes"] = gate
+            let read = Task { await store.refreshPanes() }
+            await fulfillment(of: [gate.started], timeout: 3)
+            XCTAssertEqual(store.panes.state, previous)
+            gate.release()
+            await read.value
+            XCTAssertEqual(store.panes.state, previous)
+        }
+    }
+
+    func testOldHostClearsUnknownNotificationOnlyAfterKnownAgentRoster() async {
+        let client = PaneClientFixture()
+        client.errors["list_panes"] = .api("unsupported_operation")
+        let store = store(client)
+        store.focusedPaneID = "exited"
+        XCTAssertNil(store.focusedPaneDestination)
+        store.resumePanes()
+        await store.refreshPanes()
+        XCTAssertEqual(store.focusedPaneID, "exited", "Cold target waits for an authoritative agent roster")
+        XCTAssertNil(store.focusedPaneDestination)
+        await store.refresh()
+        XCTAssertNil(store.focusedPaneID)
+        store.focusedPaneID = "agent"
+        let known = store.focusedPaneDestination
+        XCTAssertEqual(known, FocusedPaneDestination(paneID: "agent", destination: .agents))
+        client.agentState = "waiting"
+        await store.refresh()
+        XCTAssertEqual(store.focusedPaneDestination, known, "Unrelated agent updates keep the same navigation task key")
+        store.focusedPaneID = "another-exited"
+        await store.refreshPanes()
+        XCTAssertNil(store.focusedPaneID)
+        XCTAssertNil(store.focusedPaneDestination)
+    }
+
+    func testFailedRosterNeverRoutesUnknownNotificationToSessions() async {
+        let client = PaneClientFixture()
+        client.errors["list_panes"] = .unreachable
+        let store = store(client)
+        store.focusedPaneID = "unknown"
+        await store.refresh()
+        store.resumePanes()
+        await store.refreshPanes()
+        XCTAssertEqual(store.focusedPaneID, "unknown")
+        XCTAssertNil(store.focusedPaneDestination)
+        client.errors = [:]
         await store.refreshPanes()
         XCTAssertNil(store.focusedPaneID)
     }
@@ -350,7 +535,7 @@ final class PaneRosterTests: XCTestCase {
         revoked.resumePanes()
         await revoked.refreshPanes()
         XCTAssertEqual(deniedHosts, ["lan.invalid"])
-        XCTAssertEqual(revoked.panes.state, .revoked)
+        guard case .failed = revoked.panes.state else { return XCTFail("Expected recoverable denial") }
     }
 
     private func previews(_ store: CompanionStore) -> [String] {
@@ -391,6 +576,8 @@ final class RequestGate {
 final class PaneClientFixture: CompanionSessionClient {
     struct Call { let operation: String; let connectionID: UUID; let allowed: Bool? }
     var calls: [Call] = []
+    var agentState = "running"
+    var capturedAt = Date.now
     var allowed: Bool? = true
     var receiptOverride: Bool?
     var mutationStatusOverride: Bool?
@@ -407,9 +594,9 @@ final class PaneClientFixture: CompanionSessionClient {
         case "get_attention_events":
             response = APIResponse(attentionEvents: .init(events: [], nextCursor: "cursor", cursorStatus: "initial", hasMore: false, currentStateRecoveryRequired: false))
         default:
-            response = APIResponse(capturedAt: Date(timeIntervalSince1970: 1_700_000_000), agents: [
+            response = APIResponse(capturedAt: capturedAt, agents: [
                 .init(paneID: "agent", workspaceID: "workspace", workspaceName: "awesoMux", provider: "Codex",
-                      executionLocation: "local", availability: "attached", state: "running")
+                      executionLocation: "local", availability: "attached", state: agentState)
             ])
         }
         let error = errors[operation]

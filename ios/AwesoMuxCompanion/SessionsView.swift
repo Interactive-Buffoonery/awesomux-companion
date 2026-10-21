@@ -1,26 +1,21 @@
 import SwiftUI
 
 struct CompanionTabs: View {
-    enum Page: Hashable { case agents, sessions }
     let store: CompanionStore
-    @State private var selection: Page = .sessions
+    @State private var selection: CompanionDestination = .sessions
 
     var body: some View {
         TabView(selection: $selection) {
-            Tab("Sessions", systemImage: "rectangle.split.2x2", value: Page.sessions) {
+            Tab("Sessions", systemImage: "rectangle.split.2x2", value: CompanionDestination.sessions) {
                 SessionsView(store: store)
             }
-            Tab("Agents", systemImage: "person.2", value: Page.agents) {
+            Tab("Agents", systemImage: "person.2", value: CompanionDestination.agents) {
                 AgentsView(store: store)
             }
         }
-        .task(id: store.focusedPaneID) { selectFocusedPane() }
-        .onChange(of: store.snapshot?.agents) { selectFocusedPane() }
-    }
-
-    private func selectFocusedPane() {
-        guard let id = store.focusedPaneID else { return }
-        selection = store.snapshot?.agents.contains(where: { $0.id == id }) == true ? .agents : .sessions
+        .task(id: store.focusedPaneDestination) {
+            if let target = store.focusedPaneDestination { selection = target.destination }
+        }
     }
 }
 
@@ -81,10 +76,6 @@ struct SessionsView: View {
         case .unsupported:
             ContentUnavailableView("Update awesoMux on your Mac", systemImage: "desktopcomputer",
                                    description: Text("This Mac doesn't support the pane list yet. Your agents are still available in Agents."))
-                .listRowBackground(Color.clear)
-        case .revoked:
-            ContentUnavailableView("Pair again to see sessions", systemImage: "lock",
-                                   description: Text("Open Settings to pair this iPhone with your Mac again."))
                 .listRowBackground(Color.clear)
         case .failed(let message):
             Section {

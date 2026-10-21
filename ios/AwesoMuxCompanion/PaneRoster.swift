@@ -1,7 +1,7 @@
 import AwesoMuxCompanionProtocol
 import Foundation
 
-enum TerminalPreviewPermission: Equatable {
+enum TerminalPreviewPermission: Equatable, Sendable {
     case unknown, unsupported, disabled, enabled
     case updating(Bool)
     case failed(String)
@@ -53,7 +53,7 @@ struct ListedPane: Identifiable, Equatable {
 }
 
 enum PaneRosterState: Equatable {
-    case idle, loading, unsupported, revoked
+    case idle, loading, unsupported
     case loaded([PaneWorkspace])
     case failed(String)
 
@@ -66,8 +66,10 @@ enum PaneRosterState: Equatable {
 /// Memory-only screen content. Neither wire rosters nor previews enter the agent cache.
 struct PaneRoster {
     enum Lifecycle { case suspended, active }
+    enum PreviewIntent { case followHost, keepOff }
     var state: PaneRosterState = .idle
     var permission: TerminalPreviewPermission = .unknown
+    var previewIntent: PreviewIntent = .followHost
     var lifecycle: Lifecycle = .suspended
     private(set) var generation = 0
 
@@ -77,18 +79,13 @@ struct PaneRoster {
         invalidate()
         state = .idle
         permission = .unknown
+        previewIntent = .followHost
     }
 
     mutating func suspend() {
         lifecycle = .suspended
         invalidate()
-        if state != .revoked { state = .idle }
-        permission = .unknown
-    }
-
-    mutating func revoke() {
-        invalidate()
-        state = .revoked
+        state = .idle
         permission = .unknown
     }
 
@@ -138,4 +135,13 @@ extension Error {
         default: return false
         }
     }
+}
+
+enum CompanionDestination: Hashable {
+    case agents, sessions
+}
+
+struct FocusedPaneDestination: Equatable {
+    let paneID: String
+    let destination: CompanionDestination
 }

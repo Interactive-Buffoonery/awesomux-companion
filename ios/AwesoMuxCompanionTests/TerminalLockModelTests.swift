@@ -4,7 +4,126 @@ import XCTest
 
 @MainActor
 final class TerminalLockModelTests: XCTestCase {
-    func testStartsLockedByDefaultAndPersistsAuthenticatedDisable() async {
+    func testEffectiveLockInvariantAndSecurityNotificationsAcrossTransitions() async {
+        let fixture = Fixture(enabled: nil)
+        let model = fixture.model
+        var notifications: [[Bool]] = []
+        model.securityDidChange = {
+            XCTAssertTrue(model.isEnabled || !model.isLocked)
+            notifications.append([model.isEnabled, model.isLocked, model.isActive, model.authenticationFailed])
+        }
+        defer { model.securityDidChange = nil }
+        func check(_ enabled: Bool, _ locked: Bool, _ active: Bool, _ failed: Bool = false,
+                   events: [[Bool]] = [], file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertTrue(model.isEnabled || !model.isLocked, file: file, line: line)
+            XCTAssertEqual([model.isEnabled, model.isLocked, model.isActive, model.authenticationFailed],
+                           [enabled, locked, active, failed], file: file, line: line)
+            XCTAssertEqual(notifications, events, file: file, line: line)
+            notifications.removeAll()
+        }
+        check(false, false, false)
+        model.becomeActive()
+        check(false, false, true, events: [[false, false, true, false]])
+        await model.setEnabled(true)
+        check(true, true, true, events: [[true, true, true, false]])
+        var request = await fixture.start { await model.setEnabled(false) }
+        check(true, true, true)
+        fixture.auth.finish(false)
+        await request.value
+        check(true, true, true, true, events: [[true, true, true, true]])
+        request = await fixture.start { await model.setEnabled(false) }
+        check(true, true, true, events: [[true, true, true, false]])
+        fixture.auth.finish(true)
+        await request.value
+        check(false, false, true, events: [[false, false, true, false]])
+        model.enterBackground()
+        check(false, false, false, events: [[false, false, false, false]])
+        fixture.clock.time += TerminalLockModel.gracePeriod
+        model.enterForeground()
+        check(false, false, false)
+        model.becomeActive()
+        check(false, false, true, events: [[false, false, true, false]])
+        fixture.defaults.set(true, forKey: TerminalLockModel.preferenceKey)
+        model.synchronizePreference()
+        check(true, true, true, events: [[true, true, true, false]])
+        request = await fixture.start { await model.unlock() }
+        check(true, true, true)
+        fixture.auth.finish(true)
+        await request.value
+        check(true, false, true, events: [[true, false, true, false]])
+        fixture.defaults.set(false, forKey: TerminalLockModel.preferenceKey)
+        model.synchronizePreference()
+        check(false, false, true)
+        model.enterBackground()
+        check(false, false, false, events: [[false, false, false, false]])
+        fixture.clock.time += TerminalLockModel.gracePeriod
+        model.enterForeground()
+        check(false, false, false)
+        model.becomeActive()
+        check(false, false, true, events: [[false, false, true, false]])
+        fixture.defaults.removeObject(forKey: TerminalLockModel.preferenceKey)
+        model.synchronizePreference()
+        check(false, false, true)
+        fixture.defaults.set(true, forKey: TerminalLockModel.preferenceKey)
+        model.synchronizePreference()
+        check(true, true, true, events: [[true, true, true, false]])
+        fixture.defaults.removeObject(forKey: TerminalLockModel.preferenceKey)
+        model.synchronizePreference()
+        check(false, false, true, events: [[false, false, true, false]])
+        await model.setEnabled(true)
+        check(true, true, true, events: [[true, true, true, false]])
+        request = await fixture.start { await model.unlock() }
+        check(true, true, true)
+        request.cancel()
+        check(true, true, true)
+        fixture.auth.finish(true)
+        await request.value
+        check(true, true, true, true, events: [[true, true, true, true]])
+        model.becomeInactive()
+        check(true, true, false, true, events: [[true, true, false, true]])
+        model.enterBackground()
+        check(true, true, false, events: [[true, true, false, false]])
+        fixture.clock.time += TerminalLockModel.gracePeriod
+        model.enterForeground()
+        check(true, true, false)
+        model.becomeActive()
+        check(true, true, true, events: [[true, true, true, false]])
+    }
+
+    // Failure modes: the old absent-key default must not become consent, while
+    // persisted true was only written by an explicit enable in previous builds.
+    func testFreshAndLegacyDefaultsStayUnlockedWithoutAuthentication() async {
+        for storedValue in [nil, false] as [Bool?] {
+            let fixture = Fixture(enabled: storedValue)
+            XCTAssertFalse(fixture.model.isEnabled)
+            XCTAssertFalse(fixture.model.isLocked)
+            fixture.model.becomeActive()
+            await fixture.model.unlock()
+            fixture.model.enterBackground()
+            fixture.clock.time += TerminalLockModel.gracePeriod
+            fixture.model.becomeActive()
+            XCTAssertFalse(fixture.model.isLocked)
+            XCTAssertEqual(fixture.auth.requestCount, 0)
+            XCTAssertEqual(fixture.defaults.object(forKey: TerminalLockModel.preferenceKey) as? Bool, storedValue)
+        }
+    }
+
+    func testSuccessfulUnlockPreservesOptInAcrossPreferenceSynchronization() async {
+        let fixture = Fixture()
+        await fixture.unlock()
+        fixture.model.synchronizePreference()
+        XCTAssertTrue(fixture.model.isEnabled)
+        XCTAssertFalse(fixture.model.isLocked)
+        XCTAssertEqual(fixture.defaults.object(forKey: TerminalLockModel.preferenceKey) as? Bool, true)
+    }
+
+    func testLegacyExplicitEnableRemainsLocked() {
+        let fixture = Fixture(enabled: true)
+        XCTAssertTrue(fixture.model.isEnabled)
+        XCTAssertTrue(fixture.model.isLocked)
+    }
+
+    func testExplicitProtectionOptInPersistsAuthenticatedDisable() async {
         let fixture = Fixture()
         XCTAssertTrue(fixture.model.isEnabled)
         XCTAssertTrue(fixture.model.isLocked)
@@ -92,7 +211,7 @@ final class TerminalLockModelTests: XCTestCase {
             XCTAssertTrue(fixture.model.isLocked)
             XCTAssertTrue(fixture.model.isEnabled)
             XCTAssertTrue(fixture.model.authenticationFailed)
-            XCTAssertNil(fixture.defaults.object(forKey: TerminalLockModel.preferenceKey))
+            XCTAssertEqual(fixture.defaults.object(forKey: TerminalLockModel.preferenceKey) as? Bool, true)
         }
     }
 
@@ -237,8 +356,9 @@ private final class Fixture {
     let clock: TestClock
     let model: TerminalLockModel
 
-    init() {
+    init(enabled: Bool? = true) {
         defaults = UserDefaults(suiteName: suite)!
+        if let enabled { defaults.set(enabled, forKey: TerminalLockModel.preferenceKey) }
         let clock = TestClock()
         self.clock = clock
         model = TerminalLockModel(defaults: defaults, now: { [clock] in clock.time }, authenticator: auth)

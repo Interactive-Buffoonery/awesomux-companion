@@ -128,16 +128,19 @@ an isolated synthetic Mac-to-phone reconnect fixture, without pairing. See the
 
 ## Agent and terminal protection
 
-Protection is on by default. The paired agent content requires Face ID, Touch ID,
-or the device passcode on each launch. Settings → Privacy controls the persisted
-preference; turning it off also requires authentication, including from the locked
-screen. Pairing stays available without unlocking. Authentication failure or
-cancellation leaves the gate closed. Devices without a passcode stay locked and
-show instructions to set a passcode in iOS Settings. Enabling protection locks immediately.
+App locking is optional and off by default. Settings → Privacy → Lock App
+opts in to Face ID, Touch ID, or device passcode authentication for paired agent
+content on each launch. Turning it off requires authentication, including from
+the locked screen. On upgrade, an absent preference from the previous forced
+default becomes off; an explicitly saved on or off choice is preserved. Previous
+builds wrote on only when the user enabled the setting. Pairing stays available
+without unlocking. With Lock App enabled, authentication failure or cancellation
+leaves the gate closed. Devices without a passcode stay locked and show
+instructions to set a passcode in iOS Settings. Enabling Lock App locks immediately.
 
 The grace clock advances during device sleep. Background returns under 15 seconds keep an already unlocked session; returns at
 15 seconds or later lock again. Every inactive scene gets an opaque
-privacy window above app navigation and sheets, even with protection disabled.
+privacy window above app navigation and sheets, even with Lock App disabled.
 Backgrounding cancels pending authentication and rejects late results. Temporary
 inactivity during the system authentication prompt withholds success until active.
 Polling, notifications, widgets and Live Activities run independently of this

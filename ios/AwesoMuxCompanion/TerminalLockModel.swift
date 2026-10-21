@@ -50,9 +50,12 @@ final class TerminalLockModel {
     static let preferenceKey = "terminalProtectionEnabled"
     static let gracePeriod: TimeInterval = 15
 
-    private(set) var isEnabled: Bool
-    private(set) var isLocked: Bool {
-        didSet { if oldValue != isLocked { securityDidChange?() } }
+    private(set) var isEnabled = false {
+        didSet { if (oldValue && sessionLocked) != isLocked { securityDidChange?() } }
+    }
+    var isLocked: Bool { isEnabled && sessionLocked }
+    private var sessionLocked = true {
+        didSet { if (isEnabled && oldValue) != isLocked { securityDidChange?() } }
     }
     private(set) var isActive = false {
         didSet { if oldValue != isActive { securityDidChange?() } }
@@ -71,6 +74,10 @@ final class TerminalLockModel {
     private var generation = 0
     private var pendingSuccess: (generation: Int, disabling: Bool)?
 
+    private var storedPreference: Bool {
+        defaults.object(forKey: Self.preferenceKey) as? Bool ?? false
+    }
+
     init(
         defaults: UserDefaults = .standard,
         now: @escaping () -> TimeInterval = {
@@ -83,9 +90,7 @@ final class TerminalLockModel {
         self.defaults = defaults
         self.now = now
         self.authenticator = authenticator
-        let enabled = defaults.object(forKey: Self.preferenceKey) as? Bool ?? true
-        isEnabled = enabled
-        isLocked = enabled
+        isEnabled = storedPreference
     }
 
     func becomeInactive() {
@@ -104,7 +109,7 @@ final class TerminalLockModel {
         // Only enterBackground records backgroundedAt, and it invalidates authentication.
         // Applying the grace period here cannot revive a pre-background success.
         if let backgroundedAt, now() - backgroundedAt >= Self.gracePeriod {
-            isLocked = isEnabled
+            sessionLocked = true
         }
     }
 
@@ -119,11 +124,11 @@ final class TerminalLockModel {
     }
 
     func synchronizePreference() {
-        let enabled = defaults.object(forKey: Self.preferenceKey) as? Bool ?? true
+        let enabled = storedPreference
         guard enabled != isEnabled else { return }
         invalidateAuthentication()
+        if enabled { sessionLocked = true }
         isEnabled = enabled
-        isLocked = enabled
     }
 
     func unlock() async {
@@ -135,8 +140,8 @@ final class TerminalLockModel {
         if enabled {
             invalidateAuthentication()
             guard !isEnabled else { return }
+            sessionLocked = true
             isEnabled = true
-            isLocked = true
             defaults.set(true, forKey: Self.preferenceKey)
         } else {
             guard isEnabled else { return }
@@ -166,10 +171,11 @@ final class TerminalLockModel {
         guard request == generation, isActive else { return }
         pendingSuccess = nil
         isAuthenticating = false
-        isLocked = false
         if disabling {
             isEnabled = false
             defaults.set(false, forKey: Self.preferenceKey)
+        } else {
+            sessionLocked = false
         }
     }
 

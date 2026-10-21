@@ -56,6 +56,7 @@ struct SettingsView: View {
                     Text(message).font(.callout).foregroundStyle(Cat.subtext0)
                 }
             } header: { Text("Privacy").foregroundStyle(Cat.subtext0) }
+                footer: { Text("Use Face ID, Touch ID, or your device passcode to unlock the app.").foregroundStyle(Cat.subtext0) }
             .listRowBackground(Cat.card)
             Section {
                 LabeledContent("Version", value: Self.version).foregroundStyle(Cat.text)

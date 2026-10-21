@@ -345,6 +345,9 @@ final class CompanionStore {
     private func apply(_ next: GlanceSnapshot) async {
         let previous = snapshot
         snapshot = next; reachable = true; message = nil; isSnapshotCached = false
+        if let focusedPaneID, !next.agents.contains(where: { $0.id == focusedPaneID }) {
+            self.focusedPaneID = nil
+        }
         if previous?.agents != next.agents || previous?.connected != next.connected || previous?.hostName != next.hostName
             || SharedSnapshot.read()?.connected != next.connected
             // Refresh well inside the widget's freshness window so a quiet, healthy Mac never ages out.

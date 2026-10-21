@@ -49,6 +49,8 @@ struct AgentsView: View {
                 .background(Cat.page)
                 .task(id: visibleFocusedPaneID) {
                     guard let paneID = visibleFocusedPaneID else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled, visibleFocusedPaneID == paneID else { return }
                     withAnimation { proxy.scrollTo(paneID, anchor: .center) }
                     do {
                         try await Task.sleep(for: .seconds(3))

@@ -48,6 +48,12 @@ import Testing
         #expect(throws: Stream.Failure.tooLarge) { try Stream.decode(encoded + [0]) }
     }
 
+    @Test func controlCapMatchesDecoderCap() throws {
+        #expect(throws: Stream.Failure.tooLarge) {
+            try Stream.encode(.leader(.init(leader: String(repeating: "a", count: Stream.maximumFrameBytes))), generation: 1)
+        }
+    }
+
     @Test func malformedFramesAreRejected() {
         #expect(throws: Stream.Failure.unknownType(0x7f)) { try Stream.decode(Data([0x7f, 0, 0, 0, 1, 0x7b, 0x7d])) }
         #expect(throws: Stream.Failure.tooShort) { try Stream.decode(Data([Stream.FrameType.output.rawValue, 0, 0, 0, 1, 0])) }

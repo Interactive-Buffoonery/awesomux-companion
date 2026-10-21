@@ -218,6 +218,7 @@ public enum CompanionTerminalStream {
         case .end(let value): try control(value)
         case .phoneSent: throw Failure.invalidControl
         }
+        guard data.count <= maximumFrameBytes else { throw Failure.tooLarge }
         return data
     }
 

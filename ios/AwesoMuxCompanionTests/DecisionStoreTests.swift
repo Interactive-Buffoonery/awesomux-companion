@@ -132,7 +132,6 @@ final class DecisionStoreTests: XCTestCase {
     @MainActor
     private final class Fixture {
         let suite = "DecisionStoreTests.\(UUID())"
-        let defaults: UserDefaults
         var active = true
         let lan = DecisionClientFixture()
         let tailscale = DecisionClientFixture()
@@ -140,7 +139,7 @@ final class DecisionStoreTests: XCTestCase {
             targetVersion: UUID(), providerSessionID: "claude", invocationID: UUID(), revision: 1), choice: .allow, retryID: UUID())
         let store: CompanionStore
         init() {
-            defaults = UserDefaults(suiteName: suite)!
+            let defaults = UserDefaults(suiteName: suite)!
             let lan = lan, tailscale = tailscale
             store = CompanionStore(defaults: defaults,
                 loadPairing: { panePairing(routes: [.init(transport: .lan, host: "192.168.1.2"),
@@ -148,7 +147,7 @@ final class DecisionStoreTests: XCTestCase {
                 makeClient: { _, route in route.transport == .lan ? lan : tailscale },
                 removePairing: { _ in }, liveActivity: nil, writeShared: { _ in }, clearShared: {})
         }
-        deinit { defaults.removePersistentDomain(forName: suite) }
+        deinit { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
     }
 }
 

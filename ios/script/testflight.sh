@@ -79,8 +79,7 @@ if [[ "$CHECK_SIGNING" == true ]]; then
     echo "Signing probe requires runner credentials" >&2; exit 1;
   }
   cp /usr/bin/true "$WORK/signing-probe"
-  REAL_USER_HOME="$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')"
-  HOME="$REAL_USER_HOME" codesign --force --sign 'Apple Development' --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
+  codesign --force --sign 'Apple Development' --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
     --timestamp=none "$WORK/signing-probe"
   codesign --verify --strict "$WORK/signing-probe"
   echo "Runner signing probe passed"

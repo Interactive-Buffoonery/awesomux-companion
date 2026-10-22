@@ -126,7 +126,11 @@ final class WatchTerminal: ObservableObject, WatchRendering {
               grid.cols * grid.rows <= 250_000 else { throw WatchTerminalFailure.invalidGrid }
     }
 
-    private func makeSurface(size: CGSize) throws -> WatchNativeSurface {
+    private func makeSurface(size: CGSize, displayScale: CGFloat = 3) throws -> WatchNativeSurface {
+        let screenScale = UIApplication.shared.connectedScenes.compactMap {
+            ($0 as? UIWindowScene)?.screen.scale
+        }.max() ?? 3
+        try WatchDrawableBudget.validate(size: size, displayScale: max(screenScale, displayScale))
         TerminalDebugLog.disable()
         let identity = epoch
         return try WatchNativeSurface(size: size, scrollbackBound: scrollbackBound,
@@ -167,8 +171,13 @@ final class WatchTerminal: ObservableObject, WatchRendering {
             if sizingSurface === probe {
                 // Calibration changes only an empty surface. Retained content
                 // sees exactly one resize, at the authoritative dimensions.
-                surface.size = sizingSurface.size
-                surface.applySize()
+                do {
+                    try surface.resize(to: sizingSurface.size,
+                                       displayScale: sizingSurface.view.traitCollection.displayScale)
+                } catch {
+                    _ = invalidate(.drawableTooLarge)
+                    return
+                }
                 probe?.detach()
                 probe = nil
                 return
@@ -198,13 +207,11 @@ final class WatchTerminal: ObservableObject, WatchRendering {
                           height: Int(value.rows) == target.rows ? sizingSurface.size.height
                           : sizingSurface.size.height * (CGFloat(target.rows) + 0.5) / (CGFloat(value.rows) + 0.5))
         }
-        guard next.width.isFinite, next.height.isFinite,
-              next.width > 0, next.height > 0, next.width <= 32768, next.height <= 32768 else {
-            _ = invalidate(.invalidGrid)
-            return
+        do {
+            try sizingSurface.resize(to: next)
+        } catch {
+            _ = invalidate(.drawableTooLarge)
         }
-        sizingSurface.size = next
-        sizingSurface.applySize()
     }
 
     private func pump() {
@@ -238,7 +245,10 @@ final class WatchTerminal: ObservableObject, WatchRendering {
             target = grid
             beginSizing()
             do {
-                probe = try makeSurface(size: surface.size)
+                probe = try makeSurface(size: surface.size,
+                                        displayScale: surface.view.traitCollection.displayScale)
+            } catch let failure as WatchTerminalFailure {
+                _ = invalidate(failure)
             } catch {
                 _ = invalidate(.unsafeConfiguration)
             }
@@ -265,7 +275,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
 }
 
 enum WatchTerminalFailure: Error, LocalizedError, Equatable {
-    case accessDenied, notAttached, invalidGrid, invalidRetention, overflow
+    case accessDenied, notAttached, invalidGrid, invalidRetention, overflow, drawableTooLarge
     case readinessTimeout, drainTimeout, unexpectedGrid, unsafeConfiguration, nativeBusy
 
     var errorDescription: String? {
@@ -273,6 +283,7 @@ enum WatchTerminalFailure: Error, LocalizedError, Equatable {
         case .accessDenied: "Watch is no longer available."
         case .notAttached: "The Watch renderer is not attached."
         case .invalidGrid: "The terminal grid exceeds the Watch renderer limit."
+        case .drawableTooLarge: "The terminal dimensions exceed the Watch renderer's display limit."
         case .invalidRetention: "The terminal history bound is invalid."
         case .overflow: "Watch output exceeded the renderer buffer. Reconnect to continue."
         case .readinessTimeout: "The Watch renderer did not become ready."
@@ -284,6 +295,20 @@ enum WatchTerminalFailure: Error, LocalizedError, Equatable {
     }
 }
 
+enum WatchDrawableBudget {
+    static func validate(size: CGSize, displayScale: CGFloat) throws {
+        guard size.width.isFinite, size.height.isFinite,
+              size.width > 0, size.height > 0,
+              displayScale.isFinite, displayScale > 0 else { throw WatchTerminalFailure.drawableTooLarge }
+        let scale = max(displayScale, 3)
+        let width = ceil(size.width * scale)
+        let height = ceil(size.height * scale)
+        // BGRA uses four bytes per pixel: at most 32 MiB per drawable.
+        guard width <= 8192, height <= 8192,
+              width * height <= 8_388_608 else { throw WatchTerminalFailure.drawableTooLarge }
+    }
+}
+
 @MainActor
 fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
     TerminalSurfaceOpenURLDelegate, TerminalSurfaceClipboardConfirmationDelegate {
@@ -291,7 +316,7 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
     let controller: TerminalController
     let session: InMemoryTerminalSession
     let view: WatchReadOnlyTerminalView
-    @Published var size: CGSize
+    @Published private(set) var size: CGSize
     var viewport: InMemoryTerminalViewport?
 
     init(size: CGSize, scrollbackBound: Int, discardedWrites: WatchDiscardedWrites,
@@ -321,6 +346,13 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
         view.controller = controller
         view.accessibilityLabel = "Read-only Mac terminal"
         view.accessibilityHint = "Select text to copy. Use two fingers or the history controls to scroll."
+    }
+
+    func resize(to size: CGSize, displayScale: CGFloat = 3) throws {
+        try WatchDrawableBudget.validate(size: size,
+            displayScale: max(displayScale, view.traitCollection.displayScale))
+        self.size = size
+        applySize()
     }
 
     func applySize() {
@@ -431,13 +463,25 @@ fileprivate final class WatchReadOnlyTerminalView: UITerminalView {
 
 struct WatchTerminalView: View {
     @ObservedObject var terminal: WatchTerminal
+    @State private var zoom: Double
+
+    init(terminal: WatchTerminal, initialZoom: Double = 1) {
+        self.terminal = terminal
+        _zoom = State(initialValue: min(2, max(1, initialZoom)))
+    }
 
     var body: some View {
         VStack(spacing: 4) {
             if let surface = terminal.surface, terminal.canRender() {
                 ScrollView([.horizontal, .vertical]) {
                     WatchNativeCanvas(surface: surface)
+                        .scaleEffect(zoom, anchor: .topLeading)
+                        .frame(width: surface.size.width * zoom,
+                               height: surface.size.height * zoom, alignment: .topLeading)
                 }
+                Stepper("Terminal display: \(Int(zoom * 100))%", value: $zoom, in: 1...2, step: 0.25)
+                    .font(.caption)
+                    .accessibilityHint("Enlarges the display while preserving the Mac terminal grid.")
                 HStack {
                     historyButton("Earlier", action: "scroll_page_up")
                     historyButton("Later", action: "scroll_page_down")

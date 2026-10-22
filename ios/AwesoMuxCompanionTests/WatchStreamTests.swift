@@ -119,6 +119,24 @@ final class WatchStreamTests: XCTestCase {
         }
     }
 
+    func testEndAcceptsCurrentOrNewerGenerationBeforeReplacementSnapshot() throws {
+        for generation in [UInt32(7), 8] {
+            var stream = try makeStream()
+            _ = try stream.consume(packet(.snapshotBegin(begin()), generation: 7))
+            XCTAssertThrowsError(try stream.consume(packet(.end(.init(reason: .revoked)), generation: generation))) {
+                XCTAssertEqual($0 as? WatchFailure, .ended(.revoked))
+            }
+        }
+        var stream = try makeStream()
+        _ = try stream.consume(packet(.snapshotBegin(begin()), generation: 7))
+        XCTAssertThrowsError(try stream.consume(packet(.end(.init(reason: .revoked)), generation: 6))) {
+            XCTAssertEqual($0 as? WatchFailure, .invalidStream)
+        }
+        XCTAssertThrowsError(try stream.consume(packet(.heartbeat, generation: 8))) {
+            XCTAssertEqual($0 as? WatchFailure, .invalidStream)
+        }
+    }
+
     private func makeStream(limits: Stream.Capabilities = .init()) throws -> WatchStream {
         try WatchStream(paneID: paneID, targetVersion: targetVersion, capabilities: limits)
     }

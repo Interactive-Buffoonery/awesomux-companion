@@ -23,6 +23,7 @@ final class WatchModel {
     @ObservationIgnored private var target: Target?
     @ObservationIgnored private var allowed = false
     @ObservationIgnored private var lanFailed = false
+    @ObservationIgnored private var retrySeconds = 1
 
     private struct Target: Equatable {
         let record: PairingRecord
@@ -49,6 +50,7 @@ final class WatchModel {
         cancelAndClear()
         target = next
         lanFailed = false
+        retrySeconds = 1
         launchIfAllowed()
         return task
     }
@@ -59,6 +61,7 @@ final class WatchModel {
         allowed = next
         if next {
             lanFailed = false
+            retrySeconds = 1
             launchIfAllowed()
         } else {
             cancelAndClear()
@@ -68,6 +71,7 @@ final class WatchModel {
     func reconnect() {
         cancelAndClear()
         lanFailed = false
+        retrySeconds = 1
         launchIfAllowed()
     }
 
@@ -80,7 +84,26 @@ final class WatchModel {
     func rendererFailed(_ error: Error) {
         cancelAndClear()
         status = .failed
-        self.error = String(localized: "This terminal couldn't be displayed. Reconnect to try again.")
+        if Self.isTransientRendererFailure(error) {
+            self.error = Self.message(for: error)
+            guard allowed, canWatch(), let target else { return }
+            let epoch = epoch
+            let delay = retrySeconds
+            task = Task { [weak self] in
+                guard let self, self.isCurrent(epoch) else { return }
+                do { try await self.sleep(.seconds(delay)) } catch { return }
+                guard self.isCurrent(epoch) else { return }
+                self.retrySeconds = min(delay * 2, 15)
+                await self.run(target, epoch: epoch)
+            }
+            return
+        }
+        if let failure = error as? WatchTerminalFailure,
+           failure == .invalidGrid || failure == .drawableTooLarge {
+            self.error = String(localized: "This terminal's dimensions can't be displayed.")
+        } else {
+            self.error = String(localized: "This terminal couldn't be displayed. Reconnect to try again.")
+        }
     }
 
     private func launchIfAllowed() {
@@ -120,7 +143,6 @@ final class WatchModel {
     }
 
     private func run(_ target: Target, epoch: UUID) async {
-        var retrySeconds = 1
         while isCurrent(epoch) {
             do {
                 status = .connecting
@@ -137,7 +159,11 @@ final class WatchModel {
                     let event = try stream.consume(packet)
                     do {
                         try render(event)
+                    } catch let failure as WatchTerminalFailure where Self.isTransientRendererFailure(failure) {
+                        // Drop this stream and request a fresh snapshot after the bounded backoff.
+                        throw failure
                     } catch {
+                        guard isCurrent(epoch) else { opened.cancel(); return }
                         rendererFailed(error)
                         return
                     }
@@ -150,7 +176,9 @@ final class WatchModel {
                 guard isCurrent(epoch) else { return }
                 connection?.cancel()
                 connection = nil
-                if activeRoute?.transport == .lan { lanFailed = true }
+                if activeRoute?.transport == .lan, !Self.isTransientRendererFailure(error) {
+                    lanFailed = true
+                }
                 activeRoute = nil
                 clearTerminal()
                 self.error = Self.message(for: error)
@@ -159,6 +187,7 @@ final class WatchModel {
                 do {
                     try await sleep(.seconds(retrySeconds))
                 } catch { return }
+                guard isCurrent(epoch) else { return }
                 retrySeconds = min(retrySeconds * 2, 15)
             }
         }
@@ -208,8 +237,14 @@ final class WatchModel {
         }
     }
 
+    private static func isTransientRendererFailure(_ error: Error) -> Bool {
+        guard let failure = error as? WatchTerminalFailure else { return false }
+        return [.nativeBusy, .overflow, .readinessTimeout, .drainTimeout].contains(failure)
+    }
+
     private static func canRetry(_ error: Error) -> Bool {
         if error is CancellationError { return false }
+        if error is WatchTerminalFailure { return isTransientRendererFailure(error) }
         if let failure = error as? MacClientFailure {
             switch failure {
             case .api, .denied: return false
@@ -227,6 +262,12 @@ final class WatchModel {
     }
 
     private static func message(for error: Error) -> String {
+        if (error as? WatchTerminalFailure) == .nativeBusy {
+            return String(localized: "The previous terminal is still stopping. Reconnecting…")
+        }
+        if isTransientRendererFailure(error) {
+            return String(localized: "The terminal display was interrupted. Reconnecting…")
+        }
         if let failure = error as? WatchFailure {
             switch failure {
             case .unsupportedStream: return String(localized: "Update awesoMux on your Mac to watch this terminal.")

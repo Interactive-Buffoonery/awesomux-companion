@@ -4,6 +4,23 @@ import XCTest
 
 @MainActor
 final class TerminalLockModelTests: XCTestCase {
+    func testSecurityObserversRunSynchronouslyWithoutReplacingPrivacyCover() {
+        let fixture = Fixture(enabled: nil)
+        let model = fixture.model
+        model.becomeActive()
+        var coverCalls = 0
+        var observedActive: [Bool] = []
+        model.securityDidChange = { coverCalls += 1 }
+        let token = model.observeSecurityChanges { observedActive.append(model.isActive) }
+        model.becomeInactive()
+        XCTAssertEqual(coverCalls, 1)
+        XCTAssertEqual(observedActive, [false])
+        model.removeSecurityObserver(token)
+        model.becomeActive()
+        XCTAssertEqual(coverCalls, 2)
+        XCTAssertEqual(observedActive, [false])
+    }
+
     func testEffectiveLockInvariantAndSecurityNotificationsAcrossTransitions() async {
         let fixture = Fixture(enabled: nil)
         let model = fixture.model

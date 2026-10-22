@@ -11,6 +11,7 @@ struct WatchView: View {
     @StateObject private var terminal: WatchTerminal
     @State private var model: WatchModel
     @State private var isVisible = false
+    @State private var securityObserver: UUID?
 
     init(store: CompanionStore, paneID: UUID, targetVersion: UUID, title: String, terminalLock: TerminalLockModel) {
         self.store = store
@@ -66,11 +67,20 @@ struct WatchView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             isVisible = true
+            if securityObserver == nil {
+                securityObserver = terminalLock.observeSecurityChanges { [weak model, weak terminalLock] in
+                    guard let terminalLock, !terminalLock.isActive || terminalLock.isLocked else { return }
+                    model?.updateLifecycle(isActive: terminalLock.isActive,
+                                           isUnlocked: !terminalLock.isLocked, isVisible: true)
+                }
+            }
             terminal.onFailure = { [weak model] error in model?.rendererFailed(error) }
             connect()
         }
         .onDisappear {
             isVisible = false
+            if let securityObserver { terminalLock.removeSecurityObserver(securityObserver) }
+            securityObserver = nil
             model.stop()
         }
         .onChange(of: canWatch) { _, _ in updateLifecycle() }

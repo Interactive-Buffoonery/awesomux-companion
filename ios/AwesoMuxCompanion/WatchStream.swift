@@ -143,8 +143,9 @@ struct WatchStream {
             snapshotBytes = 0
             return .reset(begin)
         }
-        // The Mac can deny/end an attach before its first snapshot.
-        if case .end(let end) = packet.frame, generation == nil {
+        // A final end can precede snapshot_begin after the Mac advances its generation.
+        if case .end(let end) = packet.frame {
+            guard generation.map({ packet.generation >= $0 }) ?? true else { throw WatchFailure.invalidStream }
             throw WatchFailure.ended(end.reason)
         }
         guard generation == packet.generation, phase != .awaitingSnapshot else {

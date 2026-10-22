@@ -9,6 +9,49 @@ import XCTest
 final class WatchTerminalTests: XCTestCase {
     private let initialGrid = CompanionTerminalStream.Grid(rows: 6, cols: 20)
 
+    func testDrawableBudgetAcceptsBoundariesAndUsesAtLeastThreeTimesScale() throws {
+        // 8192 x 1024 physical pixels is exactly 32 MiB in BGRA.
+        let boundary = CGSize(width: 2048, height: 256)
+        XCTAssertNoThrow(try WatchDrawableBudget.validate(size: boundary, displayScale: 4))
+        XCTAssertThrowsError(try WatchDrawableBudget.validate(
+            size: CGSize(width: 2048.25, height: 256), displayScale: 4)) {
+            XCTAssertEqual($0 as? WatchTerminalFailure, .drawableTooLarge)
+        }
+        XCTAssertNoThrow(try WatchDrawableBudget.validate(
+            size: CGSize(width: 640, height: 384), displayScale: 3))
+        for scale in [CGFloat(1), 2, 3] {
+            XCTAssertThrowsError(try WatchDrawableBudget.validate(
+                size: CGSize(width: 1000, height: 1000), displayScale: scale)) {
+                XCTAssertEqual($0 as? WatchTerminalFailure, .drawableTooLarge)
+            }
+        }
+    }
+
+    func testDrawableBudgetRejectsOversizedGridEstimatesAndCalibrationSizes() {
+        let sizes: [CGSize] = [
+            CGSize(width: 1000 * 8, height: 250 * 16),
+            CGSize(width: 250 * 8, height: 1000 * 16),
+            CGSize(width: 8193, height: 1),
+            CGSize(width: 1, height: 8193),
+            CGSize(width: 2048, height: 256.25),
+            CGSize(width: CGFloat.infinity, height: 1),
+            CGSize(width: 1, height: CGFloat.nan),
+            CGSize(width: 0, height: 100),
+            CGSize(width: 100, height: -1)
+        ]
+        for size in sizes {
+            XCTAssertThrowsError(try WatchDrawableBudget.validate(size: size, displayScale: 4)) {
+                XCTAssertEqual($0 as? WatchTerminalFailure, .drawableTooLarge)
+            }
+        }
+        for scale in [CGFloat(0), -1, .infinity, .nan] {
+            XCTAssertThrowsError(try WatchDrawableBudget.validate(
+                size: CGSize(width: 100, height: 100), displayScale: scale)) {
+                XCTAssertEqual($0 as? WatchTerminalFailure, .drawableTooLarge)
+            }
+        }
+    }
+
     func testProductionRendererReplaysCapturedReattachAndContinuation() async throws {
         let live = WatchTerminal(), restored = WatchTerminal()
         let host = try mount([live, restored])
@@ -69,12 +112,14 @@ final class WatchTerminalTests: XCTestCase {
 
     func testAuthoritativeGridChangeOrdersOutputAndPhoneLayoutKeepsGrid() async throws {
         let changing = WatchTerminal(), reference = WatchTerminal()
-        let host = try mount([changing, reference])
+        let host = try mount([changing, reference], initialZoom: 2)
         defer { host.close(); changing.clear(); reference.clear() }
         let larger = CompanionTerminalStream.Grid(rows: 8, cols: 24)
         try changing.reset(grid: initialGrid, scrollbackBound: 4096)
         try reference.reset(grid: larger, scrollbackBound: 4096)
         try await idle([changing, reference])
+        XCTAssertEqual(changing.reportedGrid, initialGrid)
+        XCTAssertEqual(reference.reportedGrid, larger)
         let prefix = Data("BEFORE\r\nSECOND".utf8)
         let suffix = Data("\r\nAFTER 界 e\u{301}".utf8)
         try changing.feed(prefix)
@@ -222,7 +267,7 @@ final class WatchTerminalTests: XCTestCase {
         }
     }
 
-    private func mount(_ terminals: [WatchTerminal]) throws -> TestHost {
+    private func mount(_ terminals: [WatchTerminal], initialZoom: Double = 1) throws -> TestHost {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .first(where: { $0.activationState == .foregroundActive }))
         let previous = scene.windows.first(where: \.isKeyWindow)
@@ -230,7 +275,7 @@ final class WatchTerminalTests: XCTestCase {
         window.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
         window.rootViewController = UIHostingController(rootView: VStack {
             ForEach(Array(terminals.enumerated()), id: \.offset) { _, terminal in
-                WatchTerminalView(terminal: terminal).frame(height: 280)
+                WatchTerminalView(terminal: terminal, initialZoom: initialZoom).frame(height: 280)
             }
         })
         window.makeKeyAndVisible()

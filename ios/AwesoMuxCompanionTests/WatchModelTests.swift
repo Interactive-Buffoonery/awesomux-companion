@@ -138,6 +138,156 @@ final class WatchModelTests: XCTestCase {
         await task?.value
     }
 
+    func testNativeBusyResetReattachesWithFreshSnapshotAndCanStop() async {
+        let f = WatchModelFixture()
+        let retry = expectation(description: "native busy backoff")
+        let live = expectation(description: "fresh snapshot live")
+        let first = f.connection(bytes: Data([1, 2]))
+        let second = f.connection(waiting: live, bytes: Data([7, 8]))
+        var releaseRetry: CheckedContinuation<Void, Error>?
+        f.sleep = { delay in
+            XCTAssertEqual(delay, .seconds(1))
+            try await withCheckedThrowingContinuation { continuation in
+                releaseRetry = continuation
+                retry.fulfill()
+            }
+        }
+        f.renderer.busyResetsRemaining = 1
+        f.open = { _ in f.openCount == 1 ? first : second }
+        let task = f.start()
+        await fulfillment(of: [retry], timeout: 2)
+        XCTAssertTrue(first.cancelled)
+        XCTAssertEqual(f.openCount, 1)
+        XCTAssertEqual(f.renderer.resets, 1)
+        XCTAssertTrue(f.renderer.bytes.isEmpty)
+        XCTAssertNil(f.model.grid)
+        XCTAssertNil(f.model.activeRoute)
+
+        releaseRetry?.resume()
+        await fulfillment(of: [live], timeout: 2)
+        XCTAssertEqual(f.openCount, 2)
+        XCTAssertEqual(f.renderer.resets, 2)
+        XCTAssertEqual(f.renderer.bytes, Data([7, 8]))
+        XCTAssertEqual(f.model.status, .live)
+        XCTAssertNil(f.model.error)
+        XCTAssertEqual(f.routes.map(\.transport), [.lan, .lan])
+        f.model.stop()
+        await task?.value
+        XCTAssertTrue(second.cancelled)
+        XCTAssertTrue(f.renderer.bytes.isEmpty)
+        XCTAssertEqual(f.model.status, .idle)
+    }
+
+    func testStopDuringNativeBusyBackoffPreventsAnotherAttach() async {
+        let f = WatchModelFixture()
+        let retry = expectation(description: "native busy cancellation wait")
+        let first = f.connection()
+        var releaseRetry: CheckedContinuation<Void, Error>?
+        f.sleep = { _ in
+            try await withCheckedThrowingContinuation { continuation in
+                releaseRetry = continuation
+                retry.fulfill()
+            }
+        }
+        f.renderer.busyResetsRemaining = 1
+        f.open = { _ in first }
+        let task = f.start()
+        await fulfillment(of: [retry], timeout: 2)
+        f.model.stop()
+        // Even a cancellation-ignoring sleeper cannot revive the old epoch.
+        releaseRetry?.resume()
+        await task?.value
+        XCTAssertTrue(first.cancelled)
+        XCTAssertEqual(f.openCount, 1)
+        XCTAssertEqual(f.renderer.resets, 1)
+        XCTAssertTrue(f.renderer.bytes.isEmpty)
+        XCTAssertNil(f.model.grid)
+        XCTAssertEqual(f.model.status, .idle)
+    }
+
+    func testTransientRendererThrowsAndCallbacksClearThenAttachFreshSnapshot() async {
+        for failure in [WatchTerminalFailure.overflow, .readinessTimeout, .drainTimeout] {
+            for mode in 0..<3 {
+                let delayed = mode == 2
+                let f = WatchModelFixture()
+                let firstLive = delayed ? expectation(description: "before renderer callback") : nil
+                let freshLive = expectation(description: "fresh renderer snapshot")
+                let retry = expectation(description: "renderer failure backoff")
+                let first = f.connection(waiting: firstLive)
+                let second = f.connection(waiting: freshLive, bytes: Data([7, 8]))
+                var releaseRetry: CheckedContinuation<Void, Error>?
+                f.sleep = { delay in
+                    XCTAssertEqual(delay, .seconds(1))
+                    try await withCheckedThrowingContinuation { continuation in
+                        releaseRetry = continuation
+                        retry.fulfill()
+                    }
+                }
+                if !delayed { f.renderer.feedFailure = failure }
+                if mode == 1 {
+                    f.renderer.onFailure = { [weak model = f.model] in model?.rendererFailed($0) }
+                }
+                f.open = { _ in f.openCount == 1 ? first : second }
+                let task = f.start()
+                if let firstLive {
+                    await fulfillment(of: [firstLive], timeout: 2)
+                    f.model.rendererFailed(failure)
+                    XCTAssertTrue(first.cancelled)
+                    XCTAssertTrue(f.renderer.bytes.isEmpty)
+                    XCTAssertNil(f.model.grid)
+                }
+                await fulfillment(of: [retry], timeout: 2)
+                let retryTask = f.model.start(record: f.record, paneID: f.paneID, targetVersion: f.targetVersion)
+                XCTAssertTrue(first.cancelled)
+                XCTAssertTrue(f.renderer.bytes.isEmpty)
+                XCTAssertNil(f.model.grid)
+                XCTAssertEqual(f.model.status, .failed)
+                XCTAssertEqual(f.openCount, 1)
+                f.renderer.feedFailure = nil
+                releaseRetry?.resume()
+                await fulfillment(of: [freshLive], timeout: 2)
+                XCTAssertEqual(f.openCount, 2)
+                XCTAssertEqual(f.renderer.bytes, Data([7, 8]))
+                XCTAssertEqual(f.model.status, .live)
+                XCTAssertEqual(f.routes.map(\.transport), [.lan, .lan])
+                f.model.stop()
+                await task?.value
+                await retryTask?.value
+                XCTAssertTrue(second.cancelled)
+            }
+        }
+    }
+
+    func testTransientRendererRetryRechecksAuthorityAfterBackoff() async {
+        let f = WatchModelFixture()
+        let live = expectation(description: "before authority loss")
+        let retry = expectation(description: "authority retry wait")
+        let connection = f.connection(waiting: live)
+        var releaseRetry: CheckedContinuation<Void, Error>?
+        f.sleep = { _ in
+            try await withCheckedThrowingContinuation { continuation in
+                releaseRetry = continuation
+                retry.fulfill()
+            }
+        }
+        f.open = { _ in connection }
+        let task = f.start()
+        await fulfillment(of: [live], timeout: 2)
+        f.model.rendererFailed(WatchTerminalFailure.drainTimeout)
+        await fulfillment(of: [retry], timeout: 2)
+        let retryTask = f.model.start(record: f.record, paneID: f.paneID, targetVersion: f.targetVersion)
+        f.authorized = false
+        releaseRetry?.resume()
+        await task?.value
+        await retryTask?.value
+        XCTAssertTrue(connection.cancelled)
+        XCTAssertEqual(f.openCount, 1)
+        XCTAssertTrue(f.renderer.bytes.isEmpty)
+        XCTAssertNil(f.model.grid)
+        XCTAssertEqual(f.model.status, .idle)
+        f.model.stop()
+    }
+
     func testRendererSyncAndDelayedFailuresCancelClearAndSurfaceSafeError() async {
         for delayed in [false, true] {
             let f = WatchModelFixture()
@@ -236,8 +386,22 @@ private final class WatchTestRenderer: WatchRendering {
     var bytes = Data()
     var resets = 0
     var failOnFeed = false
-    func reset(grid: CompanionTerminalStream.Grid, scrollbackBound: Int) throws { bytes = Data(); resets += 1 }
+    var feedFailure: WatchTerminalFailure?
+    var onFailure: ((Error) -> Void)?
+    var busyResetsRemaining = 0
+    func reset(grid: CompanionTerminalStream.Grid, scrollbackBound: Int) throws {
+        bytes = Data()
+        resets += 1
+        if busyResetsRemaining > 0 {
+            busyResetsRemaining -= 1
+            throw WatchTerminalFailure.nativeBusy
+        }
+    }
     func feed(_ bytes: Data) throws {
+        if let feedFailure {
+            onFailure?(feedFailure)
+            throw feedFailure
+        }
         if failOnFeed { throw WatchFailure.invalidDimensions }
         self.bytes.append(bytes)
     }

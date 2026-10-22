@@ -258,7 +258,10 @@ final class WatchTerminal: ObservableObject, WatchRendering {
             target = grid
             beginSizing()
             do {
-                probe = try makeSurface(size: surface.size, fontSize: surface.fontSize,
+                let cell = WatchDrawableBudget.cellSize(fontSize: surface.fontSize)
+                probe = try makeSurface(size: CGSize(width: CGFloat(grid.cols) * cell.width,
+                                                     height: CGFloat(grid.rows) * cell.height),
+                                        fontSize: surface.fontSize,
                                         displayScale: surface.view.traitCollection.displayScale)
             } catch let failure as WatchTerminalFailure {
                 _ = invalidate(failure)

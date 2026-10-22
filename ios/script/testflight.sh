@@ -70,6 +70,11 @@ result = subprocess.run(['security', 'unlock-keychain', '-p', Path(sys.argv[2]).
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 if result.returncode:
     raise SystemExit('Runner signing keychain could not be unlocked')
+result = subprocess.run(['security', 'set-key-partition-list', '-S', 'apple-tool:,apple:', '-s',
+                         '-k', Path(sys.argv[2]).read_text(), sys.argv[1]],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+if result.returncode:
+    raise SystemExit('Runner signing key authorization could not be configured')
 PY
   SIGNING=("OTHER_CODE_SIGN_FLAGS=--keychain $HEAVY_GATE_SIGNING_KEYCHAIN")
 fi
@@ -79,28 +84,9 @@ if [[ "$CHECK_SIGNING" == true ]]; then
     echo "Signing probe requires runner credentials" >&2; exit 1;
   }
   cp /usr/bin/true "$WORK/signing-probe"
-  python3 - "$WORK/signing-probe" <<'PROBE'
-import os, pwd, shlex, subprocess, sys
-env = dict(os.environ, HOME=pwd.getpwuid(os.getuid()).pw_dir)
-keychain = os.environ['HEAVY_GATE_SIGNING_KEYCHAIN']
-def security(*args):
-    return subprocess.check_output(['security', *args], env=env, text=True)
-existing = shlex.split(security('list-keychains', '-d', 'user'))
-default = shlex.split(security('default-keychain', '-d', 'user'))[0]
-added = keychain not in existing
-try:
-    if added:
-        security('list-keychains', '-d', 'user', '-s', *existing, keychain)
-    security('default-keychain', '-d', 'user', '-s', keychain)
-    subprocess.run(['codesign', '--force', '--sign', 'Apple Development', '--keychain', keychain,
-                    '--timestamp=none', sys.argv[1]], env=env, check=True)
-    subprocess.run(['codesign', '--verify', '--strict', sys.argv[1]], env=env, check=True)
-finally:
-    security('default-keychain', '-d', 'user', '-s', default)
-    if added:
-        current = shlex.split(security('list-keychains', '-d', 'user'))
-        security('list-keychains', '-d', 'user', '-s', *[p for p in current if p != keychain])
-PROBE
+  codesign --force --sign 'Apple Development' --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
+    --timestamp=none "$WORK/signing-probe"
+  codesign --verify --strict "$WORK/signing-probe"
   echo "Runner signing probe passed"
   exit 0
 fi

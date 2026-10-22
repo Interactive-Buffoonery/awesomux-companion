@@ -59,6 +59,7 @@ if [[ -n "${HEAVY_GATE_SIGNING_KEYCHAIN:-}" ]]; then
   [[ -n "${HEAVY_GATE_REMOTE_JOB:-}" ]] || {
     echo "Runner signing requires an isolated heavy-gate remote job" >&2; exit 1;
   }
+  export CFFIXED_USER_HOME="$HOME"
   # These preferences belong to the disposable job HOME, not the user's login.
   mkdir -p "$HOME/Library/Preferences"
   security list-keychains -d user -s "$HEAVY_GATE_SIGNING_KEYCHAIN" /Library/Keychains/System.keychain /System/Library/Keychains/SystemRootCertificates.keychain

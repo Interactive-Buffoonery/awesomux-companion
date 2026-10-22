@@ -86,14 +86,17 @@ keychain = os.environ['HEAVY_GATE_SIGNING_KEYCHAIN']
 def security(*args):
     return subprocess.check_output(['security', *args], env=env, text=True)
 existing = shlex.split(security('list-keychains', '-d', 'user'))
+default = shlex.split(security('default-keychain', '-d', 'user'))[0]
 added = keychain not in existing
 try:
     if added:
         security('list-keychains', '-d', 'user', '-s', *existing, keychain)
+    security('default-keychain', '-d', 'user', '-s', keychain)
     subprocess.run(['codesign', '--force', '--sign', 'Apple Development', '--keychain', keychain,
                     '--timestamp=none', sys.argv[1]], env=env, check=True)
     subprocess.run(['codesign', '--verify', '--strict', sys.argv[1]], env=env, check=True)
 finally:
+    security('default-keychain', '-d', 'user', '-s', default)
     if added:
         current = shlex.split(security('list-keychains', '-d', 'user'))
         security('list-keychains', '-d', 'user', '-s', *[p for p in current if p != keychain])

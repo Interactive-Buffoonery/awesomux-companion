@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "requestID": "01234567-89ab-cdef-0123-456789abcdef",
+  "operation": "watch_terminal",
+  "connectionID": "01234567-89ab-cdef-0123-456789abcdef",
+  "paneID": "01234567-89ab-cdef-0123-456789abcdef",
+  "targetVersion": "01234567-89ab-cdef-0123-456789abcdef",
+  "streamVersion": 1,
+  "grid": { "rows": 40, "cols": 100 }
+}

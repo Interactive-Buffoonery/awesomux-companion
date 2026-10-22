@@ -23,10 +23,12 @@ public extension CompanionAPIResponse {
         public let availability: String
         public let state: String?
         public let lastOutputLine: String?
+        /// Terminal panes only; the `watch_terminal` request must echo it.
+        public let targetVersion: String?
 
         public init(
             paneID: String, kind: String, title: String, availability: String,
-            state: String? = nil, lastOutputLine: String? = nil
+            state: String? = nil, lastOutputLine: String? = nil, targetVersion: String? = nil
         ) {
             self.paneID = paneID
             self.kind = kind
@@ -34,6 +36,7 @@ public extension CompanionAPIResponse {
             self.availability = availability
             self.state = state
             self.lastOutputLine = lastOutputLine
+            self.targetVersion = targetVersion
         }
     }
 }

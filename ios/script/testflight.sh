@@ -83,6 +83,8 @@ if [[ "$CHECK_SIGNING" == true ]]; then
   [[ -n "${HEAVY_GATE_SIGNING_KEYCHAIN:-}" ]] || {
     echo "Signing probe requires runner credentials" >&2; exit 1;
   }
+  swiftc "$IOS_DIR/script/check-runner-signing.swift" -o "$WORK/check-runner-signing"
+  "$WORK/check-runner-signing" "$HEAVY_GATE_SIGNING_KEYCHAIN"
   cp /usr/bin/true "$WORK/signing-probe"
   codesign --force --sign 'Apple Development' --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
     --timestamp=none "$WORK/signing-probe"

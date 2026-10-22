@@ -128,6 +128,23 @@ TEST_NOTES="What changed in this build" ./script/testflight.sh
 
 The build number is the current UTC time, so it always increases. The script waits until App Store Connect finishes processing, then the build appears for the group's testers. Set `TESTFLIGHT_GROUP` to send it to a different internal group.
 
+### Minimighty runner
+
+From a clean repository root, `heavy-gate ./ios/script/testflight.sh` can run on
+minimighty using its dedicated signing keychain and App Store Connect API key.
+Use `--export-only` to archive and export an IPA without uploading or assigning
+it to a testing group. Logs and the IPA return under `.build/testflight/`.
+The archive and DerivedData use the job's SSD-backed TMPDIR.
+
+Only a TestFlight job sources runner settings that export `HEAVY_GATE_XCODE_AUTH_CONFIG` pointing to a restricted JSON
+file with `private_key_path`, `key_id`, and `issuer_id`, plus
+`HEAVY_GATE_SIGNING_KEYCHAIN` and `HEAVY_GATE_SIGNING_PASSWORD_FILE` pointing to
+the dedicated keychain and its restricted password file. `ASC_CONFIG_PATH` and
+`ASC_BYPASS_KEYCHAIN=1` let asc use the same API credential from the isolated job
+HOME. Local runs keep using Xcode's existing account when these are absent.
+The gate forwards TEST_NOTES, TESTFLIGHT_GROUP and BUILD_NUMBER as literal data.
+Never check credentials into this repository.
+
 ## Snapshot diagnostic app
 
 The separate `AwesoMuxDiagnostics.xcodeproj` / `AwesoMuxDiagnostics` scheme uses
@@ -329,3 +346,7 @@ plus controlled paired-stream frames for ordering, reconnect and lifecycle
 failures. Physical devices, VoiceOver, real paired LAN/Tailscale interruptions,
 long suspension/relaunch and complete selection/scrollback interaction still
 require acceptance. The synthetic HTTPS fixture remains test tooling only.
+
+Remote TestFlight jobs build the pinned native renderer from source before
+generation, retaining its original inputs and schema 2 receipt for validation.
+This adds a full native build to each fresh runner job.

@@ -59,10 +59,9 @@ if [[ -n "${HEAVY_GATE_SIGNING_KEYCHAIN:-}" ]]; then
   [[ -n "${HEAVY_GATE_REMOTE_JOB:-}" ]] || {
     echo "Runner signing requires an isolated heavy-gate remote job" >&2; exit 1;
   }
-  export CFFIXED_USER_HOME="$HOME"
   # These preferences belong to the disposable job HOME, not the user's login.
   mkdir -p "$HOME/Library/Preferences"
-  security list-keychains -d user -s "$HEAVY_GATE_SIGNING_KEYCHAIN" /Library/Keychains/System.keychain /System/Library/Keychains/SystemRootCertificates.keychain
+  security list-keychains -d user -s "$HEAVY_GATE_SIGNING_KEYCHAIN"
   security default-keychain -d user -s "$HEAVY_GATE_SIGNING_KEYCHAIN"
   python3 - "$HEAVY_GATE_SIGNING_KEYCHAIN" "$HEAVY_GATE_SIGNING_PASSWORD_FILE" <<'PY'
 from pathlib import Path
@@ -80,7 +79,8 @@ if [[ "$CHECK_SIGNING" == true ]]; then
     echo "Signing probe requires runner credentials" >&2; exit 1;
   }
   cp /usr/bin/true "$WORK/signing-probe"
-  codesign --force --sign 'Apple Development' \
+  REAL_USER_HOME="$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')"
+  HOME="$REAL_USER_HOME" codesign --force --sign 'Apple Development' --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
     --timestamp=none "$WORK/signing-probe"
   codesign --verify --strict "$WORK/signing-probe"
   echo "Runner signing probe passed"

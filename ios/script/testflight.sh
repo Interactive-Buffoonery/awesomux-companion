@@ -84,7 +84,7 @@ if [[ "$CHECK_SIGNING" == true ]]; then
     echo "Signing probe requires runner credentials" >&2; exit 1;
   }
   cp /usr/bin/true "$WORK/signing-probe"
-  launchctl asuser "$(id -u)" codesign --force --sign 'Apple Development' --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
+  codesign --force --sign 'Apple Development' --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
     --timestamp=none "$WORK/signing-probe"
   codesign --verify --strict "$WORK/signing-probe"
   echo "Runner signing probe passed"

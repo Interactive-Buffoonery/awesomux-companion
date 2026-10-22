@@ -34,6 +34,7 @@ final class WatchTerminalTests: XCTestCase {
         XCTAssertTrue(after.contains("DONE"))
         XCTAssertEqual(live.reportedGrid, initialGrid)
         XCTAssertEqual(restored.reportedGrid, initialGrid)
+        await displayCycles()
         attach(host.window, name: "Production Watch replay after live continuation")
 
         // Reset must replace parser state, retained cells and queued operations.
@@ -94,6 +95,7 @@ final class WatchTerminalTests: XCTestCase {
         try await idle([changing, reference])
         XCTAssertEqual(changing.reportedGrid, larger)
         XCTAssertEqual(changing.readViewportText(), text)
+        await displayCycles()
         attach(host.window, name: "Production Watch authoritative grid after phone layout change")
     }
 
@@ -182,6 +184,14 @@ final class WatchTerminalTests: XCTestCase {
         [view] + view.subviews.flatMap(descendants)
     }
 
+    private func displayCycles() async {
+        let rendered = expectation(description: "Display cycles before pixel capture")
+        let observer = WatchDisplayCycles { rendered.fulfill() }
+        observer.start()
+        defer { observer.stop() }
+        await fulfillment(of: [rendered], timeout: 2)
+    }
+
     private func attach(_ window: UIWindow, name: String) {
         window.rootViewController?.view.setNeedsLayout()
         window.rootViewController?.view.layoutIfNeeded()
@@ -236,5 +246,27 @@ private struct TestHost {
         window.isHidden = true
         window.rootViewController = nil
         previous?.makeKey()
+    }
+}
+
+@MainActor
+private final class WatchDisplayCycles: NSObject {
+    private var link: CADisplayLink?
+    private var remaining = 3
+    private let completed: () -> Void
+
+    init(completed: @escaping () -> Void) { self.completed = completed }
+
+    func start() {
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        self.link = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    func stop() { link?.invalidate(); link = nil }
+
+    @objc private func tick() {
+        remaining -= 1
+        if remaining == 0 { stop(); completed() }
     }
 }

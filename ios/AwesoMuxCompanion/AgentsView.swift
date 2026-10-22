@@ -3,6 +3,7 @@ import SwiftUI
 struct AgentsView: View {
     @Bindable var store: CompanionStore
     @Environment(TerminalLockModel.self) private var terminalLock
+    @Environment(PendingDecisionsModel.self) private var decisions
 
     var body: some View {
         NavigationStack {
@@ -37,6 +38,7 @@ struct AgentsView: View {
                         }
                         .listRowBackground(Cat.card)
                     }
+                    PendingDecisionsSection(model: decisions, context: store.decisionContext)
                     if let snapshot = store.snapshot {
                         agentSections(snapshot)
                     } else if store.message == nil {
@@ -69,7 +71,10 @@ struct AgentsView: View {
                     }
                 }
             }
-            .refreshable { await store.refresh() }
+            .refreshable {
+                await store.refresh()
+                await decisions.refresh()
+            }
         }
     }
 

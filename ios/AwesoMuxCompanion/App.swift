@@ -27,7 +27,34 @@ struct GlanceApp: App {
 private struct ProtectedCompanionRoot: View {
     let store: CompanionStore
     @Environment(\.scenePhase) private var scenePhase
-    @State private var terminalLock = TerminalLockModel()
+    @State private var terminalLock: TerminalLockModel
+    @State private var decisions: PendingDecisionsModel
+
+    init(store: CompanionStore) {
+        self.store = store
+        let lock = TerminalLockModel()
+        _terminalLock = State(initialValue: lock)
+        _decisions = State(initialValue: PendingDecisionsModel(
+            session: { [weak store] in store?.decisionSession },
+            pairing: { [weak store] in store?.decisionPairing },
+            isUnlocked: { [weak store] in
+                lock.isActive && !lock.isLocked && store?.showingPairing == false && store?.pairingStep == .idle
+            },
+            isLocked: { lock.isLocked },
+            read: { [weak store] session, canRead in
+                guard let store else { throw CancellationError() }
+                return try await store.readDecisions(session: session, canRead: canRead)
+            },
+            submit: { [weak store] answer, session, canSend in
+                guard let store else { throw CancellationError() }
+                return try await store.submitDecision(answer, session: session, canSend: canSend)
+            }))
+    }
+
+    private var canReadDecisions: Bool {
+        scenePhase == .active && terminalLock.isActive && !terminalLock.isLocked
+            && store.decisionSession != nil && !store.showingPairing && store.pairingStep == .idle
+    }
 
     var body: some View {
         TerminalLockContainer(
@@ -40,12 +67,25 @@ private struct ProtectedCompanionRoot: View {
                 CompanionTabs(store: store)
             }
         }
+        .environment(decisions)
         .tint(Cat.accent)
         .onOpenURL { url in
             store.openPairingLink(url.absoluteString, review: true)
         }
         .onChange(of: scenePhase) {
             if scenePhase != .active { store.suspendPanes() }
+            decisions.sceneChanged(active: scenePhase == .active,
+                backgrounded: scenePhase == .background || store.showingPairing || store.pairingStep != .idle)
+        }
+        .onChange(of: canReadDecisions, initial: true) {
+            decisions.sceneChanged(active: scenePhase == .active,
+                backgrounded: scenePhase == .background || store.showingPairing || store.pairingStep != .idle)
+        }
+        .onChange(of: store.decisionSession) {
+            decisions.connectionChanged(denied: store.decisionAccessDenied)
+        }
+        .task(id: canReadDecisions) {
+            if canReadDecisions { await decisions.poll() }
         }
         .task(id: scenePhase) {
             switch scenePhase {

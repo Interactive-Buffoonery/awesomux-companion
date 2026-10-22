@@ -17,6 +17,21 @@ final class MacClientTests: XCTestCase {
         }
     }
 
+    func testDecisionRequestContainsOnlyExactAnswerAndPairing() throws {
+        let connection = UUID()
+        let identity = CompanionDecisionIdentity(runtimeID: UUID(), workspaceID: UUID(), paneID: UUID(),
+            targetVersion: UUID(), providerSessionID: "session", invocationID: UUID(), revision: 3)
+        let answer = CompanionDecisionAnswer(identity: identity, choice: .deny, retryID: UUID())
+        let request = MacClient.decisionRequest(answer, connectionID: connection)
+        let data = try CompanionProtocol.encoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["schemaVersion", "requestID", "operation", "connectionID", "decisionAnswer"])
+        XCTAssertEqual(object["operation"] as? String, "decide")
+        XCTAssertEqual(object["connectionID"] as? String, connection.uuidString)
+        XCTAssertEqual(try CompanionProtocol.decoder().decode(CompanionAPIRequest.self, from: data).decisionAnswer, answer)
+        XCTAssertEqual(try MacClient.frameRequest(data).dropFirst(4), data)
+    }
+
     func testEmptyRequestUsesClientFailure() {
         XCTAssertThrowsError(try MacClient.frameRequest(Data())) { error in
             XCTAssertEqual(error as? MacClientFailure, .invalidResponse)

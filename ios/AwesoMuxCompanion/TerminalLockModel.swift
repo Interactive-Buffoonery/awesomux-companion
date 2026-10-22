@@ -17,17 +17,23 @@ extension TerminalAuthenticating {
 @MainActor
 final class DeviceOwnerAuthenticator: TerminalAuthenticating {
     private var context: LAContext?
+    private let reason: String
+
+    init(reason: String = String(localized: "Unlock your agents and terminals.")) {
+        self.reason = reason
+    }
     private(set) var failureMessage: String?
 
     func authenticate() async -> Bool {
         failureMessage = nil
         let context = LAContext()
+        context.touchIDAuthenticationAllowableReuseDuration = 0
         self.context = context
         defer { if self.context === context { self.context = nil } }
         do {
             return try await context.evaluatePolicy(
                 .deviceOwnerAuthentication,
-                localizedReason: String(localized: "Unlock your agents and terminals."))
+                localizedReason: reason)
         } catch {
             failureMessage = Self.message(for: error)
             return false

@@ -17,11 +17,26 @@ enum PairingStep: Equatable {
 
 protocol CompanionSessionClient: Sendable {
     func call(_ operation: String, connectionID: UUID, limit: Int?, cursor: String?) async throws -> APIResponse
+    func call(_ operation: String, connectionID: UUID, limit: Int?, cursor: String?,
+              canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
     func unpair(connectionID: UUID) async throws
+    func answerDecision(_ answer: CompanionDecisionAnswer, connectionID: UUID,
+                        canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
     func setTerminalPreview(_ allowed: Bool, connectionID: UUID) async throws -> APIResponse
 }
 
 extension CompanionSessionClient {
+    func call(_ operation: String, connectionID: UUID, limit: Int?, cursor: String?,
+              canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse {
+        guard await canSend() else { throw CancellationError() }
+        return try await call(operation, connectionID: connectionID, limit: limit, cursor: cursor)
+    }
+
+    func answerDecision(_ answer: CompanionDecisionAnswer, connectionID: UUID,
+                        canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse {
+        throw MacClientFailure.api("unsupported_operation")
+    }
+
     func setTerminalPreview(_ allowed: Bool, connectionID: UUID) async throws -> APIResponse {
         throw MacClientFailure.api("unsupported_operation")
     }
@@ -32,6 +47,12 @@ extension MacClient: CompanionSessionClient {}
 @MainActor @Observable
 final class CompanionStore {
     private(set) var panes = PaneRoster()
+    private(set) var decisionPairingID = UUID()
+    var decisionPairing: UUID? { record == nil || isUnpairing ? nil : decisionPairingID }
+    private(set) var decisionSessionID = UUID()
+    private(set) var decisionAccessDenied = false
+    var decisionSession: UUID? { record == nil || isUnpairing ? nil : decisionSessionID }
+
     private(set) var record: PairingRecord?
     private(set) var snapshot: GlanceSnapshot?
     private(set) var isSnapshotCached = false
@@ -283,6 +304,9 @@ final class CompanionStore {
     }
 
     private func forgetConnection() {
+        decisionPairingID = UUID()
+        decisionAccessDenied = false
+        decisionSessionID = UUID()
         revision += 1
         invalidatePaneRead()
         let previewIntent = panes.previewIntent
@@ -578,11 +602,12 @@ final class CompanionStore {
     }
 
     private func sessionCall(_ operation: String, record: PairingRecord, revision started: Int,
-                             limit: Int? = nil, cursor: String? = nil, previewAllowed: Bool? = nil, paneGeneration: Int? = nil) async throws -> APIResponse {
+                             limit: Int? = nil, cursor: String? = nil, previewAllowed: Bool? = nil, paneGeneration: Int? = nil,
+                             canRead: (@MainActor @Sendable () -> Bool)? = nil, scopedDecision: Bool = false) async throws -> APIResponse {
         let permissionStarted = permissionRevision
         func checkCurrent() throws {
             try Task.checkCancellation()
-            guard revision == started, permissionRevision == permissionStarted,
+            guard revision == started, permissionRevision == permissionStarted, canRead?() ?? true,
                   paneGeneration.map({ acceptsPaneRead($0, revision: started) }) ?? true else { throw CancellationError() }
         }
         try checkCurrent()
@@ -593,6 +618,12 @@ final class CompanionStore {
                 if let previewAllowed {
                     return try await client.setTerminalPreview(previewAllowed, connectionID: record.connectionID)
                 }
+                if let canRead {
+                    return try await client.call(operation, connectionID: record.connectionID, limit: limit, cursor: cursor,
+                        canSend: { [weak self] in
+                            self?.revision == started && self?.permissionRevision == permissionStarted && canRead()
+                        })
+                }
                 return try await client.call(operation, connectionID: record.connectionID, limit: limit, cursor: cursor)
             }
             try checkCurrent()
@@ -601,12 +632,23 @@ final class CompanionStore {
             return response
         } catch {
             try checkCurrent()
-            if error.isCompanionAuthorizationFailure { handleAuthorizationFailure(error) }
+            if scopedDecision, (error as? MacClientFailure) == .api("permission_denied") {
+                handleDecisionDenial()
+            } else if error.isCompanionAuthorizationFailure {
+                handleAuthorizationFailure(error)
+            }
             throw error
         }
     }
 
+    private func handleDecisionDenial() {
+        decisionAccessDenied = true
+        decisionSessionID = UUID()
+    }
+
     private func handleAuthorizationFailure(_ error: Error) {
+        decisionAccessDenied = true
+        decisionSessionID = UUID()
         permissionRevision += 1
         invalidatePaneRead()
         panes.state = .failed(Self.readMessage(for: error, macName: record?.macName ?? "Mac"))
@@ -619,6 +661,55 @@ final class CompanionStore {
             self.snapshot = offline
             writeShared(offline)
             if liveActivityEnabled { Task { await liveActivity?.sync(offline, connected: false) } }
+        }
+    }
+
+    func decisionContext(_ identity: CompanionDecisionIdentity) -> DecisionContext {
+        let workspaceID = identity.workspaceID.uuidString
+        let paneID = identity.paneID.uuidString
+        let workspace = panes.state.workspaces.first { $0.id.caseInsensitiveCompare(workspaceID) == .orderedSame }
+        let pane = workspace?.panes.first { $0.id.caseInsensitiveCompare(paneID) == .orderedSame }
+        return DecisionContext(workspace: workspace?.name, pane: pane?.title, identity: identity)
+    }
+
+    // MARK: Foreground decisions
+
+    func readDecisions(session: UUID, canRead: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse {
+        guard canRead(), decisionSession == session, let record else { throw CancellationError() }
+        let started = revision
+        let status = try await sessionCall(CompanionOperation.connectionStatus.rawValue,
+                                           record: record, revision: started, canRead: canRead)
+        guard canRead(), decisionSession == session else { throw CancellationError() }
+        decisionAccessDenied = false
+        guard status.remoteDecisionsEnabled == true else { return status }
+        let response = try await sessionCall(CompanionOperation.pendingDecisions.rawValue,
+                                             record: record, revision: started, canRead: canRead, scopedDecision: true)
+        guard canRead(), decisionSession == session else { throw CancellationError() }
+        return response
+    }
+
+    /// A write uses exactly one route. Lost replies require a fresh read and an
+    /// explicit authenticated retry; firstAnswering must never replay this call.
+    func submitDecision(_ answer: CompanionDecisionAnswer, session: UUID,
+                        canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse {
+        guard decisionSession == session, let record, canSend(),
+              let route = activeRoute ?? orderedRoutes(record).first else { throw CancellationError() }
+        let client = try client(for: route, record: record)
+        guard decisionSession == session, canSend() else { throw CancellationError() }
+        do {
+            let response = try await client.answerDecision(answer, connectionID: record.connectionID, canSend: { [weak self] in
+                self?.decisionSession == session && canSend()
+            })
+            guard decisionSession == session else { throw CancellationError() }
+            return response
+        } catch {
+            guard decisionSession == session else { throw CancellationError() }
+            if (error as? MacClientFailure) == .api("permission_denied") {
+                handleDecisionDenial()
+            } else if error.isCompanionAuthorizationFailure {
+                handleAuthorizationFailure(error)
+            }
+            throw error
         }
     }
 

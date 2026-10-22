@@ -10,10 +10,12 @@ IOS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # ponytail: timestamp build numbers are always increasing, so nothing is committed per upload.
 BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
 EXPORT_ONLY=false
+CHECK_SIGNING=false
 case "${1:-}" in
   "") ;;
   --export-only) EXPORT_ONLY=true ;;
-  *) echo "Usage: script/testflight.sh [--export-only]" >&2; exit 64 ;;
+  --check-signing) CHECK_SIGNING=true ;;
+  *) echo "Usage: script/testflight.sh [--export-only|--check-signing]" >&2; exit 64 ;;
 esac
 [[ "$#" -le 1 ]] || { echo "Too many arguments" >&2; exit 64; }
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/companion-testflight.XXXXXX")"
@@ -70,6 +72,18 @@ if result.returncode:
     raise SystemExit('Runner signing keychain could not be unlocked')
 PY
   SIGNING=("OTHER_CODE_SIGN_FLAGS=--keychain $HEAVY_GATE_SIGNING_KEYCHAIN")
+fi
+
+if [[ "$CHECK_SIGNING" == true ]]; then
+  [[ -n "${HEAVY_GATE_SIGNING_KEYCHAIN:-}" ]] || {
+    echo "Signing probe requires runner credentials" >&2; exit 1;
+  }
+  cp /usr/bin/true "$WORK/signing-probe"
+  codesign --force --sign 'Apple Development' --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
+    --timestamp=none "$WORK/signing-probe"
+  codesign --verify --strict "$WORK/signing-probe"
+  echo "Runner signing probe passed"
+  exit 0
 fi
 
 cat > "$WORK/export.plist" <<PLIST

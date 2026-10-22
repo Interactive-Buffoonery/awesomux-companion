@@ -57,19 +57,36 @@ final class TerminalLockModel {
     static let gracePeriod: TimeInterval = 15
 
     private(set) var isEnabled = false {
-        didSet { if (oldValue && sessionLocked) != isLocked { securityDidChange?() } }
+        didSet { if (oldValue && sessionLocked) != isLocked { notifySecurityChange() } }
     }
     var isLocked: Bool { isEnabled && sessionLocked }
     private var sessionLocked = true {
-        didSet { if (isEnabled && oldValue) != isLocked { securityDidChange?() } }
+        didSet { if (isEnabled && oldValue) != isLocked { notifySecurityChange() } }
     }
     private(set) var isActive = false {
-        didSet { if oldValue != isActive { securityDidChange?() } }
+        didSet { if oldValue != isActive { notifySecurityChange() } }
     }
     @ObservationIgnored var securityDidChange: (() -> Void)?
+    @ObservationIgnored private var securityObservers: [UUID: () -> Void] = [:]
+
+    func observeSecurityChanges(_ observer: @escaping () -> Void) -> UUID {
+        let id = UUID()
+        securityObservers[id] = observer
+        return id
+    }
+
+    func removeSecurityObserver(_ id: UUID) {
+        securityObservers[id] = nil
+    }
+
+    private func notifySecurityChange() {
+        securityDidChange?()
+        for observer in Array(securityObservers.values) { observer() }
+    }
+
     private(set) var isAuthenticating = false
     private(set) var authenticationFailureMessage: String? {
-        didSet { if oldValue != authenticationFailureMessage { securityDidChange?() } }
+        didSet { if oldValue != authenticationFailureMessage { notifySecurityChange() } }
     }
     var authenticationFailed: Bool { authenticationFailureMessage != nil }
 

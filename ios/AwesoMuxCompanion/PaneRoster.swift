@@ -29,6 +29,7 @@ struct ListedPane: Identifiable, Equatable {
     let availability: String
     let state: String?
     var preview: String?
+    var targetVersion: String? = nil
 
     var status: String {
         switch availability {
@@ -120,7 +121,8 @@ struct PaneRoster {
                 let preview = previews && kind == .terminal && pane.availability == "attached"
                     ? pane.lastOutputLine : nil
                 return ListedPane(id: pane.paneID, title: pane.title, kind: kind,
-                                  availability: pane.availability, state: pane.state, preview: preview)
+                                  availability: pane.availability, state: pane.state, preview: preview,
+                                  targetVersion: pane.targetVersion)
             })
         }
     }

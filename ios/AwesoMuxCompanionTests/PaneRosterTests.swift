@@ -22,7 +22,7 @@ final class PaneRosterTests: XCTestCase {
     func testProjectionPreservesHostOrderAndRejectsUnknownOrUnavailablePreviews() {
         let projected = PaneRoster.project([
             .init(workspaceID: "b", name: "Second alphabetically", panes: [
-                .init(paneID: "shell", kind: "terminal", title: "Shell", availability: "attached", state: "thinking", lastOutputLine: "safe fixture"),
+                .init(paneID: "shell", kind: "terminal", title: "Shell", availability: "attached", state: "thinking", lastOutputLine: "safe fixture", targetVersion: "watch-target"),
                 .init(paneID: "docs", kind: "documentGroup", title: "Notes", availability: "attached", lastOutputLine: "must not show"),
                 .init(paneID: "future", kind: "futureKind", title: "Future", availability: "attached", lastOutputLine: "must not show"),
                 .init(paneID: "stale", kind: "terminal", title: "Old", availability: "stale", lastOutputLine: "must not show"),
@@ -34,6 +34,7 @@ final class PaneRosterTests: XCTestCase {
         XCTAssertEqual(projected.map(\.id), ["b", "a"])
         XCTAssertEqual(projected[0].panes.map(\.id), ["shell", "docs", "future", "stale", "unknown"])
         XCTAssertEqual(projected[0].panes.compactMap(\.preview), ["safe fixture"])
+        XCTAssertEqual(projected[0].panes.first?.targetVersion, "watch-target")
         XCTAssertEqual(projected[0].panes.map(\.status), ["Working", "Documents", "Unsupported pane", "Stale", "Status unavailable"])
         XCTAssertEqual(PaneRoster.project(paneWorkspaces(), previews: false).flatMap(\.panes).compactMap(\.preview), [])
     }

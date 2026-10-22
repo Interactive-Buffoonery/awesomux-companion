@@ -25,9 +25,19 @@ network.
 
 ## Build
 
+Watch uses the pinned source-built public CAMetalLayer renderer. First integrate
+its schema 2 native artifact using the recipe in
+`../spikes/snapshot-reconnect/ios-diagnostics.md` into
+`ios/build/diagnostics-native`. The original source, toolchain and receipt must
+remain available. `script/generate-watch.sh` checks that integration, generates
+the app project, and seeds the pinned dependency lock. Every app build validates
+the native inputs and dependency pins again. There is no downloaded binary
+fallback. The app bundles the renderer's third-party notices and supports arm64
+Simulator and device builds.
+
 ```sh
 cd ios
-xcodegen generate
+zsh script/generate-watch.sh
 xcodebuild -project AwesoMuxCompanion.xcodeproj -scheme AwesoMuxCompanion \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 ```
@@ -178,8 +188,7 @@ device, including sheets, backgrounding during authentication and a grace return
 
 Sessions lists the Mac's workspaces and panes in their native order, including
 plain shells, split terminals and document groups. Each row shows availability
-and terminal/agent status. Unknown pane kinds remain metadata-only. Watching a
-live terminal and an iPad-specific layout are separate follow-ups (#10 and #11).
+and terminal/agent status. Unknown pane kinds remain metadata-only. Tap an attached terminal to open Watch. The iPad-specific layout remains #11.
 The Agents tab, notification focus, cached agents, widgets and Live Activity keep
 their existing roles.
 
@@ -212,8 +221,7 @@ show an update message for unsupported pane lists.
 Pane rosters and previews stay in process memory, outside `GlanceSnapshot`, the
 cached agent snapshot and App Group/widget storage. Backgrounding clears them
 and invalidates unfinished reads. All Sessions and consent UI lives beneath
-`TerminalLockContainer` and its scene privacy cover. This feature adds no live
-terminal renderer, relay access, document content, saved previews or widget
+`TerminalLockContainer` and its scene privacy cover. Sessions adds no relay access, document content, saved previews or widget
 previews. Simulator fixture screenshots demonstrate SwiftUI rendering; actual
 paired networking, physical biometric/passcode flows and VoiceOver need separate
 verification. Accessibility polish remains deferred.
@@ -287,3 +295,37 @@ store tests cover production gate discovery, route handling and authority at
 send. App-hosted fixture renderings exercise request context and status copy;
 physical authentication, live paired networking, native Claude races and
 VoiceOver still need separate acceptance.
+
+## Watch
+
+Tap an attached terminal in Sessions to watch its real paired snapshot and live
+output over the direct LAN/Tailscale connection. Watch access is granted per
+workspace in Mac Companion settings, separately from terminal previews. A Mac
+without the stream contract needs an update. Documents and unknown pane kinds
+remain metadata-only.
+
+Every attach, reconnect and overflow resync starts a fresh generation. The phone
+checks target identity, dimensions, contiguous byte sequences and snapshot byte
+counts before continuing. Truncated or out-of-order streams discard the model.
+Earlier history is always labeled incomplete: snapshots retain terminal cells,
+but do not recover logical wraps, command boundaries or exit codes. Retention
+is bounded; Watch never invents missing history.
+
+The model keeps the Mac grid through phone rotation. Local panning, selection,
+copy and history scrolling do not send input. Native query replies, clipboard
+escape sequences, notifications and link opening are suppressed. Watch never
+sends input, takeover, reply or resize frames, including when no Mac client leads.
+Typing/takeover (#13), phone-width rewrap, Chat (#18) and iPad layout (#11) are
+separate work.
+
+Watch closes its connection and clears terminal content when inactive, locked
+or dismissed. Foreground recovery uses a new attach and snapshot, with bounded
+retry delays for transport failures. Permission refusals stop retries. Content
+stays in memory and never enters agent caches, widgets, notifications or logs.
+The screen uses the scene's existing terminal lock and privacy cover.
+
+Regression checks reuse #35's bundled replay bytes with the production renderer,
+plus controlled paired-stream frames for ordering, reconnect and lifecycle
+failures. Physical devices, VoiceOver, real paired LAN/Tailscale interruptions,
+long suspension/relaunch and complete selection/scrollback interaction still
+require acceptance. The synthetic HTTPS fixture remains test tooling only.

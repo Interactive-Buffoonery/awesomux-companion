@@ -114,6 +114,53 @@ struct MacClient: Sendable {
                             connectionID: connectionID, decisionAnswer: answer)
     }
 
+    static func watchRequest(connectionID: UUID, paneID: UUID, targetVersion: UUID) -> CompanionAPIRequest {
+        CompanionAPIRequest(operation: CompanionOperation.watchTerminal.rawValue, connectionID: connectionID,
+                            paneID: paneID, targetVersion: targetVersion,
+                            streamVersion: CompanionTerminalStream.version, grid: .init(rows: 24, cols: 80))
+    }
+
+    func openWatch(connectionID: UUID, paneID: UUID, targetVersion: UUID,
+                   canSend: @escaping @MainActor @Sendable () -> Bool = { true }) async throws -> any WatchConnection {
+        guard await canSend() else { throw CancellationError() }
+        let advertised = try await exchange(CompanionAPIRequest(operation: CompanionOperation.capabilities.rawValue,
+                                                               connectionID: connectionID), canSend: canSend)
+        guard let limits = advertised.terminalStream else { throw WatchFailure.unsupportedStream }
+        try WatchStream.validate(limits)
+        guard await canSend() else { throw CancellationError() }
+        let connection = try await FramedConnection.open(client: self)
+        return try await Self.openWatch(connection: connection,
+            request: Self.watchRequest(connectionID: connectionID, paneID: paneID, targetVersion: targetVersion),
+            capabilities: limits, canSend: canSend)
+    }
+
+    static func openWatch(connection: any WatchFrameConnection, request: CompanionAPIRequest,
+                          capabilities: CompanionTerminalStream.Capabilities,
+                          canSend: @escaping @MainActor @Sendable () -> Bool = { true }) async throws -> any WatchConnection {
+        do {
+            try WatchStream.validate(capabilities)
+            try Task.checkCancellation()
+            try await connection.send(CompanionProtocol.encoder().encode(request), canSend: canSend)
+            let data = try await withTimeout(requestTimeout) {
+                try await connection.receiveFrame(maximum: maximumResponseBytes)
+            }
+            try Task.checkCancellation()
+            guard await canSend() else { throw CancellationError() }
+            let response = try CompanionProtocol.decoder().decode(APIResponse.self, from: data)
+            guard response.schemaVersion == CompanionProtocol.version, response.requestID == request.requestID else {
+                throw MacClientFailure.invalidResponse
+            }
+            if let error = response.error { throw MacClientFailure.api(error) }
+            guard response.terminalStreamAccepted == .init(role: .watch) else {
+                throw MacClientFailure.invalidResponse
+            }
+            return MacWatchConnection(connection: connection, capabilities: capabilities)
+        } catch {
+            connection.cancel()
+            throw error
+        }
+    }
+
     private func exchange(_ request: CompanionAPIRequest,
                           canSend: (@MainActor @Sendable () -> Bool)? = nil) async throws -> APIResponse {
         let connection = try await FramedConnection.open(client: self)
@@ -135,7 +182,7 @@ typealias APIResponse = CompanionAPIResponse
 
 // MARK: - Transport
 
-private final class FramedConnection: @unchecked Sendable {
+private final class FramedConnection: WatchFrameConnection, @unchecked Sendable {
     private let connection: NWConnection
     private let queue = DispatchQueue(label: "com.interactivebuffoonery.awesomux.companion.connection")
     private let pin: OSAllocatedUnfairLock<Data?>
@@ -183,6 +230,10 @@ private final class FramedConnection: @unchecked Sendable {
         let connection = connection
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
                 let resumed = OSAllocatedUnfairLock(initialState: false)
                 @Sendable func finish(_ result: Result<Void, Error>) {
                     guard resumed.withLock({ let first = !$0; $0 = true; return first }) else { return }
@@ -252,6 +303,7 @@ private final class FramedConnection: @unchecked Sendable {
     private func receiveLoop(_ connection: NWConnection, exactly count: Int) async throws -> Data {
         var buffer = Data()
         while buffer.count < count {
+            try Task.checkCancellation()
             let needed = count - buffer.count
             let chunk: Data = try await withCheckedThrowingContinuation { continuation in
                 connection.receive(minimumIncompleteLength: 1, maximumLength: needed) { data, _, isComplete, error in
@@ -266,7 +318,7 @@ private final class FramedConnection: @unchecked Sendable {
     }
 }
 
-private func withTimeout<T: Sendable>(_ limit: Duration, _ work: @escaping @Sendable () async throws -> T) async throws -> T {
+func withTimeout<T: Sendable>(_ limit: Duration, _ work: @escaping @Sendable () async throws -> T) async throws -> T {
     try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask { try await work() }
         group.addTask {

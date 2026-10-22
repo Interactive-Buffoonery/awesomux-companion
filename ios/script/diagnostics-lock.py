@@ -37,12 +37,14 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--seed', action='store_true')
     mode.add_argument('--allow-missing', action='store_true')
+    parser.add_argument('--project', choices=['AwesoMuxCompanion', 'AwesoMuxDiagnostics'], default='AwesoMuxDiagnostics')
     args = parser.parse_args()
+    resolved = ROOT / f'{args.project}.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved'
     if args.seed:
         pins(TRACKED)
-        RESOLVED.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(TRACKED, RESOLVED)
-    validate_lock(allow_missing=args.allow_missing)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(TRACKED, resolved)
+    validate_lock(resolved=resolved, allow_missing=args.allow_missing)
 
 
 if __name__ == '__main__':

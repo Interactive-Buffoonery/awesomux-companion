@@ -96,7 +96,17 @@ struct SessionsView: View {
                         Text("No panes").foregroundStyle(Cat.subtext0)
                     }
                     ForEach(workspace.panes) { pane in
-                        PaneRow(pane: pane)
+                        Group {
+                            if pane.kind == .terminal, pane.availability == "attached",
+                               let paneID = UUID(uuidString: pane.id),
+                               let version = pane.targetVersion.flatMap(UUID.init(uuidString:)) {
+                                NavigationLink {
+                                    WatchView(store: store, paneID: paneID, targetVersion: version, title: pane.title, terminalLock: terminalLock)
+                                } label: { PaneRow(pane: pane) }
+                            } else {
+                                PaneRow(pane: pane)
+                            }
+                        }
                             .id(pane.id)
                             .listRowBackground(store.focusedPaneID == pane.id ? Cat.needs.opacity(0.18) : Cat.card)
                     }

@@ -24,7 +24,7 @@ cat > "$WORK/export.plist" <<PLIST
 PLIST
 
 cd "$IOS_DIR"
-xcodegen generate --quiet
+zsh script/generate-watch.sh
 echo "Archiving build $BUILD_NUMBER (logs in $WORK)"
 xcodebuild -project AwesoMuxCompanion.xcodeproj -scheme AwesoMuxCompanion -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$WORK/app.xcarchive" -allowProvisioningUpdates \

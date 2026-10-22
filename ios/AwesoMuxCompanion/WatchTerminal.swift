@@ -31,14 +31,26 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     private let discardedWrites = WatchDiscardedWrites()
     private static let maximumQueuedBytes = CompanionTerminalStream.maximumSnapshotBytes
     private static let maximumOperations = 256
+    // Native logging is independent of TerminalDebugLog. The pinned engine
+    // reads this setting once in ghostty_init, before any controller exists.
+    private static let nativeLoggingDisabled = setenv("GHOSTTY_LOG", "no-stderr,no-macos", 1) == 0
+
+    init() {
+        _ = Self.nativeLoggingDisabled
+        TerminalDebugLog.disable()
+    }
 
     var isIdle: Bool { isReady && operations.isEmpty && drainToken == nil && probe == nil }
     var discardedWriteByteCount: Int { discardedWrites.count }
     var grid: CompanionTerminalStream.Grid? { target }
+    var reportedGrid: CompanionTerminalStream.Grid? {
+        surface?.viewport.map { .init(rows: Int($0.rows), cols: Int($0.columns)) }
+    }
 
     func reset(grid: CompanionTerminalStream.Grid, scrollbackBound: Int) throws {
         clear()
         try requireAuthority()
+        guard Self.nativeLoggingDisabled else { throw WatchTerminalFailure.unsafeConfiguration }
         guard drainToken == nil else { throw WatchTerminalFailure.nativeBusy }
         try validate(grid)
         guard scrollbackBound >= 0 else { throw WatchTerminalFailure.invalidRetention }
@@ -291,7 +303,7 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
         let configuration = TerminalConfiguration()
             .fontSize(13).windowPaddingX(0).windowPaddingY(0)
             .custom("clipboard-read", "deny").custom("clipboard-write", "deny")
-            .custom("copy-on-select", "false")
+            .custom("copy-on-select", "none")
             .custom("desktop-notifications", "false")
             .custom("bell-features", "no-system,no-audio,no-attention,no-title,no-border")
             .custom("link-url", "false").custom("link-previews", "false")
@@ -353,6 +365,18 @@ fileprivate final class WatchReadOnlyTerminalView: UITerminalView {
         guard authority() else { return }
         super.copy(sender)
     }
+    override func copySelectedTextToPasteboard() -> Bool {
+        guard authority() else { return false }
+        return super.copySelectedTextToPasteboard()
+    }
+    override func selectionMenuPoint(at point: CGPoint) -> CGPoint? {
+        guard authority() else { return nil }
+        return super.selectionMenuPoint(at: point)
+    }
+    override func selectionContextMenuElements() -> [UIMenuElement] {
+        guard authority() else { return [] }
+        return super.selectionContextMenuElements()
+    }
     override func select(_ sender: Any?) {
         guard authority() else { return }
         super.select(sender)
@@ -374,6 +398,10 @@ fileprivate final class WatchReadOnlyTerminalView: UITerminalView {
     override func layoutSubviews() {
         guard authority() else { return }
         super.layoutSubviews()
+    }
+    override func didMoveToWindow() {
+        guard window == nil || authority() else { return }
+        super.didMoveToWindow()
     }
     override func touchMenuItems(for context: TerminalTouchMenuContext) -> [UIMenuElement] {
         guard authority() else { return [] }

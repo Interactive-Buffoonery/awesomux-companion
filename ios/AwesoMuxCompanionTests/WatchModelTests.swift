@@ -141,12 +141,12 @@ final class WatchModelTests: XCTestCase {
     func testRendererSyncAndDelayedFailuresCancelClearAndSurfaceSafeError() async {
         for delayed in [false, true] {
             let f = WatchModelFixture()
-            let waiting = expectation(description: "renderer live")
-            let connection = f.connection(waiting: delayed ? waiting : nil)
+            let waiting = delayed ? expectation(description: "renderer live") : nil
+            let connection = f.connection(waiting: waiting)
             f.open = { _ in connection }
             f.renderer.failOnFeed = !delayed
             let task = f.start()
-            if delayed {
+            if let waiting {
                 await fulfillment(of: [waiting], timeout: 2)
                 f.model.rendererFailed(WatchFailure.invalidDimensions)
             }

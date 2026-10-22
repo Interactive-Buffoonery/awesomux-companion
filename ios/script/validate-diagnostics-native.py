@@ -9,10 +9,11 @@ import sys
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--allow-missing-lock', action='store_true')
+parser.add_argument('--project', default='AwesoMuxDiagnostics')
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 subprocess.run([
-    sys.executable, str(root / 'script/diagnostics-lock.py'),
+    sys.executable, str(root / 'script/diagnostics-lock.py'), '--project', args.project,
     *(['--allow-missing'] if args.allow_missing_lock else []),
 ], check=True)
 output = root / 'build/diagnostics-native'

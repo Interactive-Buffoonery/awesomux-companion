@@ -37,6 +37,24 @@ class DiagnosticsLockTests(unittest.TestCase):
         self.assertEqual(resolved.read_bytes(), tracked.read_bytes())
         subprocess.run([sys.executable, str(script)], check=True)
 
+    def test_shipping_project_uses_same_pinned_lock(self):
+        root = Path(self.temporary.name)
+        script = root / 'ios/script/diagnostics-lock.py'
+        script.parent.mkdir(parents=True)
+        script.write_bytes(SCRIPT.read_bytes())
+        tracked = root / 'spikes/ios-terminal-renderer/Package.resolved'
+        tracked.parent.mkdir(parents=True)
+        tracked.write_bytes(self.tracked.read_bytes())
+        subprocess.run([sys.executable, str(script), '--project', 'AwesoMuxCompanion', '--seed'], check=True)
+        resolved = root / 'ios/AwesoMuxCompanion.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved'
+        self.assertEqual(resolved.read_bytes(), tracked.read_bytes())
+        data = json.loads(resolved.read_text())
+        data['pins'][0]['state']['revision'] = '0' * 40
+        resolved.write_text(json.dumps(data))
+        result = subprocess.run([sys.executable, str(script), '--project', 'AwesoMuxCompanion'], capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'pins differ', result.stderr)
+
     def test_tracked_displaylink_identity(self):
         self.assertEqual(self.data['pins'][0]['identity'], 'displaylink')
         self.assertEqual(self.data['pins'][0]['state'], {

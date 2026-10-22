@@ -13,14 +13,27 @@ settings:
     DEVELOPMENT_TEAM: 7CNK4YPCQX
     CODE_SIGN_STYLE: Automatic
 packages:
+  libghostty-spm:
+    path: ${GHOSTTY_LOCAL_PACKAGE}
   AwesoMuxCompanionProtocol:
     path: ..
 targets:
   AwesoMuxCompanion:
     type: application
     platform: iOS
-    sources: [AwesoMuxCompanion, Shared]
+    sources:
+      - AwesoMuxCompanion
+      - Shared
+      - path: ../spikes/ios-terminal-renderer/IOSRendererSpike/ThirdPartyNotices
+        type: folder
+        buildPhase: resources
+    preBuildScripts:
+      - name: Verify public renderer
+        script: python3 "$SRCROOT/script/watch-manifest.py" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+        basedOnDependencyAnalysis: false
     dependencies:
+      - package: libghostty-spm
+        product: GhosttyTerminal
       - target: AwesoMuxCompanionWidgets
       - package: AwesoMuxCompanionProtocol
     entitlements:
@@ -44,6 +57,8 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
       base:
+        ARCHS: arm64
+        DIAGNOSTICS_NATIVE_PACKAGE: ${GHOSTTY_LOCAL_PACKAGE}
         PRODUCT_BUNDLE_IDENTIFIER: com.interactivebuffoonery.awesomux.companion
         INFOPLIST_KEY_NSFaceIDUsageDescription: awesoMux uses Face ID to unlock your agents and terminals and authenticate Claude permission answers.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -67,7 +82,14 @@ targets:
   AwesoMuxCompanionTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [AwesoMuxCompanionTests]
+    sources:
+      - AwesoMuxCompanionTests
+      - path: ../spikes/snapshot-reconnect/input.bin
+        buildPhase: resources
+      - path: ../spikes/snapshot-reconnect/away.bin
+        buildPhase: resources
+      - path: ../spikes/snapshot-reconnect/reattach.bin
+        buildPhase: resources
     dependencies:
       - target: AwesoMuxCompanion
     settings:

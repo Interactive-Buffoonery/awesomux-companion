@@ -4,8 +4,9 @@ Generate the separate `AwesoMuxDiagnostics.xcodeproj` with
 `ios/script/generate-diagnostics.sh`. Only its `AwesoMuxDiagnostics` target links
 the local source-built GhosttyTerminal wrapper at package revision
 `42bacd1339f323a693ddbca779295f4f77e5a697`, using the spike's public CAMetalLayer
-pipeline. `ios/project.yml`, the shipping companion/widgets/tests, and the
-TestFlight generation path contain no renderer package or dependency.
+pipeline. Production Watch now uses that same pinned public renderer through
+`ios/script/generate-watch.sh`. The widget has no renderer dependency. Both app
+projects validate the original native receipt and the tracked dependency pins.
 The diagnostic bundle identifier is `com.interactivebuffoonery.awesomux.diagnostics`.
 
 The app root opens Watch diagnostics without pairing. Companion sources are
@@ -68,7 +69,7 @@ set and hashes (including headers and Info.plist), exact source hashes, compiler
 identity, build recipe, driver, ordered patches and target configuration. The manifest hashes this receipt,
 Swift sources, fixtures, Info.plists, both project specs, integration/generation/
 validation scripts, native build scripts/patch, notices and local Package.resolved.
-`ThirdPartyNotices` is bundled only in the diagnostic app. Exported JSON identifies
+`ThirdPartyNotices` is bundled in both terminal app targets. Exported JSON identifies
 the public renderer and includes both manifest and native receipt SHA256 values.
 The generated source-manifest copy is ignored and informational; pre-build output
 is authoritative. The prior tracked private-renderer manifest is preserved as

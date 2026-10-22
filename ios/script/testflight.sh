@@ -61,7 +61,7 @@ if [[ -n "${HEAVY_GATE_SIGNING_KEYCHAIN:-}" ]]; then
   }
   # These preferences belong to the disposable job HOME, not the user's login.
   mkdir -p "$HOME/Library/Preferences"
-  security list-keychains -d user -s "$HEAVY_GATE_SIGNING_KEYCHAIN"
+  security list-keychains -d user -s "$HEAVY_GATE_SIGNING_KEYCHAIN" /Library/Keychains/System.keychain /System/Library/Keychains/SystemRootCertificates.keychain
   security default-keychain -d user -s "$HEAVY_GATE_SIGNING_KEYCHAIN"
   python3 - "$HEAVY_GATE_SIGNING_KEYCHAIN" "$HEAVY_GATE_SIGNING_PASSWORD_FILE" <<'PY'
 from pathlib import Path

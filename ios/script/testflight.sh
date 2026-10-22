@@ -79,9 +79,25 @@ if [[ "$CHECK_SIGNING" == true ]]; then
     echo "Signing probe requires runner credentials" >&2; exit 1;
   }
   cp /usr/bin/true "$WORK/signing-probe"
-  codesign --force --sign 'Apple Development' --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
-    --timestamp=none "$WORK/signing-probe"
-  codesign --verify --strict "$WORK/signing-probe"
+  python3 - "$WORK/signing-probe" <<'PROBE'
+import os, pwd, shlex, subprocess, sys
+env = dict(os.environ, HOME=pwd.getpwuid(os.getuid()).pw_dir)
+keychain = os.environ['HEAVY_GATE_SIGNING_KEYCHAIN']
+def security(*args):
+    return subprocess.check_output(['security', *args], env=env, text=True)
+existing = shlex.split(security('list-keychains', '-d', 'user'))
+added = keychain not in existing
+try:
+    if added:
+        security('list-keychains', '-d', 'user', '-s', *existing, keychain)
+    subprocess.run(['codesign', '--force', '--sign', 'Apple Development', '--keychain', keychain,
+                    '--timestamp=none', sys.argv[1]], env=env, check=True)
+    subprocess.run(['codesign', '--verify', '--strict', sys.argv[1]], env=env, check=True)
+finally:
+    if added:
+        current = shlex.split(security('list-keychains', '-d', 'user'))
+        security('list-keychains', '-d', 'user', '-s', *[p for p in current if p != keychain])
+PROBE
   echo "Runner signing probe passed"
   exit 0
 fi

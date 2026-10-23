@@ -52,6 +52,41 @@ final class WatchTerminalTests: XCTestCase {
         }
     }
 
+    func testFontSizeKeepsSmallGridsAtThirteenAndFitsLargeGridsInBudget() throws {
+        XCTAssertEqual(WatchDrawableBudget.fontSize(for: .init(rows: 24, cols: 80)), 13)
+        for (rows, cols) in [(70, 240), (100, 400), (250, 1000), (1000, 250), (1000, 1)] {
+            let fontSize = WatchDrawableBudget.fontSize(for: .init(rows: rows, cols: cols))
+            XCTAssertLessThan(fontSize, 13)
+            let cell = WatchDrawableBudget.cellSize(fontSize: fontSize)
+            // Allow the estimate to run 20% small and still fit.
+            XCTAssertNoThrow(try WatchDrawableBudget.validate(
+                size: CGSize(width: CGFloat(cols) * cell.width * 1.2, height: CGFloat(rows) * cell.height * 1.2),
+                displayScale: 3), "\(cols)x\(rows)")
+        }
+    }
+
+    func testWideMacGridRendersAndGrowingPastItsFontRequestsSnapshot() async throws {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        defer { host.close(); terminal.clear() }
+        let widest = CompanionTerminalStream.Grid(rows: 100, cols: 400)
+        try terminal.reset(grid: widest, scrollbackBound: 4096)
+        try await idle([terminal])
+        XCTAssertEqual(terminal.reportedGrid, widest)
+        let wide = CompanionTerminalStream.Grid(rows: 70, cols: 240)
+        try terminal.reset(grid: wide, scrollbackBound: 4096)
+        try await idle([terminal])
+        XCTAssertEqual(terminal.reportedGrid, wide)
+        try terminal.feed(Data("WIDE".utf8))
+        try await idle([terminal])
+        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("WIDE"))
+
+        var failure: Error?
+        terminal.onFailure = { failure = $0 }
+        try terminal.resize(.init(rows: 140, cols: 480))
+        XCTAssertEqual(failure as? WatchTerminalFailure, .gridOutgrewFont)
+    }
+
     func testProductionRendererReplaysCapturedReattachAndContinuation() async throws {
         let live = WatchTerminal(), restored = WatchTerminal()
         let host = try mount([live, restored])

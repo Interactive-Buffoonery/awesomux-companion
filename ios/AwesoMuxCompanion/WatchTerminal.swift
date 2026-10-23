@@ -56,8 +56,11 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         guard scrollbackBound >= 0 else { throw WatchTerminalFailure.invalidRetention }
         self.scrollbackBound = min(scrollbackBound, Self.maximumQueuedBytes)
         target = grid
-        let surface = try makeSurface(size: CGSize(width: CGFloat(grid.cols) * 8,
-                                                  height: CGFloat(grid.rows) * 16))
+        let fontSize = WatchDrawableBudget.fontSize(for: grid)
+        let cell = WatchDrawableBudget.cellSize(fontSize: fontSize)
+        let surface = try makeSurface(size: CGSize(width: CGFloat(grid.cols) * cell.width,
+                                                  height: CGFloat(grid.rows) * cell.height),
+                                      fontSize: fontSize)
         self.surface = surface
         beginSizing()
     }
@@ -126,14 +129,14 @@ final class WatchTerminal: ObservableObject, WatchRendering {
               grid.cols * grid.rows <= 250_000 else { throw WatchTerminalFailure.invalidGrid }
     }
 
-    private func makeSurface(size: CGSize, displayScale: CGFloat = 3) throws -> WatchNativeSurface {
+    private func makeSurface(size: CGSize, fontSize: Float, displayScale: CGFloat = 3) throws -> WatchNativeSurface {
         let screenScale = UIApplication.shared.connectedScenes.compactMap {
             ($0 as? UIWindowScene)?.screen.scale
         }.max() ?? 3
         try WatchDrawableBudget.validate(size: size, displayScale: max(screenScale, displayScale))
         TerminalDebugLog.disable()
         let identity = epoch
-        return try WatchNativeSurface(size: size, scrollbackBound: scrollbackBound,
+        return try WatchNativeSurface(size: size, fontSize: fontSize, scrollbackBound: scrollbackBound,
                                       discardedWrites: discardedWrites,
                                       authority: { [weak self] in self?.checkAuthority() ?? false },
                                       resized: { [weak self] id, value in
@@ -191,8 +194,12 @@ final class WatchTerminal: ObservableObject, WatchRendering {
             _ = invalidate(.unexpectedGrid)
             return
         }
-        sizingAttempts += 1
         let scale = sizingSurface.view.traitCollection.displayScale
+        // The engine first reports its default pre-layout size; extrapolating
+        // from that overshoots wide grids. Wait for the laid-out report.
+        guard abs(CGFloat(value.widthPixels) - sizingSurface.size.width * scale) <= scale,
+              abs(CGFloat(value.heightPixels) - sizingSurface.size.height * scale) <= scale else { return }
+        sizingAttempts += 1
         let next: CGSize
         if value.cellWidthPixels > 0, value.cellHeightPixels > 0, scale > 0 {
             let paddingX = max(0, Int(value.widthPixels) - Int(value.columns) * Int(value.cellWidthPixels))
@@ -242,10 +249,19 @@ final class WatchTerminal: ObservableObject, WatchRendering {
             }
         case .grid(let grid):
             guard grid != target else { pump(); return }
+            // A live surface cannot change font, so a grid that needs a smaller
+            // one reconnects for a fresh snapshot sized for it.
+            guard WatchDrawableBudget.fontSize(for: grid) >= surface.fontSize else {
+                _ = invalidate(.gridOutgrewFont)
+                return
+            }
             target = grid
             beginSizing()
             do {
-                probe = try makeSurface(size: surface.size,
+                let cell = WatchDrawableBudget.cellSize(fontSize: surface.fontSize)
+                probe = try makeSurface(size: CGSize(width: CGFloat(grid.cols) * cell.width,
+                                                     height: CGFloat(grid.rows) * cell.height),
+                                        fontSize: surface.fontSize,
                                         displayScale: surface.view.traitCollection.displayScale)
             } catch let failure as WatchTerminalFailure {
                 _ = invalidate(failure)
@@ -276,7 +292,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
 
 enum WatchTerminalFailure: Error, LocalizedError, Equatable {
     case accessDenied, notAttached, invalidGrid, invalidRetention, overflow, drawableTooLarge
-    case readinessTimeout, drainTimeout, unexpectedGrid, unsafeConfiguration, nativeBusy
+    case readinessTimeout, drainTimeout, unexpectedGrid, unsafeConfiguration, nativeBusy, gridOutgrewFont
 
     var errorDescription: String? {
         switch self {
@@ -291,11 +307,32 @@ enum WatchTerminalFailure: Error, LocalizedError, Equatable {
         case .unexpectedGrid: "The Watch renderer could not preserve the Mac terminal grid."
         case .unsafeConfiguration: "The Watch renderer could not disable terminal host effects."
         case .nativeBusy: "The previous Watch renderer is still stopping."
+        case .gridOutgrewFont: "The Mac terminal grew past the Watch renderer's font size."
         }
     }
 }
 
 enum WatchDrawableBudget {
+    static let maximumFontSize: Float = 13
+
+    /// Measured on iOS 26 at 3x: a 13pt cell is about 10.6x23.1pt and scales
+    /// linearly with the font size.
+    static func cellSize(fontSize: Float) -> CGSize {
+        let ratio = CGFloat(fontSize / maximumFontSize)
+        return CGSize(width: 10.6 * ratio, height: 23.1 * ratio)
+    }
+
+    /// Largest font, up to 13pt, whose estimated drawable fits the budget, so
+    /// wide Mac grids render small instead of failing. 20% headroom per side
+    /// covers padding and measurement error.
+    static func fontSize(for grid: CompanionTerminalStream.Grid) -> Float {
+        let side: CGFloat = 8192 / 3 * 0.8
+        let cell = cellSize(fontSize: maximumFontSize)
+        let width = CGFloat(grid.cols) * cell.width, height = CGFloat(grid.rows) * cell.height
+        let fit = min(1, side / width, side / height, (8_388_608 * 0.64 / 9 / (width * height)).squareRoot())
+        return max(1, (maximumFontSize * Float(fit) * 2).rounded(.down) / 2)
+    }
+
     static func validate(size: CGSize, displayScale: CGFloat) throws {
         guard size.width.isFinite, size.height.isFinite,
               size.width > 0, size.height > 0,
@@ -316,17 +353,19 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
     let controller: TerminalController
     let session: InMemoryTerminalSession
     let view: WatchReadOnlyTerminalView
+    let fontSize: Float
     @Published private(set) var size: CGSize
     var viewport: InMemoryTerminalViewport?
 
-    init(size: CGSize, scrollbackBound: Int, discardedWrites: WatchDiscardedWrites,
+    init(size: CGSize, fontSize: Float, scrollbackBound: Int, discardedWrites: WatchDiscardedWrites,
          authority: @escaping () -> Bool,
          resized: @escaping @MainActor (UUID, InMemoryTerminalViewport) -> Void) throws {
         let identity = UUID()
         id = identity
         self.size = size
+        self.fontSize = fontSize
         let configuration = TerminalConfiguration()
-            .fontSize(13).windowPaddingX(0).windowPaddingY(0)
+            .fontSize(fontSize).windowPaddingX(0).windowPaddingY(0)
             .custom("clipboard-read", "deny").custom("clipboard-write", "deny")
             .custom("copy-on-select", "none")
             .custom("desktop-notifications", "false")
@@ -342,7 +381,7 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
         view = WatchReadOnlyTerminalView(frame: CGRect(origin: .zero, size: size))
         view.authority = authority
         view.delegate = self
-        view.configuration = TerminalSurfaceOptions(backend: .inMemory(session), fontSize: 13)
+        view.configuration = TerminalSurfaceOptions(backend: .inMemory(session), fontSize: fontSize)
         view.controller = controller
         view.accessibilityLabel = "Read-only Mac terminal"
         view.accessibilityHint = "Select text to copy. Use two fingers or the history controls to scroll."

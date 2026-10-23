@@ -119,7 +119,6 @@ def prepare_export():
         profile_uuid = profile['UUID']
         if not isinstance(profile_uuid, str) or str(uuid.UUID(profile_uuid)).upper() != profile_uuid.upper():
             raise ValueError()
-        profile_uuid = profile_uuid.upper()
         entitlements = profile['Entitlements']
         if profile['TeamIdentifier'] != [team] or entitlements['application-identifier'] != f'{team}.{bundle}':
             raise ValueError()
@@ -137,7 +136,7 @@ def prepare_export():
             raise ValueError()
         if certificate not in {hashlib.sha1(item).hexdigest().upper() for item in certificates}:
             raise ValueError()
-        if profile_uuid in {item[0] for item in validated.values()}:
+        if profile_uuid.casefold() in {item[0].casefold() for item in validated.values()}:
             raise ValueError()
         validated[bundle] = (profile_uuid, contents)
 

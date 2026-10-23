@@ -175,7 +175,7 @@ struct WatchStream {
         case .leader(let leader): return .leader(leader.leader)
         case .heartbeat: return .heartbeat
         case .end(let end): throw WatchFailure.ended(end.reason)
-        case .phoneSent, .snapshotBegin: throw WatchFailure.invalidStream
+        case .input, .claim, .ack, .phoneSent, .snapshotBegin: throw WatchFailure.invalidStream
         }
     }
 

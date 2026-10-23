@@ -19,6 +19,8 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         case grid(CompanionTerminalStream.Grid)
     }
 
+    private var boundary = WatchTerminalBoundary()
+    private var modeProbe: UUID?
     private var operations: [Operation] = []
     private var queuedBytes = 0
     private var epoch = UUID()
@@ -75,6 +77,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
             throw invalidate(.overflow)
         }
         guard !bytes.isEmpty else { return }
+        boundary.receive(bytes)
         operations.append(.bytes(bytes))
         queuedBytes += bytes.count
         pump()
@@ -94,6 +97,8 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         epoch = UUID()
         deadline?.cancel()
         deadline = nil
+        boundary = WatchTerminalBoundary()
+        modeProbe = nil
         operations.removeAll(keepingCapacity: false)
         queuedBytes = 0
         target = nil
@@ -118,17 +123,25 @@ final class WatchTerminal: ObservableObject, WatchRendering {
                      cols: max(1, min(1000, Int(size.width / max(1, cell.width)))))
     }
 
-    // DECRQM reads the actual emulator modes through the public byte path.
-    // All responses stay local; no renderer write is ever network input.
+    // Probe only between complete parser sequences, after native output drains.
+    // Request counts fence late reports from the Mac's own earlier DECRQM queries.
     func inputModes() async -> WatchInputModes? {
         guard checkAuthority(), let surface else { return nil }
         let identity = epoch
-        let versions = surface.modeReports.versions
-        do { try feed(Data("\u{1b}[?2004$p\u{1b}[?1$p".utf8)) } catch { return nil }
+        let probe = UUID()
         let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !isIdle || !boundary.canProbe || modeProbe != nil {
+            guard epoch == identity, checkAuthority(), !Task.isCancelled, ContinuousClock.now < deadline else { return nil }
+            do { try await Task.sleep(for: .milliseconds(10)) } catch { return nil }
+        }
+        guard epoch == identity, checkAuthority(), !Task.isCancelled else { return nil }
+        modeProbe = probe
+        defer { if modeProbe == probe { modeProbe = nil } }
+        do { try feed(Data("\u{1b}[?2004$p\u{1b}[?1$p".utf8)) } catch { return nil }
+        let expected = (boundary.pasteRequests, boundary.cursorRequests)
         while ContinuousClock.now < deadline {
             guard epoch == identity, checkAuthority(), !Task.isCancelled else { return nil }
-            if let modes = surface.modeReports.read(after: versions) { return modes }
+            if let modes = surface.modeReports.read(expected: expected) { return modes }
             do { try await Task.sleep(for: .milliseconds(10)) } catch { return nil }
         }
         return nil
@@ -608,14 +621,9 @@ fileprivate final class WatchModeReports: @unchecked Sendable {
     private var paste = (version: UInt64(0), enabled: false)
     private var cursor = (version: UInt64(0), enabled: false)
 
-    var versions: (UInt64, UInt64) {
+    func read(expected: (UInt64, UInt64)) -> WatchInputModes? {
         lock.lock(); defer { lock.unlock() }
-        return (paste.version, cursor.version)
-    }
-
-    func read(after versions: (UInt64, UInt64)) -> WatchInputModes? {
-        lock.lock(); defer { lock.unlock() }
-        guard paste.version > versions.0, cursor.version > versions.1 else { return nil }
+        guard paste.version >= expected.0, cursor.version >= expected.1 else { return nil }
         return WatchInputModes(bracketedPaste: paste.enabled, applicationCursor: cursor.enabled)
     }
 

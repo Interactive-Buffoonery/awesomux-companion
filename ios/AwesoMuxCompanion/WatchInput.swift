@@ -98,11 +98,13 @@ final class WatchInput {
     @ObservationIgnored private var pasteSequence: UInt64?
     @ObservationIgnored private var highestTyped: UInt64?
     @ObservationIgnored private var highestAck: UInt64?
+    @ObservationIgnored private var lastSentGrid: Stream.Grid?
     @ObservationIgnored private var maximum = Stream.maximumInputBytes
     @ObservationIgnored private let now: () -> TimeInterval
 
     init(now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) { self.now = now }
 
+    var sessionID: UUID { token }
     var canType: Bool { isInteractive && isLive && generation != nil && authority() }
     var pasteInFlight: Bool { pasteDelivery == .sending }
     var drivingText: String {
@@ -134,6 +136,7 @@ final class WatchInput {
         highestAck = nil
         highestTyped = nil
         pasteSequence = nil
+        lastSentGrid = nil
     }
 
     func ready() { isLive = true }
@@ -148,7 +151,8 @@ final class WatchInput {
     func type(_ bytes: Data) { enqueue(bytes, paste: false) }
 
     func paste(_ text: String, modes: WatchInputModes) {
-        guard canType, !pasteInFlight, confirmation == nil else { return }
+        guard canType else { return }
+        guard !pasteInFlight, confirmation == nil else { refuseQueuedInput(paste: true); return }
         pasteError = nil
         guard !text.isEmpty else { return }
         // Bound allocation before encoding; stripping and CR conversion never shrink UTF-8.
@@ -174,17 +178,35 @@ final class WatchInput {
 
     func cancelPaste() { confirmation = nil }
     func dismissTypedNotice() { typedNotice = nil }
+    func refuseModeRead(paste: Bool) {
+        if paste {
+            guard !pasteInFlight, confirmation == nil else { refuseQueuedInput(paste: true); return }
+            pasteSequence = nil
+            pasteDelivery = .notSent
+            pasteError = "The terminal is still receiving a control sequence. Try pasting again when output settles."
+        } else {
+            typedNotice = "Key not sent. Try again when terminal output settles."
+        }
+    }
+    func refuseQueuedInput(paste: Bool) {
+        if paste { pasteError = "A paste is already waiting. Try again after it settles." }
+        else { typedNotice = "Key not sent. Input is busy; try again after it settles." }
+    }
 
     func acknowledge(_ sequence: UInt64, generation: UInt32) {
         guard self.generation == generation, sequence < nextSequence else { return }
         highestAck = max(highestAck ?? sequence, sequence)
         outstanding = outstanding.filter { $0.key > sequence }
         if let pasteSequence, pasteSequence <= sequence { pasteDelivery = .sent }
+        if let highestTyped, highestTyped <= sequence { typedNotice = nil }
     }
 
     func checkDeadlines() {
         let expired = outstanding.filter { now() - $0.value >= 2 }
         if let pasteSequence, expired[pasteSequence] != nil { pasteDelivery = .mayHaveRun }
+        if expired.keys.contains(where: { $0 != pasteSequence }) {
+            typedNotice = "Typed input may have run. Check the terminal before typing it again."
+        }
         for sequence in expired.keys { outstanding.removeValue(forKey: sequence) }
     }
 
@@ -204,7 +226,6 @@ final class WatchInput {
             pasteDelivery = pasteSequence.map { outstanding[$0] != nil ? .mayHaveRun : .notSent } ?? .notSent
         }
         token = UUID()
-        worker?.cancel()
         worker = nil
         timer?.cancel()
         timer = nil
@@ -224,6 +245,7 @@ final class WatchInput {
         guard canType, !bytes.isEmpty, bytes.count <= maximum, jobs.count < 64,
               outstanding.count < 512, nextSequence < UInt64.max else {
             if paste { pasteSequence = nil; pasteDelivery = .notSent }
+            else if canType { refuseQueuedInput(paste: false) }
             return
         }
         guard !paste || !pasteInFlight else { return }
@@ -243,12 +265,13 @@ final class WatchInput {
                 while self.token == identity, !self.jobs.isEmpty {
                     let job = self.jobs.removeFirst()
                     guard self.canType else { self.disconnect(); return }
-                    if job.sequence != nil {
-                        // Grid precedes every input, so the first follower keystroke
-                        // claims with the newest phone dimensions even after handback.
-                        try await connection.send(.grid(self.preferredGrid), generation: generation) { [weak self] in
+                    if job.sequence != nil, self.lastSentGrid != self.preferredGrid {
+                        let grid = self.preferredGrid
+                        try await connection.send(.grid(grid), generation: generation) { [weak self] in
                             self?.maySend(identity) ?? false
                         }
+                        guard self.token == identity else { return }
+                        self.lastSentGrid = grid
                     }
                     try await connection.send(job.frame, generation: generation) { [weak self] in
                         guard let self, self.maySend(identity) else { return false }
@@ -259,6 +282,8 @@ final class WatchInput {
                         }
                         return true
                     }
+                    guard self.token == identity else { return }
+                    if case .claim(let claim) = job.frame { self.lastSentGrid = claim.grid }
                 }
                 guard self.token == identity else { return }
                 self.worker = nil

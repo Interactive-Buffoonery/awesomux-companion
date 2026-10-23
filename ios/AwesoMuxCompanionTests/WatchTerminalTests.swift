@@ -227,6 +227,31 @@ final class WatchTerminalTests: XCTestCase {
         XCTAssertTrue((10...40).contains(phone.rows))
     }
 
+    func testModeProbesWaitForSplitControlStringsAndUTF8WithoutChangingOutput() async throws {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        defer { host.close(); terminal.clear() }
+        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
+        try await idle([terminal])
+        for (prefix, suffix) in [(Data("\u{1b}[?2004".utf8), Data("h".utf8)),
+                                 (Data("\u{1b}]2;title".utf8), Data("\u{1b}\\".utf8)),
+                                 (Data([0xe7, 0x95]), Data([0x8c]))] {
+            try terminal.feed(prefix)
+            let read = Task { await terminal.inputModes() }
+            await Task.yield()
+            try terminal.feed(suffix)
+            let modes = await read.value
+            XCTAssertEqual(modes?.bracketedPaste, true)
+        }
+        try await idle([terminal])
+        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("界"))
+        XCTAssertFalse(try XCTUnwrap(terminal.readViewportText()).contains("�"))
+        // Earlier Mac queries must not satisfy the local probe with stale modes.
+        try terminal.feed(Data("\u{1b}[?2004$p\u{1b}[?2004l".utf8))
+        let latest = await terminal.inputModes()
+        XCTAssertEqual(latest?.bracketedPaste, false)
+    }
+
     func testAuthorityIsRecheckedByPendingDrainAndCopy() async throws {
         let terminal = WatchTerminal()
         var allowed = true

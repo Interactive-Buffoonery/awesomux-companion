@@ -9,7 +9,7 @@ struct WatchKeyboard: UIViewRepresentable {
     func makeUIView(context: Context) -> WatchKeyboardResponder {
         let view = WatchKeyboardResponder()
         view.input = input
-        view.terminal = terminal
+        view.readModes = { [weak terminal] in await terminal?.inputModes() }
         view.onHide = { isShown = false }
         return view
     }
@@ -29,11 +29,13 @@ struct WatchKeyboard: UIViewRepresentable {
 @MainActor
 final class WatchKeyboardResponder: UIView, UIKeyInput {
     weak var input: WatchInput?
-    weak var terminal: WatchTerminal?
+    var readModes: @MainActor () async -> WatchInputModes? = { nil }
     var onHide: () -> Void = {}
     private(set) var modifiers = WatchKeyModifiers()
     private var actions: [Action] = []
     private var worker: Task<Void, Never>?
+    private var epoch = UUID()
+    private var workerSessionID: UUID?
     private var lastControlTap = -Double.infinity
     private var lastAltTap = -Double.infinity
     private weak var controlButton: UIButton?
@@ -58,7 +60,7 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
     var keyboardType = UIKeyboardType.asciiCapable
 
     func insertText(_ text: String) {
-        if text.count > 1 { append(.paste(text)) }
+        if text == "\r\n" || text.count > 1 { append(.paste(text)) }
         else { append(.key(text == "\n" ? "\r" : text, control: false, alt: false)) }
     }
 
@@ -110,6 +112,7 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
 
     func stopInput() {
         resignFirstResponder()
+        epoch = UUID()
         worker?.cancel()
         worker = nil
         actions.removeAll()
@@ -118,7 +121,18 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
     }
 
     private func append(_ action: Action) {
-        guard input?.canType == true, actions.count < 64 else { return }
+        guard input?.canType == true else { return }
+        if worker != nil, workerSessionID != input?.sessionID {
+            epoch = UUID()
+            worker?.cancel()
+            worker = nil
+            actions.removeAll()
+        }
+        guard actions.count < 64 else {
+            if case .paste = action { input?.refuseQueuedInput(paste: true) }
+            else { input?.refuseQueuedInput(paste: false) }
+            return
+        }
         switch action {
         case .key(let text, let control, let alt):
             actions.append(.bytes(modifiers.encode(text, control: control, alt: alt)))
@@ -132,11 +146,14 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
         }
         updateButtons()
         guard worker == nil, let generation = input?.generation else { return }
+        let identity = epoch
+        let sessionID = input?.sessionID
+        workerSessionID = sessionID
         worker = Task { [weak self] in
             guard let self else { return }
-            while !self.actions.isEmpty, !Task.isCancelled {
+            while self.epoch == identity, !self.actions.isEmpty, !Task.isCancelled {
                 let action = self.actions.removeFirst()
-                guard let input = self.input, input.generation == generation, input.canType else {
+                guard let input = self.input, input.sessionID == sessionID, input.generation == generation, input.canType else {
                     self.actions.removeAll()
                     self.worker = nil
                     return
@@ -144,22 +161,28 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
                 switch action {
                 case .bytes(let bytes): input.type(bytes)
                 case .arrow(let final, let control, let alt):
-                    guard let modes = await self.terminal?.inputModes(), !Task.isCancelled,
-                          input.generation == generation, input.canType else { continue }
                     if control || alt {
                         input.type(Data("\u{1b}[1;\(1 + (control ? 4 : 0) + (alt ? 2 : 0))\(final)".utf8))
                     } else {
+                        guard let modes = await self.readModes(), !Task.isCancelled,
+                              input.sessionID == sessionID, input.canType else {
+                            if !Task.isCancelled, input.sessionID == sessionID { input.refuseModeRead(paste: false) }
+                            continue
+                        }
                         input.type(Data(WatchKeyModifiers.arrow(final, application: modes.applicationCursor).utf8))
                     }
                 case .paste(let text):
-                    guard let modes = await self.terminal?.inputModes(), !Task.isCancelled,
-                          input.generation == generation, input.canType else { continue }
+                    guard let modes = await self.readModes(), !Task.isCancelled,
+                          input.sessionID == sessionID, input.canType else {
+                        if !Task.isCancelled, input.sessionID == sessionID { input.refuseModeRead(paste: true) }
+                        continue
+                    }
                     input.paste(text, modes: modes)
                 case .key: break
                 }
                 self.updateButtons()
             }
-            self.worker = nil
+            if self.epoch == identity { self.worker = nil }
         }
     }
 
@@ -204,7 +227,26 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
         }
         let hide = button("", label: "Hide keyboard") { [weak self] in self?.stopInput(); self?.onHide() }
         hide.setImage(UIImage(systemName: "keyboard.chevron.compact.down"), for: .normal)
+        configureModifierActions(controlButton, control: true)
+        configureModifierActions(altButton, control: false)
         return stack
+    }
+
+    private func configureModifierActions(_ button: UIButton?, control: Bool) {
+        let name = control ? "Control" : "Option"
+        let set: (WatchKeyModifiers.State) -> Void = { [weak self] state in
+            guard let self else { return }
+            if control { self.modifiers.control = state } else { self.modifiers.alt = state }
+            self.updateButtons()
+        }
+        button?.accessibilityCustomActions = [
+            UIAccessibilityCustomAction(name: "Lock \(name)") { _ in set(.locked); return true },
+            UIAccessibilityCustomAction(name: "Unlock \(name)") { _ in set(.off); return true }
+        ]
+        button?.menu = UIMenu(children: [
+            UIAction(title: "Lock \(name)") { _ in set(.locked) },
+            UIAction(title: "Unlock \(name)") { _ in set(.off) }
+        ])
     }
 
     private func updateButtons() {

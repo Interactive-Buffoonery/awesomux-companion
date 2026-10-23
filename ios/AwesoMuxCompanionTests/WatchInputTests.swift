@@ -1,6 +1,7 @@
 import AwesoMuxCompanionProtocol
 import Foundation
 import XCTest
+import os
 @testable import AwesoMuxCompanion
 
 @MainActor
@@ -29,11 +30,10 @@ final class WatchInputTests: XCTestCase {
         input.ready()
         input.preferredGrid = .init(rows: 30, cols: 40)
         for bytes in [Data("a".utf8), Data([27]), Data("b".utf8)] { input.type(bytes) }
-        await drain(wire, count: 6)
+        await drain(wire, count: 4)
         XCTAssertEqual(wire.frames.map(\.frame), [
             .grid(.init(rows: 30, cols: 40)), .input(sequence: 0, bytes: Data([97])),
-            .grid(.init(rows: 30, cols: 40)), .input(sequence: 1, bytes: Data([27])),
-            .grid(.init(rows: 30, cols: 40)), .input(sequence: 2, bytes: Data([98]))])
+            .input(sequence: 1, bytes: Data([27])), .input(sequence: 2, bytes: Data([98]))])
         XCTAssertTrue(wire.frames.allSatisfy { $0.generation == 10 })
         input.disconnect()
     }
@@ -89,10 +89,10 @@ final class WatchInputTests: XCTestCase {
         input.acknowledge(0, generation: 1)
         XCTAssertEqual(input.pasteDelivery, .sent)
         input.paste("two", modes: .init())
-        await drain(wire, count: 4)
+        await drain(wire, count: 3)
         input.disconnect()
         XCTAssertEqual(input.pasteDelivery, .mayHaveRun)
-        XCTAssertEqual(wire.frames.count, 4)
+        XCTAssertEqual(wire.frames.count, 3)
     }
 
     func testDisconnectDistinguishesQueuedPasteFromSentAndReportsTypedUncertainty() async {
@@ -165,6 +165,82 @@ final class WatchInputTests: XCTestCase {
         input.disconnect()
     }
 
+    func testTypedAckDeadlineIsVisibleAndLateAckSettlesIt() async {
+        var now: TimeInterval = 50
+        let wire = InputTestConnection()
+        let input = WatchInput(now: { now })
+        input.attach(wire, ownLeaderID: "phone", authority: { true })
+        input.begin(generation: 1, leader: nil); input.ready()
+        input.type(Data([65]))
+        await drain(wire, count: 2)
+        now = 52; input.checkDeadlines()
+        XCTAssertNotNil(input.typedNotice)
+        input.acknowledge(0, generation: 1)
+        XCTAssertNil(input.typedNotice)
+        input.disconnect()
+    }
+
+    func testResyncFencesSuspendedWriteWithoutCancellingSharedTransport() async {
+        let (input, wire) = fixture()
+        input.ready(); wire.blockGrid = true
+        input.type(Data([65]))
+        await drain(wire, count: 1)
+        input.begin(generation: 11, leader: nil)
+        await Task.yield()
+        XCTAssertEqual(wire.cancelledWrites, 0)
+        wire.releaseGrid()
+        await Task.yield()
+        XCTAssertEqual(wire.frames.count, 1)
+        input.ready(); wire.blockGrid = false
+        input.type(Data([66]))
+        await drain(wire, count: 3)
+        XCTAssertEqual(wire.frames[2].frame, .input(sequence: 0, bytes: Data([66])))
+        XCTAssertEqual(wire.frames[2].generation, 11)
+        input.disconnect()
+    }
+
+    func testKeyboardCRLFUsesPasteConfirmationAndModeFailureIsNotSent() async {
+        let (input, wire) = fixture()
+        input.ready()
+        let keyboard = WatchKeyboardResponder()
+        keyboard.input = input
+        keyboard.readModes = { WatchInputModes() }
+        keyboard.insertText("\r\n")
+        for _ in 0..<100 { if input.confirmation != nil { break }; await Task.yield() }
+        XCTAssertNotNil(input.confirmation)
+        XCTAssertTrue(wire.frames.isEmpty)
+        input.cancelPaste()
+        keyboard.stopInput()
+        keyboard.readModes = { nil }
+        keyboard.insertText("two words")
+        for _ in 0..<100 { if input.pasteDelivery != nil { break }; await Task.yield() }
+        XCTAssertEqual(input.pasteDelivery, .notSent)
+        XCTAssertNotNil(input.pasteError)
+        XCTAssertTrue(wire.frames.isEmpty)
+        keyboard.stopInput(); input.disconnect()
+    }
+
+    func testKeyboardDropsOldPasteAcrossStopAndSameNumberedReconnect() async {
+        let (input, wire) = fixture()
+        input.ready()
+        let keyboard = WatchKeyboardResponder()
+        keyboard.input = input
+        var resume: CheckedContinuation<WatchInputModes?, Never>?
+        keyboard.readModes = { await withCheckedContinuation { resume = $0 } }
+        keyboard.insertText("old paste")
+        for _ in 0..<100 { if resume != nil { break }; await Task.yield() }
+        XCTAssertNotNil(resume)
+        keyboard.stopInput()
+        input.begin(generation: 10, leader: nil); input.ready()
+        keyboard.insertText("x")
+        await drain(wire, count: 2)
+        resume?.resume(returning: WatchInputModes())
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(wire.frames.count, 2)
+        XCTAssertEqual(wire.frames[1].frame, .input(sequence: 0, bytes: Data([120])))
+        keyboard.stopInput(); input.disconnect()
+    }
+
     func testPasteEncodingMatchesGhosttyStripAndSafetyRules() {
         let stripText = String(bytes: WatchPaste.strip.sorted(), encoding: .utf8)!
         XCTAssertEqual(WatchPaste.encode(stripText, bracketed: false), Data(repeating: 32, count: WatchPaste.strip.count))
@@ -219,6 +295,8 @@ private final class InputTestConnection: WatchConnection, @unchecked Sendable {
     let accepted: CompanionTerminalStream.Accepted
     @MainActor var frames: [WatchPacket] = []
     @MainActor var blockGrid = false
+    private let cancelledWriteCount = OSAllocatedUnfairLock(initialState: 0)
+    var cancelledWrites: Int { cancelledWriteCount.withLock { $0 } }
     @MainActor private var gridWaiter: CheckedContinuation<Void, Never>?
 
     init(accepted: CompanionTerminalStream.Accepted = .init(role: .interactive)) { self.accepted = accepted }
@@ -226,7 +304,11 @@ private final class InputTestConnection: WatchConnection, @unchecked Sendable {
                          canSend: @escaping @MainActor @Sendable () -> Bool) async throws {
         guard canSend() else { throw CancellationError() }
         frames.append(.init(frame: frame, generation: generation))
-        if case .grid = frame, blockGrid { await withCheckedContinuation { gridWaiter = $0 } }
+        if case .grid = frame, blockGrid {
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { gridWaiter = $0 }
+            } onCancel: { self.cancelledWriteCount.withLock { $0 += 1 } }
+        }
     }
     @MainActor func releaseGrid() { gridWaiter?.resume(); gridWaiter = nil }
     func receive() async throws -> WatchPacket { throw CancellationError() }

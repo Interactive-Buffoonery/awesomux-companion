@@ -1,5 +1,6 @@
 import AwesoMuxCompanionProtocol
 import SwiftUI
+import UIKit
 
 struct WatchView: View {
     let store: CompanionStore
@@ -56,6 +57,19 @@ struct WatchView: View {
                 HStack {
                     Button("Take over") { model.input.takeOver() }
                         .disabled(!model.input.canType)
+                    Button("Paste") {
+                        guard let text = UIPasteboard.general.string else { return }
+                        let sessionID = model.input.sessionID
+                        Task { @MainActor in
+                            guard let modes = await terminal.inputModes() else {
+                                if model.input.sessionID == sessionID { model.input.refuseModeRead(paste: true) }
+                                return
+                            }
+                            guard model.input.sessionID == sessionID else { return }
+                            model.input.paste(text, modes: modes)
+                        }
+                    }
+                    .disabled(!model.input.canType || model.input.pasteInFlight || model.input.confirmation != nil)
                     Spacer()
                     Button(keyboardShown ? "Hide keyboard" : "Show keyboard",
                            systemImage: "keyboard") { keyboardShown.toggle() }
@@ -122,6 +136,9 @@ struct WatchView: View {
         }
         .onChange(of: canWatch) { _, _ in updateLifecycle() }
         .onChange(of: store.decisionPairing) { _, _ in model.stop() }
+        .onChange(of: inputAnnouncement) { _, message in
+            if !message.isEmpty { UIAccessibility.post(notification: .announcement, argument: message) }
+        }
         .onChange(of: model.input.canType) { _, canType in if !canType { keyboardShown = false } }
         .sheet(item: Binding(get: { model.input.confirmation }, set: { _ in model.input.cancelPaste() })) { confirmation in
             NavigationStack {
@@ -133,8 +150,14 @@ struct WatchView: View {
                         Spacer()
                         Button("Send") {
                             Task { @MainActor in
-                                guard let modes = await terminal.inputModes(),
-                                      model.input.confirmation?.id == confirmation.id else { return }
+                                guard let modes = await terminal.inputModes() else {
+                                    if model.input.confirmation?.id == confirmation.id {
+                                        model.input.cancelPaste()
+                                        model.input.refuseModeRead(paste: true)
+                                    }
+                                    return
+                                }
+                                guard model.input.confirmation?.id == confirmation.id else { return }
                                 model.input.confirmPaste(modes: modes)
                             }
                         }
@@ -145,6 +168,11 @@ struct WatchView: View {
                 .navigationBarTitleDisplayMode(.inline)
             }
         }
+    }
+
+    private var inputAnnouncement: String {
+        [model.input.pasteDelivery.map { "Paste: \($0.rawValue)" }, model.input.pasteError, model.input.typedNotice]
+            .compactMap { $0 }.joined(separator: ". ")
     }
 
     private var statusText: String {

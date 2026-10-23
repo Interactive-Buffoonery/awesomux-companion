@@ -373,18 +373,21 @@ Mac client leads. Phone-width rewrap, Chat (#18) and iPad layout (#11) remain
 separate work.
 
 When the Mac accepts an interactive stream and advertises `inputFrameMax`, Take
-over claims with the phone's grid. Attaching remains a follower. Each key sends
-the latest phone grid before its input, allowing the Mac to apply it atomically
-with that key's claim. The grid uses the available terminal view size and the
+over claims with the phone's grid. Attaching remains a follower. The first key, and the next key after a phone-grid change, send the latest
+grid before input, allowing the Mac to apply it atomically with that key's claim. The grid uses the available terminal view size and the
 renderer cell dimensions; rotation alone sends no resize. The keyboard toggle
 opens a compact Esc, Tab, one-shot/locked Ctrl and Alt, and arrow bar. Double-tap
-a modifier to lock it; tap again to turn it off. A lone Escape owns its frame.
+a modifier to lock it; tap again to turn it off. Its menu and accessibility
+actions also provide Lock/Unlock without timed taps. A lone Escape owns its frame.
 
 Input uses a separate UIKit responder. The pinned renderer exposes a combined
 write callback for both keys and replies, without a provenance-aware encoder,
 so the app encodes ordinary terminal keys separately and keeps every renderer
 write local. Paste and arrow keys query mode 2004 and DECCKM from the actual
-phone emulator using local DECRQM reports. The Swift paste port follows
+phone emulator using local DECRQM reports. Probes wait for a complete UTF-8 and
+control-sequence boundary and a drained renderer, so they cannot interrupt
+split output. Request counts fence earlier mode reports; an unavailable probe
+shows not sent. The Swift paste port follows
 Ghostty's text-insertion strip set, safety checks and bracket/CR encoding. One
 paste is one frame, at most 64 KiB after encoding. Unsafe text needs Send/Cancel
 confirmation; pending confirmation ends with its generation. Snippets, rerun,

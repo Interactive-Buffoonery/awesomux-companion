@@ -56,6 +56,15 @@ final class WatchTerminalBoundaryTests: XCTestCase {
         XCTAssertEqual(boundary.pasteRequests, 1)
     }
 
+    func testModeReportCountMatchesNativeParameterDigitWrap() {
+        for digits in [255, 256, 257] {
+            var boundary = WatchTerminalBoundary()
+            boundary.receive(Data(("\u{1b}[?" + String(repeating: "0", count: digits - 4) + "2004$p").utf8))
+            XCTAssertTrue(boundary.canProbe)
+            XCTAssertEqual(boundary.pasteRequests, digits == 256 ? 0 : 1)
+        }
+    }
+
     func testInvalidUTF8AndStrayC1DoNotLeaveOpenSequences() {
         let cases: [[UInt8]] = [[0xc0], [0xf5], [0x80], [0x9b], [0xc2, 0x1b, 0x5b, 0x6d]]
         for bytes in cases {

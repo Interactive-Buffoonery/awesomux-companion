@@ -11,6 +11,7 @@ struct WatchTerminalBoundary {
     private var utf8Remaining = 0
     private var csi: [UInt8] = []
     private var csiTruncated = false
+    private var csiDigits: UInt8 = 0
     private(set) var pasteRequests: UInt64 = 0
     private(set) var cursorRequests: UInt64 = 0
     var canProbe: Bool { state == .ground && utf8Remaining == 0 }
@@ -62,6 +63,7 @@ struct WatchTerminalBoundary {
         case .escapeIntermediate:
             if (0x30...0x7e).contains(byte) { state = .ground }
         case .csi:
+            if (48...57).contains(byte) { csiDigits &+= 1 }
             if (0x20...0x7e).contains(byte) {
                 // Normalize leading zeroes so even a long valid mode query is counted.
                 if csi == [63, 48], (48...57).contains(byte) {
@@ -99,10 +101,11 @@ struct WatchTerminalBoundary {
     private mutating func beginCSI() {
         csi.removeAll(keepingCapacity: true)
         csiTruncated = false
+        csiDigits = 0
     }
 
     private mutating func countModeRequest() {
-        guard !csiTruncated, csi.first == 63, csi.suffix(2).elementsEqual([36, 112]),
+        guard !csiTruncated, csiDigits > 0, csi.first == 63, csi.suffix(2).elementsEqual([36, 112]),
               let value = Int(String(decoding: csi.dropFirst().dropLast(2), as: UTF8.self)) else { return }
         if value == 2004 { pasteRequests &+= 1 }
         if value == 1 { cursorRequests &+= 1 }

@@ -125,6 +125,23 @@ final class WatchTerminalTests: XCTestCase {
         XCTAssertEqual(after, restored.readViewportText())
     }
 
+    func testModeProbesRecoverAfterNativeParameterDigitWrap() async throws {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        defer { host.close(); terminal.clear() }
+        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
+        try await idle([terminal])
+        for digits in [255, 256, 257] {
+            let before = terminal.discardedWriteByteCount
+            try terminal.feed(Data(("\u{1b}[?" + String(repeating: "0", count: digits - 4) + "2004$p").utf8))
+            try await idle([terminal])
+            XCTAssertEqual(terminal.discardedWriteByteCount - before,
+                           digits == 256 ? 0 : Data("\u{1b}[?2004;2$y".utf8).count)
+            let modes = await terminal.inputModes()
+            XCTAssertEqual(modes, WatchInputModes())
+        }
+    }
+
     func testSplitControlSequencesAndWideCombiningUTF8KeepParserState() async throws {
         let whole = WatchTerminal(), split = WatchTerminal()
         let host = try mount([whole, split])
@@ -225,6 +242,20 @@ final class WatchTerminalTests: XCTestCase {
         let phone = terminal.phoneGrid(for: CGSize(width: 390, height: 500))
         XCTAssertTrue((20...60).contains(phone.cols))
         XCTAssertTrue((10...40).contains(phone.rows))
+    }
+
+    func testModeProbeAccountsForQueriesInAbortedDCSHeaders() async throws {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        defer { host.close(); terminal.clear() }
+        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
+        try await idle([terminal])
+        try terminal.feed(Data("\u{1b}[?2004h\u{1b}[?1h\u{1b}P".utf8) + Data([0x9b])
+                          + Data("?2004$p\u{1b}P".utf8) + Data([0x9b])
+                          + Data("?1$p\u{1b}[?2004l\u{1b}[?1l".utf8))
+        try await idle([terminal])
+        let modes = await terminal.inputModes()
+        XCTAssertEqual(modes, WatchInputModes())
     }
 
     func testModeProbesWaitForSplitControlStringsAndUTF8WithoutChangingOutput() async throws {

@@ -83,10 +83,13 @@ if [[ "$CHECK_SIGNING" == true ]]; then
   [[ -n "${HEAVY_GATE_SIGNING_KEYCHAIN:-}" ]] || {
     echo "Signing probe requires runner credentials" >&2; exit 1;
   }
-  cp /usr/bin/true "$WORK/signing-probe"
-  codesign --force --sign 'Apple Development' --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
-    --timestamp=none "$WORK/signing-probe"
-  codesign --verify --strict "$WORK/signing-probe"
+  for identity in 'Apple Development' 'Apple Distribution'; do
+    cp /usr/bin/true "$WORK/signing-probe"
+    codesign --force --sign "$identity" --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
+      --timestamp=none "$WORK/signing-probe"
+    codesign --verify --strict "$WORK/signing-probe"
+    echo "$identity signing passed"
+  done
   echo "Runner signing probe passed"
   exit 0
 fi

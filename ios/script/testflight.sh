@@ -141,6 +141,8 @@ def prepare_export():
         validated[bundle] = (profile_uuid, contents)
 
     directory = Path.home() / 'Library/Developer/Xcode/UserData/Provisioning Profiles'
+    if not directory.resolve().is_relative_to(Path.home().resolve()):
+        raise ValueError()
     directory.mkdir(parents=True, exist_ok=True)
     if not directory.resolve().is_relative_to(Path.home().resolve()):
         raise ValueError()

@@ -36,19 +36,8 @@ trap cleanup EXIT
 
 AUTH=()
 if [[ -n "${HEAVY_GATE_XCODE_AUTH_CONFIG:-}" ]]; then
-  # Read only the three Xcode fields; never print the API private key.
-  while IFS= read -r value; do AUTH+=("$value"); done < <(
-    python3 - "$HEAVY_GATE_XCODE_AUTH_CONFIG" <<'PY'
-import json, sys
-from pathlib import Path
-data = json.loads(Path(sys.argv[1]).read_text())
-for name in ('private_key_path', 'key_id', 'issuer_id'):
-    value = data[name]
-    if not isinstance(value, str) or not value or '\n' in value:
-        raise SystemExit('Invalid Xcode authentication configuration')
-    print(value)
-PY
-  )
+  AUTH_VALUES="$(python3 "$IOS_DIR/script/testflight.py" auth "$HEAVY_GATE_XCODE_AUTH_CONFIG")"
+  while IFS= read -r value; do AUTH+=("$value"); done <<< "$AUTH_VALUES"
   [[ "${#AUTH[@]}" -eq 3 && -r "${AUTH[0]}" ]] || {
     echo "Xcode API authentication is unavailable" >&2; exit 1;
   }
@@ -63,19 +52,8 @@ if [[ -n "${HEAVY_GATE_SIGNING_KEYCHAIN:-}" ]]; then
   mkdir -p "$HOME/Library/Preferences"
   security list-keychains -d user -s "$HEAVY_GATE_SIGNING_KEYCHAIN"
   security default-keychain -d user -s "$HEAVY_GATE_SIGNING_KEYCHAIN"
-  python3 - "$HEAVY_GATE_SIGNING_KEYCHAIN" "$HEAVY_GATE_SIGNING_PASSWORD_FILE" <<'PY'
-from pathlib import Path
-import subprocess, sys
-result = subprocess.run(['security', 'unlock-keychain', '-p', Path(sys.argv[2]).read_text(), sys.argv[1]],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-if result.returncode:
-    raise SystemExit('Runner signing keychain could not be unlocked')
-result = subprocess.run(['security', 'set-key-partition-list', '-S', 'apple-tool:,apple:', '-s',
-                         '-k', Path(sys.argv[2]).read_text(), sys.argv[1]],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-if result.returncode:
-    raise SystemExit('Runner signing key authorization could not be configured')
-PY
+  python3 "$IOS_DIR/script/testflight.py" unlock-keychain \
+    "$HEAVY_GATE_SIGNING_KEYCHAIN" "$HEAVY_GATE_SIGNING_PASSWORD_FILE"
   SIGNING=("OTHER_CODE_SIGN_FLAGS=--keychain $HEAVY_GATE_SIGNING_KEYCHAIN")
 fi
 
@@ -84,97 +62,8 @@ if [[ -n "${HEAVY_GATE_XCODE_EXPORT_CONFIG:-}" ]]; then
   [[ -n "${HEAVY_GATE_REMOTE_JOB:-}" ]] || {
     echo "Manual export requires an isolated heavy-gate remote job" >&2; exit 1;
   }
-  python3 - "$HEAVY_GATE_XCODE_EXPORT_CONFIG" "$WORK/export.plist" <<'PYTHON'
-import datetime, hashlib, json, os, plistlib, re, subprocess, sys, uuid
-from xml.parsers.expat import ExpatError
-from pathlib import Path
-
-team = '7CNK4YPCQX'
-bundles = {
-    'com.interactivebuffoonery.awesomux.companion',
-    'com.interactivebuffoonery.awesomux.companion.widgets',
-}
-
-def prepare_export():
-    config = json.loads(Path(sys.argv[1]).read_text())
-    if not isinstance(config, dict) or set(config) != {'signingCertificate', 'profiles'}:
-        raise ValueError()
-    certificate = config['signingCertificate']
-    if not isinstance(certificate, str) or not re.fullmatch(r'[0-9A-F]{40}', certificate):
-        raise ValueError()
-    profiles = config['profiles']
-    if not isinstance(profiles, dict) or set(profiles) != bundles:
-        raise ValueError()
-    validated = {}
-    for bundle, source in profiles.items():
-        if not isinstance(source, str):
-            raise ValueError()
-        path = Path(source)
-        if not path.is_absolute() or path.suffix != '.mobileprovision':
-            raise ValueError()
-        contents = path.read_bytes()
-        decoded = subprocess.run(['security', 'cms', '-D'], input=contents,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        profile = plistlib.loads(decoded.stdout)
-        profile_uuid = profile['UUID']
-        if not isinstance(profile_uuid, str) or str(uuid.UUID(profile_uuid)).upper() != profile_uuid.upper():
-            raise ValueError()
-        entitlements = profile['Entitlements']
-        if profile['TeamIdentifier'] != [team] or entitlements['application-identifier'] != f'{team}.{bundle}':
-            raise ValueError()
-        if entitlements.get('get-task-allow') is not False:
-            raise ValueError()
-        if 'ProvisionedDevices' in profile or 'ProvisionsAllDevices' in profile:
-            raise ValueError()
-        expires = profile['ExpirationDate']
-        if not isinstance(expires, datetime.datetime):
-            raise ValueError()
-        if expires.replace(tzinfo=datetime.timezone.utc) <= datetime.datetime.now(datetime.timezone.utc):
-            raise ValueError()
-        certificates = profile['DeveloperCertificates']
-        if not isinstance(certificates, list) or not all(isinstance(item, bytes) for item in certificates):
-            raise ValueError()
-        if certificate not in {hashlib.sha1(item).hexdigest().upper() for item in certificates}:
-            raise ValueError()
-        if profile_uuid.casefold() in {item[0].casefold() for item in validated.values()}:
-            raise ValueError()
-        validated[bundle] = (profile_uuid, contents)
-
-    directory = Path.home() / 'Library/Developer/Xcode/UserData/Provisioning Profiles'
-    if not directory.resolve().is_relative_to(Path.home().resolve()):
-        raise ValueError()
-    directory.mkdir(parents=True, exist_ok=True)
-    if not directory.resolve().is_relative_to(Path.home().resolve()):
-        raise ValueError()
-    for profile_uuid, contents in validated.values():
-        destination = directory / f'{profile_uuid}.mobileprovision'
-        fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, 'wb') as installed:
-            os.fchmod(installed.fileno(), 0o600)
-            installed.write(contents)
-    options = {
-        'method': 'app-store-connect',
-        'destination': 'export',
-        'teamID': team,
-        'signingStyle': 'manual',
-        'signingCertificate': certificate,
-        'provisioningProfiles': {bundle: item[0] for bundle, item in validated.items()},
-        'manageAppVersionAndBuildNumber': False,
-    }
-    with Path(sys.argv[2]).open('wb') as output:
-        plistlib.dump(options, output)
-
-try:
-    prepare_export()
-except (OSError, ValueError, KeyError, TypeError, AttributeError, ExpatError, subprocess.SubprocessError):
-    raise SystemExit('Manual export configuration or App Store profiles are invalid') from None
-PYTHON
-  DISTRIBUTION_IDENTITY="$(python3 - "$WORK/export.plist" <<'PYTHON'
-import plistlib, sys
-from pathlib import Path
-print(plistlib.loads(Path(sys.argv[1]).read_bytes())['signingCertificate'])
-PYTHON
-  )"
+  DISTRIBUTION_IDENTITY="$(python3 "$IOS_DIR/script/testflight.py" prepare-export \
+    "$HEAVY_GATE_XCODE_EXPORT_CONFIG" "$WORK/export.plist")"
 fi
 
 if [[ "$CHECK_SIGNING" == true ]]; then
@@ -211,20 +100,7 @@ if [[ -n "${HEAVY_GATE_REMOTE_JOB:-}" ]]; then
   # Fresh runner checkouts need the source-built renderer and its original inputs.
   NATIVE="$IOS_DIR/../spikes/ios-terminal-renderer/native"
   zsh "$NATIVE/build.sh" 1e9e14af5df14211892f5fc15fd21a49c7d94868
-  python3 - "$NATIVE" "$IOS_DIR/build/diagnostics-native" <<'PYTHON'
-import json, subprocess, sys
-from pathlib import Path
-native = Path(sys.argv[1])
-receipts = list((native / 'artifacts').glob('*/build-receipt.json'))
-if len(receipts) != 1:
-    raise SystemExit('Expected one fresh native renderer receipt')
-receipt = receipts[0]
-data = json.loads(receipt.read_text())
-package = Path(data['sourceDirectory']).parent / 'libghostty-spm'
-subprocess.run([sys.executable, str(native.parent / 'integrate-native.py'),
-                str(receipt.parent / 'GhosttyKit.xcframework'), str(package),
-                '--output-directory', sys.argv[2]], check=True)
-PYTHON
+  python3 "$IOS_DIR/script/testflight.py" integrate-native "$NATIVE" "$IOS_DIR/build/diagnostics-native"
 fi
 zsh script/generate-watch.sh
 echo "Archiving build $BUILD_NUMBER (logs in $OUTPUT)"

@@ -128,6 +128,60 @@ TEST_NOTES="What changed in this build" ./script/testflight.sh
 
 The build number is the current UTC time, so it always increases. The script waits until App Store Connect finishes processing, then the build appears for the group's testers. Set `TESTFLIGHT_GROUP` to send it to a different internal group.
 
+### Minimighty runner
+
+From a clean repository root, `heavy-gate ./ios/script/testflight.sh` can run on
+minimighty using its dedicated signing keychain and App Store Connect API key.
+Use `--export-only` to archive and export an IPA without uploading or assigning
+it to a testing group. Logs and the IPA return under `.build/testflight/`.
+The archive and DerivedData use the job's SSD-backed TMPDIR.
+Use `--check-signing` for a small signing and signature-verification probe before
+a full archive. Runner setup installs Apple's public WWDR G3 intermediate in
+the login keychain so the system chain builder can discover it; private signing
+keys stay in the dedicated runner keychain.
+
+Only a TestFlight job sources runner settings that export `HEAVY_GATE_XCODE_AUTH_CONFIG` pointing to a restricted JSON
+file with `private_key_path`, `key_id`, and `issuer_id`, plus
+`HEAVY_GATE_SIGNING_KEYCHAIN` and `HEAVY_GATE_SIGNING_PASSWORD_FILE` pointing to
+the dedicated keychain and its restricted password file. `ASC_CONFIG_PATH` and
+`ASC_BYPASS_KEYCHAIN=1` let asc use the same API credential from the isolated job
+HOME. Local runs keep using Xcode's existing account when these are absent.
+
+For manual App Store export, runner settings can also supply
+`HEAVY_GATE_XCODE_EXPORT_CONFIG`, a restricted JSON file with exactly these fields:
+
+```json
+{
+  "signingCertificate": "UPPERCASE_40_HEX_SHA1",
+  "profiles": {
+    "com.interactivebuffoonery.awesomux.companion": "/absolute/app.mobileprovision",
+    "com.interactivebuffoonery.awesomux.companion.widgets": "/absolute/widgets.mobileprovision"
+  }
+}
+```
+
+Replace the certificate placeholder with the distribution certificate's uppercase
+40-character SHA-1 fingerprint. Both profiles must be unexpired App Store profiles
+for team `7CNK4YPCQX`, match their exact bundle IDs, and include that certificate.
+The script validates their UUIDs and requires `get-task-allow` to be false and both
+`ProvisionedDevices` and `ProvisionsAllDevices` to be absent. It decodes profiles
+without printing their contents and installs mode-0600 copies in the disposable
+HOME's `Library/Developer/Xcode/UserData/Provisioning Profiles` directory, used by
+Xcode 16 and later.
+
+This configuration is accepted only in an isolated remote job. Export uses manual
+signing with the certificate fingerprint and profile UUIDs, avoiding cloud
+signing. Archive retains API authentication and provisioning-update flags; manual
+export omits them. With manual export configured, remote `xcodebuild` invocations
+set `CFFIXED_USER_HOME` to the disposable HOME so Xcode discovers those profiles
+and keeps its home writes isolated.
+`--check-signing` validates and installs the configured profiles before probing
+signing, using the configured distribution certificate. Without this configuration,
+export keeps automatic signing; local Xcode behavior is unchanged.
+
+The gate forwards TEST_NOTES, TESTFLIGHT_GROUP and BUILD_NUMBER as literal data.
+Never check credentials into this repository.
+
 ## Snapshot diagnostic app
 
 The separate `AwesoMuxDiagnostics.xcodeproj` / `AwesoMuxDiagnostics` scheme uses
@@ -329,3 +383,7 @@ plus controlled paired-stream frames for ordering, reconnect and lifecycle
 failures. Physical devices, VoiceOver, real paired LAN/Tailscale interruptions,
 long suspension/relaunch and complete selection/scrollback interaction still
 require acceptance. The synthetic HTTPS fixture remains test tooling only.
+
+Remote TestFlight jobs build the pinned native renderer from source before
+generation, retaining its original inputs and schema 2 receipt for validation.
+This adds a full native build to each fresh runner job.

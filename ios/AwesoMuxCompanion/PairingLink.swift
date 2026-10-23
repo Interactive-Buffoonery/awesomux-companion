@@ -77,8 +77,6 @@ struct PairingLink: Equatable, Sendable {
         }
     }
 
-    static let scheme = CompanionPairingLink.scheme
-
     init(_ text: String) throws(Failure) {
         let routes: [CompanionRoute]?
         let port: UInt16, fingerprint: String, secret: String, name: String

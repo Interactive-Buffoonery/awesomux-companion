@@ -1,6 +1,7 @@
 import AwesoMuxCompanionProtocol
 import Foundation
 import XCTest
+import UIKit
 import os
 @testable import AwesoMuxCompanion
 
@@ -74,10 +75,8 @@ final class WatchInputTests: XCTestCase {
 
     func testAckBudgetLateAckAndOnePasteInFlight() async {
         var now: TimeInterval = 50
-        let wire = InputTestConnection()
-        let input = WatchInput(now: { now })
-        input.attach(wire, ownLeaderID: "phone", authority: { true })
-        input.begin(generation: 1, leader: "mac"); input.ready()
+        let (input, wire) = fixture(generation: 1, leader: "mac", now: { now })
+        input.ready()
         input.paste("one", modes: .init())
         input.paste("two", modes: .init())
         await drain(wire, count: 2)
@@ -167,10 +166,8 @@ final class WatchInputTests: XCTestCase {
 
     func testTypedAckDeadlineIsVisibleAndLateAckSettlesIt() async {
         var now: TimeInterval = 50
-        let wire = InputTestConnection()
-        let input = WatchInput(now: { now })
-        input.attach(wire, ownLeaderID: "phone", authority: { true })
-        input.begin(generation: 1, leader: nil); input.ready()
+        let (input, wire) = fixture(generation: 1, leader: nil, now: { now })
+        input.ready()
         input.type(Data([65]))
         await drain(wire, count: 2)
         now = 52; input.checkDeadlines()
@@ -215,8 +212,7 @@ final class WatchInputTests: XCTestCase {
     func testKeyboardCRLFUsesPasteConfirmationAndModeFailureIsNotSent() async {
         let (input, wire) = fixture()
         input.ready()
-        let keyboard = WatchKeyboardResponder()
-        keyboard.input = input
+        let keyboard = keyboard(for: input)
         keyboard.readModes = { WatchInputModes() }
         keyboard.insertText("\r\n")
         for _ in 0..<100 { if input.confirmation != nil { break }; await Task.yield() }
@@ -236,8 +232,7 @@ final class WatchInputTests: XCTestCase {
     func testFailedModeProbeDoesNotBlockEveryQueuedArrowBeforeControlC() async {
         let (input, wire) = fixture()
         input.ready()
-        let keyboard = WatchKeyboardResponder()
-        keyboard.input = input
+        let keyboard = keyboard(for: input)
         var probes = 0
         var resume: CheckedContinuation<WatchInputModes?, Never>?
         keyboard.readModes = {
@@ -259,8 +254,7 @@ final class WatchInputTests: XCTestCase {
     func testKeyboardDropsOldPasteAcrossStopAndSameNumberedReconnect() async {
         let (input, wire) = fixture()
         input.ready()
-        let keyboard = WatchKeyboardResponder()
-        keyboard.input = input
+        let keyboard = keyboard(for: input)
         var resume: CheckedContinuation<WatchInputModes?, Never>?
         keyboard.readModes = { await withCheckedContinuation { resume = $0 } }
         keyboard.insertText("old paste")
@@ -309,11 +303,37 @@ final class WatchInputTests: XCTestCase {
         XCTAssertEqual(WatchKeyModifiers.arrow("D", application: true), "\u{1b}OD")
     }
 
-    private func fixture() -> (WatchInput, InputTestConnection) {
+    func testKeyboardConsumesOneShotModifierBeforeNextKey() async throws {
+        let (input, wire) = fixture()
+        input.ready()
+        let keyboard = keyboard(for: input)
+        let bar = try XCTUnwrap(keyboard.inputAccessoryView as? UIStackView)
+        let control = try XCTUnwrap(bar.arrangedSubviews.compactMap { $0 as? UIButton }
+            .first { $0.title(for: .normal) == "Ctrl" })
+        control.sendActions(for: .touchUpInside)
+        keyboard.arrow("A")
+        keyboard.insertText("c")
+        await drain(wire, count: 3)
+        XCTAssertEqual(wire.frames.map(\.frame), [
+            .grid(.init(rows: 24, cols: 80)),
+            .input(sequence: 0, bytes: Data("\u{1b}[1;5A".utf8)),
+            .input(sequence: 1, bytes: Data([99]))])
+        XCTAssertEqual(keyboard.modifiers.control, .off)
+        keyboard.stopInput(); input.disconnect()
+    }
+
+    private func keyboard(for input: WatchInput) -> WatchKeyboardResponder {
+        let keyboard = WatchKeyboardResponder()
+        keyboard.input = input
+        return keyboard
+    }
+
+    private func fixture(generation: UInt32 = 10, leader: String? = "mac",
+                         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) -> (WatchInput, InputTestConnection) {
         let wire = InputTestConnection()
-        let input = WatchInput()
+        let input = WatchInput(now: now)
         input.attach(wire, ownLeaderID: "phone", authority: { true })
-        input.begin(generation: 10, leader: "mac")
+        input.begin(generation: generation, leader: leader)
         return (input, wire)
     }
 

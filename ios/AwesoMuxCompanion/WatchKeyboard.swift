@@ -116,21 +116,22 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
 
     func stopInput() {
         resignFirstResponder()
+        resetWorker()
+        modifiers = WatchKeyModifiers()
+        updateButtons()
+    }
+
+    private func resetWorker() {
         epoch = UUID()
         worker?.cancel()
         worker = nil
         actions.removeAll()
-        modifiers = WatchKeyModifiers()
-        updateButtons()
     }
 
     private func append(_ action: Action) {
         guard input?.canType == true else { return }
         if worker != nil, workerSessionID != input?.sessionID {
-            epoch = UUID()
-            worker?.cancel()
-            worker = nil
-            actions.removeAll()
+            resetWorker()
         }
         guard actions.count < 64 else {
             if case .paste = action { input?.refuseQueuedInput(paste: true) }
@@ -141,10 +142,7 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
         case .key(let text, let control, let alt):
             actions.append(.bytes(modifiers.encode(text, control: control, alt: alt)))
         case .arrow(let final, let control, let alt):
-            let useControl = control || modifiers.control != .off
-            let useAlt = alt || modifiers.alt != .off
-            if modifiers.control == .once { modifiers.control = .off }
-            if modifiers.alt == .once { modifiers.alt = .off }
+            let (useControl, useAlt) = modifiers.consume(control: control, alt: alt)
             actions.append(.arrow(final, control: useControl, alt: useAlt))
         default: actions.append(action)
         }
@@ -156,6 +154,18 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
         worker = Task { [weak self] in
             guard let self else { return }
             var modesUnavailable = false
+            @MainActor func currentModes(paste: Bool, input: WatchInput) async -> WatchInputModes? {
+                guard !modesUnavailable else { input.refuseModeRead(paste: paste); return nil }
+                guard let modes = await self.readModes(), !Task.isCancelled,
+                      input.sessionID == sessionID, input.canType else {
+                    if !Task.isCancelled, input.sessionID == sessionID {
+                        modesUnavailable = true
+                        input.refuseModeRead(paste: paste)
+                    }
+                    return nil
+                }
+                return modes
+            }
             while self.epoch == identity, !self.actions.isEmpty, !Task.isCancelled {
                 let action = self.actions.removeFirst()
                 guard let input = self.input, input.sessionID == sessionID, input.generation == generation, input.canType else {
@@ -169,27 +179,11 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
                     if control || alt {
                         input.type(Data("\u{1b}[1;\(1 + (control ? 4 : 0) + (alt ? 2 : 0))\(final)".utf8))
                     } else {
-                        guard !modesUnavailable else { input.refuseModeRead(paste: false); continue }
-                        guard let modes = await self.readModes(), !Task.isCancelled,
-                              input.sessionID == sessionID, input.canType else {
-                            if !Task.isCancelled, input.sessionID == sessionID {
-                                modesUnavailable = true
-                                input.refuseModeRead(paste: false)
-                            }
-                            continue
-                        }
+                        guard let modes = await currentModes(paste: false, input: input) else { continue }
                         input.type(Data(WatchKeyModifiers.arrow(final, application: modes.applicationCursor).utf8))
                     }
                 case .paste(let text):
-                    guard !modesUnavailable else { input.refuseModeRead(paste: true); continue }
-                    guard let modes = await self.readModes(), !Task.isCancelled,
-                          input.sessionID == sessionID, input.canType else {
-                        if !Task.isCancelled, input.sessionID == sessionID {
-                            modesUnavailable = true
-                            input.refuseModeRead(paste: true)
-                        }
-                        continue
-                    }
+                    guard let modes = await currentModes(paste: true, input: input) else { continue }
                     input.paste(text, modes: modes)
                 case .key: break
                 }
@@ -221,18 +215,10 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
         _ = button("Esc", label: "Escape") { [weak self] in self?.append(.key("\u{1b}", control: false, alt: false)) }
         _ = button("Tab") { [weak self] in self?.append(.key("\t", control: false, alt: false)) }
         controlButton = button("Ctrl", label: "Control, tap once for next key, double tap to lock") { [weak self] in
-            guard let self else { return }
-            let now = ProcessInfo.processInfo.systemUptime
-            self.modifiers.control = WatchKeyModifiers.tapped(self.modifiers.control, doubleTap: now - self.lastControlTap < 0.35)
-            self.lastControlTap = now
-            self.updateButtons()
+            self?.tapModifier(\.control, lastTap: \.lastControlTap)
         }
         altButton = button("Alt", label: "Option, tap once for next key, double tap to lock") { [weak self] in
-            guard let self else { return }
-            let now = ProcessInfo.processInfo.systemUptime
-            self.modifiers.alt = WatchKeyModifiers.tapped(self.modifiers.alt, doubleTap: now - self.lastAltTap < 0.35)
-            self.lastAltTap = now
-            self.updateButtons()
+            self?.tapModifier(\.alt, lastTap: \.lastAltTap)
         }
         for (title, final, label) in [("←", Character("D"), "Left arrow"), ("↑", Character("A"), "Up arrow"),
                                       ("↓", Character("B"), "Down arrow"), ("→", Character("C"), "Right arrow")] {
@@ -245,20 +231,29 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
         return stack
     }
 
+    private func tapModifier(_ modifier: WritableKeyPath<WatchKeyModifiers, WatchKeyModifiers.State>,
+                             lastTap: ReferenceWritableKeyPath<WatchKeyboardResponder, Double>) {
+        let now = ProcessInfo.processInfo.systemUptime
+        modifiers[keyPath: modifier] = WatchKeyModifiers.tapped(modifiers[keyPath: modifier], doubleTap: now - self[keyPath: lastTap] < 0.35)
+        self[keyPath: lastTap] = now
+        updateButtons()
+    }
+
     private func configureModifierActions(_ button: UIButton?, control: Bool) {
         let name = control ? "Control" : "Option"
+        let lockTitle = "Lock \(name)", unlockTitle = "Unlock \(name)"
         let set: (WatchKeyModifiers.State) -> Void = { [weak self] state in
             guard let self else { return }
             if control { self.modifiers.control = state } else { self.modifiers.alt = state }
             self.updateButtons()
         }
         button?.accessibilityCustomActions = [
-            UIAccessibilityCustomAction(name: "Lock \(name)") { _ in set(.locked); return true },
-            UIAccessibilityCustomAction(name: "Unlock \(name)") { _ in set(.off); return true }
+            UIAccessibilityCustomAction(name: lockTitle) { _ in set(.locked); return true },
+            UIAccessibilityCustomAction(name: unlockTitle) { _ in set(.off); return true }
         ]
         button?.menu = UIMenu(children: [
-            UIAction(title: "Lock \(name)") { _ in set(.locked) },
-            UIAction(title: "Unlock \(name)") { _ in set(.off) }
+            UIAction(title: lockTitle) { _ in set(.locked) },
+            UIAction(title: unlockTitle) { _ in set(.off) }
         ])
     }
 

@@ -89,8 +89,8 @@ struct WatchView: View {
                 }
                 .background(WatchKeyboard(input: model.input, terminal: terminal, isShown: $keyboardShown)
                     .frame(width: 1, height: 1))
-            if let delivery = model.input.pasteDelivery {
-                Text("Paste: \(delivery.rawValue)").font(.caption)
+            if let pasteDeliveryText {
+                Text(pasteDeliveryText).font(.caption)
                     .accessibilityAddTraits(.updatesFrequently)
             }
             if let error = model.input.pasteError { Text(error).font(.caption) }
@@ -170,8 +170,10 @@ struct WatchView: View {
         }
     }
 
+    private var pasteDeliveryText: String? { model.input.pasteDelivery.map { "Paste: \($0.rawValue)" } }
+
     private var inputAnnouncement: String {
-        [model.input.pasteDelivery.map { "Paste: \($0.rawValue)" }, model.input.pasteError, model.input.typedNotice]
+        [pasteDeliveryText, model.input.pasteError, model.input.typedNotice]
             .compactMap { $0 }.joined(separator: ". ")
     }
 

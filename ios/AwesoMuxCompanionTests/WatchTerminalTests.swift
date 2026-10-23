@@ -126,11 +126,7 @@ final class WatchTerminalTests: XCTestCase {
     }
 
     func testModeProbesRecoverAfterNativeParameterDigitWrap() async throws {
-        let terminal = WatchTerminal()
-        let host = try mount([terminal])
-        defer { host.close(); terminal.clear() }
-        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
-        try await idle([terminal])
+        let terminal = try await readyTerminal()
         for digits in [255, 256, 257, 300] {
             try terminal.feed(Data("\u{1b}[?2004h\u{1b}[?1h".utf8))
             try terminal.feed(Data(("\u{1b}[?" + String(repeating: "0", count: digits - 4) + "2004$p").utf8))
@@ -225,11 +221,7 @@ final class WatchTerminalTests: XCTestCase {
     }
 
     func testInputReadsPasteAndCursorModesFromNativeEmulatorAndResetsThem() async throws {
-        let terminal = WatchTerminal()
-        let host = try mount([terminal])
-        defer { host.close(); terminal.clear() }
-        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
-        try await idle([terminal])
+        let terminal = try await readyTerminal()
         let initial = await terminal.inputModes()
         XCTAssertEqual(initial, WatchInputModes())
         try terminal.feed(Data("\u{1b}[?2004h\u{1b}[?1h".utf8))
@@ -244,11 +236,7 @@ final class WatchTerminalTests: XCTestCase {
     }
 
     func testModeProbeAccountsForQueriesInAbortedDCSHeaders() async throws {
-        let terminal = WatchTerminal()
-        let host = try mount([terminal])
-        defer { host.close(); terminal.clear() }
-        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
-        try await idle([terminal])
+        let terminal = try await readyTerminal()
         try terminal.feed(Data("\u{1b}[?2004h\u{1b}[?1h\u{1b}P".utf8) + Data([0x9b])
                           + Data("?2004$p\u{1b}P".utf8) + Data([0x9b])
                           + Data("?1$p\u{1b}[?2004l\u{1b}[?1l".utf8))
@@ -258,11 +246,7 @@ final class WatchTerminalTests: XCTestCase {
     }
 
     func testModeProbesWaitForSplitControlStringsAndUTF8WithoutChangingOutput() async throws {
-        let terminal = WatchTerminal()
-        let host = try mount([terminal])
-        defer { host.close(); terminal.clear() }
-        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
-        try await idle([terminal])
+        let terminal = try await readyTerminal()
         for (prefix, suffix) in [(Data("\u{1b}[?2004".utf8), Data("h".utf8)),
                                  (Data("\u{1b}]2;title".utf8), Data("\u{1b}\\".utf8)),
                                  (Data([0xe7, 0x95]), Data([0x8c]))] {
@@ -314,6 +298,15 @@ final class WatchTerminalTests: XCTestCase {
         XCTAssertNotNil(failure)
         XCTAssertFalse(terminal.isReady)
         XCTAssertNil(terminal.readViewportText())
+    }
+
+    private func readyTerminal() async throws -> WatchTerminal {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        addTeardownBlock { await MainActor.run { host.close(); terminal.clear() } }
+        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
+        try await idle([terminal])
+        return terminal
     }
 
     private func fixture(_ name: String) throws -> Data {

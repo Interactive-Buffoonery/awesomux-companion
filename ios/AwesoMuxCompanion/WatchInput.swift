@@ -35,10 +35,7 @@ struct WatchKeyModifiers {
     }
 
     mutating func encode(_ text: String, control heldControl: Bool = false, alt heldAlt: Bool = false) -> Data {
-        let useControl = heldControl || control != .off
-        let useAlt = heldAlt || alt != .off
-        if control == .once { control = .off }
-        if alt == .once { alt = .off }
+        let (useControl, useAlt) = consume(control: heldControl, alt: heldAlt)
         var bytes = Data(text.utf8)
         if useControl, bytes.count == 1, let byte = bytes.first {
             switch byte {
@@ -50,6 +47,14 @@ struct WatchKeyModifiers {
         }
         if useAlt { bytes.insert(0x1b, at: 0) }
         return bytes
+    }
+
+    mutating func consume(control heldControl: Bool = false, alt heldAlt: Bool = false) -> (control: Bool, alt: Bool) {
+        let useControl = heldControl || control != .off
+        let useAlt = heldAlt || alt != .off
+        if control == .once { control = .off }
+        if alt == .once { alt = .off }
+        return (useControl, useAlt)
     }
 
     static func arrow(_ final: Character, application: Bool) -> String {
@@ -160,9 +165,9 @@ final class WatchInput {
         pasteError = nil
         guard !text.isEmpty else { return }
         // Bound allocation before encoding; stripping and CR conversion never shrink UTF-8.
-        guard text.utf8.count <= maximum else { refusePaste(); return }
+        guard text.utf8.count <= maximum else { refusePaste(WatchPaste.tooLarge); return }
         let bytes = WatchPaste.encode(text, bracketed: modes.bracketedPaste)
-        guard bytes.count <= maximum else { refusePaste(); return }
+        guard bytes.count <= maximum else { refusePaste(WatchPaste.tooLarge); return }
         guard WatchPaste.isSafe(text, bracketed: modes.bracketedPaste) else {
             confirmation = Confirmation(text: text, encoded: bytes, generation: generation!, modes: modes)
             return
@@ -185,9 +190,7 @@ final class WatchInput {
     func refuseModeRead(paste: Bool) {
         if paste {
             guard !pasteInFlight, confirmation == nil else { refuseQueuedInput(paste: true); return }
-            pasteSequence = nil
-            pasteDelivery = .notSent
-            pasteError = "The terminal is still receiving a control sequence. Try pasting again when output settles."
+            refusePaste("The terminal is still receiving a control sequence. Try pasting again when output settles.")
         } else {
             typedRefusal = "Key not sent. Try again when terminal output settles."
         }
@@ -239,16 +242,16 @@ final class WatchInput {
         isLive = false
     }
 
-    private func refusePaste() {
+    private func refusePaste(_ error: String? = nil) {
         pasteSequence = nil
         pasteDelivery = .notSent
-        pasteError = WatchPaste.tooLarge
+        if let error { pasteError = error }
     }
 
     private func enqueue(_ bytes: Data, paste: Bool) {
         guard canType, !bytes.isEmpty, bytes.count <= maximum, jobs.count < 64,
               outstanding.count < 512, nextSequence < UInt64.max else {
-            if paste { pasteSequence = nil; pasteDelivery = .notSent }
+            if paste { refusePaste() }
             else if canType { refuseQueuedInput(paste: false) }
             return
         }

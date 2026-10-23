@@ -114,6 +114,13 @@ import Testing
         #expect(decoded.generation == 2)
     }
 
+    @Test func inputWireLayoutStaysByteExact() throws {
+        let frame = Stream.Frame.input(sequence: 0x0102_0304_0506_0708, bytes: Data([0x1b, 0x00, 0xff]))
+        let wire = Data([0x10, 0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 4, 5, 6, 7, 8, 0x1b, 0x00, 0xff])
+        #expect(try Stream.encode(frame, generation: 0xdead_beef) == wire)
+        #expect(try Stream.decode(wire).frame == frame)
+    }
+
     // ADR-0041: an empty input frame is a protocol error and the cap is exact.
     @Test func inputBoundsAreEnforced() throws {
         let header = Data([Stream.FrameType.input.rawValue, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0])

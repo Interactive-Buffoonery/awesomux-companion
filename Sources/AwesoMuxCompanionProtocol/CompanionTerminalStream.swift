@@ -124,9 +124,9 @@ public enum CompanionTerminalStream {
 
         public init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            role = try container.decode(Role.self, forKey: .role)
-            streamVersion = try container.decode(Int.self, forKey: .streamVersion)
-            watchReason = role == .watch ? try? container.decodeIfPresent(WatchReason.self, forKey: .watchReason) : nil
+            self.init(role: try container.decode(Role.self, forKey: .role),
+                      streamVersion: try container.decode(Int.self, forKey: .streamVersion),
+                      watchReason: try? container.decodeIfPresent(WatchReason.self, forKey: .watchReason))
         }
     }
 
@@ -265,7 +265,7 @@ public enum CompanionTerminalStream {
         case .heartbeat: data.append(contentsOf: Data("{}".utf8))
         case .end(let value): try control(value)
         case .input(let sequence, let bytes):
-            guard !bytes.isEmpty, bytes.count <= maximumInputBytes else { throw Failure.invalidInput }
+            try validateInput(bytes)
             try payload(sequence, bytes)
         case .claim(let value): try control(value)
         case .ack(let value): try control(value)
@@ -321,12 +321,16 @@ public enum CompanionTerminalStream {
         case .end: frame = .end(try control(End.self))
         case .input:
             let (sequence, bytes) = try payload()
-            guard !bytes.isEmpty, bytes.count <= maximumInputBytes else { throw Failure.invalidInput }
+            try validateInput(bytes)
             frame = .input(sequence: sequence, bytes: bytes)
         case .claim: frame = .claim(try control(Claim.self))
         case .ack: frame = .ack(try control(Ack.self))
         case .reply: frame = .phoneSent(type)
         }
         return (frame, generation)
+    }
+
+    private static func validateInput(_ bytes: Data) throws {
+        guard !bytes.isEmpty, bytes.count <= maximumInputBytes else { throw Failure.invalidInput }
     }
 }

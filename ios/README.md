@@ -135,6 +135,10 @@ minimighty using its dedicated signing keychain and App Store Connect API key.
 Use `--export-only` to archive and export an IPA without uploading or assigning
 it to a testing group. Logs and the IPA return under `.build/testflight/`.
 The archive and DerivedData use the job's SSD-backed TMPDIR.
+Use `--check-signing` for a small signing and signature-verification probe before
+a full archive. Runner setup installs Apple's public WWDR G3 intermediate in
+the login keychain so the system chain builder can discover it; private signing
+keys stay in the dedicated runner keychain.
 
 Only a TestFlight job sources runner settings that export `HEAVY_GATE_XCODE_AUTH_CONFIG` pointing to a restricted JSON
 file with `private_key_path`, `key_id`, and `issuer_id`, plus

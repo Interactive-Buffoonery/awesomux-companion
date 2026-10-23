@@ -40,7 +40,7 @@ extension WatchConnection {
 extension MacClient: WatchClient {}
 
 protocol WatchFrameConnection: Sendable {
-    @MainActor func send(_ payload: Data, canSend: (@MainActor @Sendable () -> Bool)?) async throws
+    @MainActor func send(_ payload: Data, maximum: Int, canSend: (@MainActor @Sendable () -> Bool)?) async throws
     func receiveFrame(maximum: Int) async throws -> Data
     func cancel()
 }
@@ -73,7 +73,8 @@ final class MacWatchConnection: WatchConnection, Sendable {
         case .claim(let claim): try WatchStream.validate(claim.grid)
         default: throw WatchFailure.invalidStream
         }
-        try await connection.send(CompanionTerminalStream.encode(frame, generation: generation), canSend: canSend)
+        try await connection.send(CompanionTerminalStream.encode(frame, generation: generation),
+                                  maximum: CompanionTerminalStream.maximumFrameBytes, canSend: canSend)
     }
 
     func receive() async throws -> WatchPacket {

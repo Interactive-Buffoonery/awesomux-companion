@@ -22,9 +22,9 @@ struct MacClient: Sendable {
     static let maximumResponseBytes = CompanionProtocol.maximumResponseBytes
     private static let requestTimeout: Duration = .seconds(8)
 
-    static func frameRequest(_ payload: Data) throws -> Data {
+    static func frameRequest(_ payload: Data, maximum: Int = CompanionProtocol.maximumRequestBytes) throws -> Data {
         do {
-            return try CompanionFrame.encode(payload, maximum: CompanionProtocol.maximumRequestBytes)
+            return try CompanionFrame.encode(payload, maximum: maximum)
         } catch CompanionFrame.Failure.tooLarge {
             throw MacClientFailure.oversizedFrame
         } catch {
@@ -142,7 +142,8 @@ struct MacClient: Sendable {
         do {
             try WatchStream.validate(capabilities)
             try Task.checkCancellation()
-            try await connection.send(CompanionProtocol.encoder().encode(request), canSend: canSend)
+            try await connection.send(CompanionProtocol.encoder().encode(request),
+                                      maximum: CompanionProtocol.maximumRequestBytes, canSend: canSend)
             let data = try await withTimeout(requestTimeout) {
                 try await connection.receiveFrame(maximum: maximumResponseBytes)
             }
@@ -267,8 +268,9 @@ private final class FramedConnection: WatchFrameConnection, @unchecked Sendable 
     func cancel() { connection.cancel() }
 
     @MainActor
-    func send(_ payload: Data, canSend: (@MainActor @Sendable () -> Bool)? = nil) async throws {
-        let frame = try MacClient.frameRequest(payload)
+    func send(_ payload: Data, maximum: Int = CompanionProtocol.maximumRequestBytes,
+              canSend: (@MainActor @Sendable () -> Bool)? = nil) async throws {
+        let frame = try MacClient.frameRequest(payload, maximum: maximum)
         let connection = connection
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in

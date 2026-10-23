@@ -98,6 +98,20 @@ final class WatchTransportTests: XCTestCase {
         opened.cancel()
     }
 
+    func testStreamFramingSupportsFullPasteWhileAPIRequestsStayBounded() async throws {
+        let wire = WatchTestWire(replies: [])
+        let opened = MacWatchConnection(connection: wire, capabilities: .init(), accepted: .init(role: .interactive))
+        for count in [8_180, 65_536] {
+            let bytes = Data(repeating: 120, count: count)
+            try await opened.send(.input(sequence: 0, bytes: bytes), generation: 8, canSend: { true })
+            XCTAssertEqual(try Stream.decode(wire.sent.last!).frame, .input(sequence: 0, bytes: bytes))
+        }
+        XCTAssertThrowsError(try MacClient.frameRequest(Data(repeating: 120, count: 8_193)))
+        XCTAssertThrowsError(try MacClient.frameRequest(Data(repeating: 120, count: Stream.maximumFrameBytes + 1),
+                                                       maximum: Stream.maximumFrameBytes))
+        opened.cancel()
+    }
+
     func testWatchWithReasonAcceptsHandshakeButRejectsAllInput() async throws {
         let request = MacClient.watchRequest(connectionID: UUID(), paneID: UUID(), targetVersion: UUID())
         let response = APIResponse(requestID: request.requestID,
@@ -166,7 +180,8 @@ private final class WatchTestWire: WatchFrameConnection, Sendable {
         self.started = started
     }
 
-    @MainActor func send(_ payload: Data, canSend: (@MainActor @Sendable () -> Bool)?) async throws {
+    @MainActor func send(_ payload: Data, maximum: Int, canSend: (@MainActor @Sendable () -> Bool)?) async throws {
+        _ = try MacClient.frameRequest(payload, maximum: maximum)
         guard canSend?() ?? true else { throw CancellationError() }
         state.withLock { $0.sent.append(payload) }
     }

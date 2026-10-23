@@ -79,11 +79,105 @@ PY
   SIGNING=("OTHER_CODE_SIGN_FLAGS=--keychain $HEAVY_GATE_SIGNING_KEYCHAIN")
 fi
 
+DISTRIBUTION_IDENTITY='Apple Distribution'
+if [[ -n "${HEAVY_GATE_XCODE_EXPORT_CONFIG:-}" ]]; then
+  [[ -n "${HEAVY_GATE_REMOTE_JOB:-}" ]] || {
+    echo "Manual export requires an isolated heavy-gate remote job" >&2; exit 1;
+  }
+  python3 - "$HEAVY_GATE_XCODE_EXPORT_CONFIG" "$WORK/export.plist" <<'PYTHON'
+import datetime, hashlib, json, os, plistlib, re, subprocess, sys, uuid
+from pathlib import Path
+
+team = '7CNK4YPCQX'
+bundles = {
+    'com.interactivebuffoonery.awesomux.companion',
+    'com.interactivebuffoonery.awesomux.companion.widgets',
+}
+
+def prepare_export():
+    config = json.loads(Path(sys.argv[1]).read_text())
+    if not isinstance(config, dict) or set(config) != {'signingCertificate', 'profiles'}:
+        raise ValueError()
+    certificate = config['signingCertificate']
+    if not isinstance(certificate, str) or not re.fullmatch(r'[0-9A-F]{40}', certificate):
+        raise ValueError()
+    profiles = config['profiles']
+    if not isinstance(profiles, dict) or set(profiles) != bundles:
+        raise ValueError()
+    validated = {}
+    for bundle, source in profiles.items():
+        if not isinstance(source, str):
+            raise ValueError()
+        path = Path(source)
+        if not path.is_absolute() or path.suffix != '.mobileprovision':
+            raise ValueError()
+        contents = path.read_bytes()
+        decoded = subprocess.run(['security', 'cms', '-D'], input=contents,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        profile = plistlib.loads(decoded.stdout)
+        profile_uuid = profile['UUID']
+        if not isinstance(profile_uuid, str) or str(uuid.UUID(profile_uuid)).upper() != profile_uuid.upper():
+            raise ValueError()
+        profile_uuid = profile_uuid.upper()
+        entitlements = profile['Entitlements']
+        if profile['TeamIdentifier'] != [team] or entitlements['application-identifier'] != f'{team}.{bundle}':
+            raise ValueError()
+        if entitlements.get('get-task-allow') is not False:
+            raise ValueError()
+        if 'ProvisionedDevices' in profile or 'ProvisionsAllDevices' in profile:
+            raise ValueError()
+        expires = profile['ExpirationDate']
+        if not isinstance(expires, datetime.datetime):
+            raise ValueError()
+        if expires.replace(tzinfo=datetime.timezone.utc) <= datetime.datetime.now(datetime.timezone.utc):
+            raise ValueError()
+        certificates = profile['DeveloperCertificates']
+        if not isinstance(certificates, list) or not all(isinstance(item, bytes) for item in certificates):
+            raise ValueError()
+        if certificate not in {hashlib.sha1(item).hexdigest().upper() for item in certificates}:
+            raise ValueError()
+        if profile_uuid in {item[0] for item in validated.values()}:
+            raise ValueError()
+        validated[bundle] = (profile_uuid, contents)
+
+    directory = Path.home() / 'Library/Developer/Xcode/UserData/Provisioning Profiles'
+    directory.mkdir(parents=True, exist_ok=True)
+    for profile_uuid, contents in validated.values():
+        destination = directory / f'{profile_uuid}.mobileprovision'
+        fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'wb') as installed:
+            os.fchmod(installed.fileno(), 0o600)
+            installed.write(contents)
+    options = {
+        'method': 'app-store-connect',
+        'destination': 'export',
+        'teamID': team,
+        'signingStyle': 'manual',
+        'signingCertificate': certificate,
+        'provisioningProfiles': {bundle: item[0] for bundle, item in validated.items()},
+        'manageAppVersionAndBuildNumber': False,
+    }
+    with Path(sys.argv[2]).open('wb') as output:
+        plistlib.dump(options, output)
+
+try:
+    prepare_export()
+except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
+    raise SystemExit('Manual export configuration or App Store profiles are invalid') from None
+PYTHON
+  DISTRIBUTION_IDENTITY="$(python3 - "$WORK/export.plist" <<'PYTHON'
+import plistlib, sys
+from pathlib import Path
+print(plistlib.loads(Path(sys.argv[1]).read_bytes())['signingCertificate'])
+PYTHON
+  )"
+fi
+
 if [[ "$CHECK_SIGNING" == true ]]; then
   [[ -n "${HEAVY_GATE_SIGNING_KEYCHAIN:-}" ]] || {
     echo "Signing probe requires runner credentials" >&2; exit 1;
   }
-  for identity in 'Apple Development' 'Apple Distribution'; do
+  for identity in 'Apple Development' "$DISTRIBUTION_IDENTITY"; do
     cp /usr/bin/true "$WORK/signing-probe"
     codesign --force --sign "$identity" --keychain "$HEAVY_GATE_SIGNING_KEYCHAIN" \
       --timestamp=none "$WORK/signing-probe"
@@ -94,7 +188,8 @@ if [[ "$CHECK_SIGNING" == true ]]; then
   exit 0
 fi
 
-cat > "$WORK/export.plist" <<PLIST
+if [[ -z "${HEAVY_GATE_XCODE_EXPORT_CONFIG:-}" ]]; then
+  cat > "$WORK/export.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -105,6 +200,7 @@ cat > "$WORK/export.plist" <<PLIST
 <key>manageAppVersionAndBuildNumber</key><false/>
 </dict></plist>
 PLIST
+fi
 
 cd "$IOS_DIR"
 if [[ -n "${HEAVY_GATE_REMOTE_JOB:-}" ]]; then
@@ -129,15 +225,17 @@ fi
 zsh script/generate-watch.sh
 echo "Archiving build $BUILD_NUMBER (logs in $OUTPUT)"
 DERIVED_DATA=()
+XCODEBUILD=(xcodebuild)
 if [[ -n "${HEAVY_GATE_REMOTE_JOB:-}" ]]; then
   DERIVED_DATA=(-derivedDataPath "$WORK/DerivedData")
+  XCODEBUILD=(env "CFFIXED_USER_HOME=$HOME" xcodebuild)
 fi
-xcodebuild -project AwesoMuxCompanion.xcodeproj -scheme AwesoMuxCompanion -configuration Release \
+"${XCODEBUILD[@]}" -project AwesoMuxCompanion.xcodeproj -scheme AwesoMuxCompanion -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$WORK/app.xcarchive" -allowProvisioningUpdates \
   ${DERIVED_DATA[@]+"${DERIVED_DATA[@]}"} ${AUTH[@]+"${AUTH[@]}"} ${SIGNING[@]+"${SIGNING[@]}"} \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" archive > "$OUTPUT/archive.log" 2>&1 \
   || { tail -20 "$OUTPUT/archive.log"; exit 1; }
-xcodebuild -exportArchive -archivePath "$WORK/app.xcarchive" -exportOptionsPlist "$WORK/export.plist" \
+"${XCODEBUILD[@]}" -exportArchive -archivePath "$WORK/app.xcarchive" -exportOptionsPlist "$WORK/export.plist" \
   -exportPath "$OUTPUT/export" -allowProvisioningUpdates ${AUTH[@]+"${AUTH[@]}"} > "$OUTPUT/export.log" 2>&1 \
   || { tail -20 "$OUTPUT/export.log"; exit 1; }
 

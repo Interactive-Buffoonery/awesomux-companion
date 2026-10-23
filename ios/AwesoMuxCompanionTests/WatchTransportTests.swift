@@ -35,12 +35,11 @@ final class WatchTransportTests: XCTestCase {
         XCTAssertTrue(wire.cancelled)
     }
 
-    func testRejectsWrongEnvelopeInteractiveRoleMissingAcceptanceAndDenial() async throws {
+    func testRejectsWrongEnvelopeMissingAcceptanceAndDenial() async throws {
         let request = MacClient.watchRequest(connectionID: UUID(), paneID: UUID(), targetVersion: UUID())
         let responses = [
             APIResponse(schemaVersion: 2, requestID: request.requestID, terminalStream: .init(), terminalStreamAccepted: .init(role: .watch)),
             APIResponse(requestID: UUID(), terminalStream: .init(), terminalStreamAccepted: .init(role: .watch)),
-            APIResponse(requestID: request.requestID, terminalStream: .init(), terminalStreamAccepted: .init(role: .interactive)),
             APIResponse(requestID: request.requestID, terminalStream: .init()),
             APIResponse(requestID: request.requestID, error: "denied")
         ]
@@ -73,6 +72,45 @@ final class WatchTransportTests: XCTestCase {
                 XCTAssertEqual(wire.sent.count, allowedAtSend ? 1 : 0)
             }
         }
+    }
+
+    func testInteractiveHandshakePreservesWatchReasonAndSendsOnlyUserFrames() async throws {
+        let request = MacClient.watchRequest(connectionID: UUID(), paneID: UUID(), targetVersion: UUID(),
+                                             preferredGrid: .init(rows: 20, cols: 38))
+        XCTAssertEqual(request.grid, .init(rows: 20, cols: 38))
+        let response = APIResponse(requestID: request.requestID, terminalStreamAccepted: .init(role: .interactive))
+        let wire = WatchTestWire(replies: [try CompanionProtocol.encoder().encode(response)])
+        let opened = try await MacClient.openWatch(connection: wire, request: request, capabilities: .init())
+        XCTAssertEqual(opened.accepted.role, .interactive)
+        try await opened.send(.grid(.init(rows: 20, cols: 38)), generation: 8, canSend: { true })
+        try await opened.send(.input(sequence: 0, bytes: Data([3])), generation: 8, canSend: { true })
+        XCTAssertEqual(try Stream.decode(wire.sent[2]).frame, .input(sequence: 0, bytes: Data([3])))
+        XCTAssertEqual(try Stream.decode(wire.sent[2]).generation, 8)
+        do {
+            try await opened.send(.heartbeat, generation: 8, canSend: { true })
+            XCTFail("Only input, grid and claim may be sent")
+        } catch {}
+        do {
+            try await opened.send(.input(sequence: 1, bytes: Data([4])), generation: 8, canSend: { false })
+            XCTFail("Authority is checked at the wire send")
+        } catch {}
+        XCTAssertEqual(wire.sent.count, 3)
+        opened.cancel()
+    }
+
+    func testWatchWithReasonAcceptsHandshakeButRejectsAllInput() async throws {
+        let request = MacClient.watchRequest(connectionID: UUID(), paneID: UUID(), targetVersion: UUID())
+        let response = APIResponse(requestID: request.requestID,
+                                   terminalStreamAccepted: .init(role: .watch, watchReason: .inputOff))
+        let wire = WatchTestWire(replies: [try CompanionProtocol.encoder().encode(response)])
+        let opened = try await MacClient.openWatch(connection: wire, request: request, capabilities: .init())
+        XCTAssertEqual(opened.accepted.watchReason, .inputOff)
+        do {
+            try await opened.send(.claim(.init(grid: .init(rows: 20, cols: 38))), generation: 8, canSend: { true })
+            XCTFail("Watch must not write interactive frames")
+        } catch {}
+        XCTAssertEqual(wire.sent.count, 1)
+        opened.cancel()
     }
 
     func testMalformedFrameClosesConnectionAndConcurrentReceiveIsRejected() async throws {

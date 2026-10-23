@@ -114,13 +114,15 @@ struct MacClient: Sendable {
                             connectionID: connectionID, decisionAnswer: answer)
     }
 
-    static func watchRequest(connectionID: UUID, paneID: UUID, targetVersion: UUID) -> CompanionAPIRequest {
+    static func watchRequest(connectionID: UUID, paneID: UUID, targetVersion: UUID,
+                             preferredGrid: CompanionTerminalStream.Grid = .init(rows: 24, cols: 80)) -> CompanionAPIRequest {
         CompanionAPIRequest(operation: CompanionOperation.watchTerminal.rawValue, connectionID: connectionID,
                             paneID: paneID, targetVersion: targetVersion,
-                            streamVersion: CompanionTerminalStream.version, grid: .init(rows: 24, cols: 80))
+                            streamVersion: CompanionTerminalStream.version, grid: preferredGrid)
     }
 
     func openWatch(connectionID: UUID, paneID: UUID, targetVersion: UUID,
+                   preferredGrid: CompanionTerminalStream.Grid = .init(rows: 24, cols: 80),
                    canSend: @escaping @MainActor @Sendable () -> Bool = { true }) async throws -> any WatchConnection {
         guard await canSend() else { throw CancellationError() }
         let advertised = try await exchange(CompanionAPIRequest(operation: CompanionOperation.capabilities.rawValue,
@@ -130,7 +132,7 @@ struct MacClient: Sendable {
         guard await canSend() else { throw CancellationError() }
         let connection = try await FramedConnection.open(client: self)
         return try await Self.openWatch(connection: connection,
-            request: Self.watchRequest(connectionID: connectionID, paneID: paneID, targetVersion: targetVersion),
+            request: Self.watchRequest(connectionID: connectionID, paneID: paneID, targetVersion: targetVersion, preferredGrid: preferredGrid),
             capabilities: limits, canSend: canSend)
     }
 
@@ -151,10 +153,12 @@ struct MacClient: Sendable {
                 throw MacClientFailure.invalidResponse
             }
             if let error = response.error { throw MacClientFailure.api(error) }
-            guard response.terminalStreamAccepted == .init(role: .watch) else {
+            guard let accepted = response.terminalStreamAccepted,
+                  accepted.streamVersion == CompanionTerminalStream.version,
+                  accepted.role != .interactive || capabilities.inputFrameMax != nil else {
                 throw MacClientFailure.invalidResponse
             }
-            return MacWatchConnection(connection: connection, capabilities: capabilities)
+            return MacWatchConnection(connection: connection, capabilities: capabilities, accepted: accepted)
         } catch {
             connection.cancel()
             throw error

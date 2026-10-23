@@ -1,9 +1,9 @@
 # awesoMux Companion for iPhone
 
-A read-only companion for awesoMux. It shows which agents (Claude Code, Codex,
+A paired companion for awesoMux. It shows which agents (Claude Code, Codex,
 OpenCode, Pi, Grok) need you, are working, or are done, in four places: the app,
 a Home Screen and Lock Screen widget, a Live Activity (Lock Screen and Dynamic
-Island), and notifications. You answer agents at your Mac; the phone only looks.
+Island), and notifications. Terminal typing is available with the separate Mac-approved Input switch.
 
 SwiftUI, Swift 6, iOS 26+, iPhone and iPad. The phone pairs with awesoMux on
 the Mac and reads `list_agents` and `get_attention_events` over mutual TLS, as
@@ -367,10 +367,41 @@ is bounded; Watch never invents missing history.
 
 The model keeps the Mac grid through phone rotation. Local panning, selection,
 copy and history scrolling do not send input. Native query replies, clipboard
-escape sequences, notifications and link opening are suppressed. Watch never
-sends input, takeover, reply or resize frames, including when no Mac client leads.
-Typing/takeover (#13), phone-width rewrap, Chat (#18) and iPad layout (#11) are
+escape sequences, notifications and link opening are suppressed. Watch-only
+streams never send input, takeover, reply or resize frames, including when no
+Mac client leads. Phone-width rewrap, Chat (#18) and iPad layout (#11) remain
 separate work.
+
+When the Mac accepts an interactive stream and advertises `inputFrameMax`, Take
+over claims with the phone's grid. Attaching remains a follower. Each key sends
+the latest phone grid before its input, allowing the Mac to apply it atomically
+with that key's claim. The grid uses the available terminal view size and the
+renderer cell dimensions; rotation alone sends no resize. The keyboard toggle
+opens a compact Esc, Tab, one-shot/locked Ctrl and Alt, and arrow bar. Double-tap
+a modifier to lock it; tap again to turn it off. A lone Escape owns its frame.
+
+Input uses a separate UIKit responder. The pinned renderer exposes a combined
+write callback for both keys and replies, without a provenance-aware encoder,
+so the app encodes ordinary terminal keys separately and keeps every renderer
+write local. Paste and arrow keys query mode 2004 and DECCKM from the actual
+phone emulator using local DECRQM reports. The Swift paste port follows
+Ghostty's text-insertion strip set, safety checks and bracket/CR encoding. One
+paste is one frame, at most 64 KiB after encoding. Unsafe text needs Send/Cancel
+confirmation; pending confirmation ends with its generation. Snippets, rerun,
+composer/dictation and terminal reply frames are outside this layer.
+
+Paste status distinguishes sent (Mac ack), not sent, and may have run after two
+seconds or disconnect. Sent means forwarded to the daemon socket, not executed
+or accepted by the daemon. Late acks in the same generation can settle an
+uncertain paste. Unacked typing shows a brief disconnect notice. Nothing is
+replayed across reconnect, resync or route change.
+
+Mac integration is awesomux #788. For the driving label, the relay must map a
+Mac leader to `mac` and this phone's leader to its paired connection UUID;
+unknown daemon attachment IDs display “Another terminal is driving”. The
+current protocol advertises no mapping from opaque daemon IDs to device names.
+Real Mac integration must also verify grid-before-input, acknowledgements,
+permission changes, concurrent typing and safe-paste behavior in real TUIs.
 
 Watch closes its connection and clears terminal content when inactive, locked
 or dismissed. Foreground recovery uses a new attach and snapshot, with bounded

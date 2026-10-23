@@ -208,6 +208,25 @@ final class WatchTerminalTests: XCTestCase {
         // verifies clipboard/query behavior, not operating-system notification UI.
     }
 
+    func testInputReadsPasteAndCursorModesFromNativeEmulatorAndResetsThem() async throws {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        defer { host.close(); terminal.clear() }
+        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
+        try await idle([terminal])
+        let initial = await terminal.inputModes()
+        XCTAssertEqual(initial, WatchInputModes())
+        try terminal.feed(Data("\u{1b}[?2004h\u{1b}[?1h".utf8))
+        let enabled = await terminal.inputModes()
+        XCTAssertEqual(enabled, WatchInputModes(bracketedPaste: true, applicationCursor: true))
+        try terminal.feed(Data("\u{1b}[?2004l\u{1b}[?1l".utf8))
+        let disabled = await terminal.inputModes()
+        XCTAssertEqual(disabled, WatchInputModes())
+        let phone = terminal.phoneGrid(for: CGSize(width: 390, height: 500))
+        XCTAssertTrue((20...60).contains(phone.cols))
+        XCTAssertTrue((10...40).contains(phone.rows))
+    }
+
     func testAuthorityIsRecheckedByPendingDrainAndCopy() async throws {
         let terminal = WatchTerminal()
         var allowed = true

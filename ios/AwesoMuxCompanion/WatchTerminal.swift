@@ -107,6 +107,33 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         // until completion so repeated resets cannot accumulate blocked workers.
     }
 
+    func phoneGrid(for size: CGSize) -> CompanionTerminalStream.Grid {
+        var cell = WatchDrawableBudget.cellSize(fontSize: WatchDrawableBudget.maximumFontSize)
+        if let surface, let viewport = surface.viewport, viewport.columns > 0, viewport.rows > 0 {
+            let ratio = CGFloat(WatchDrawableBudget.maximumFontSize / surface.fontSize)
+            cell = CGSize(width: surface.size.width / CGFloat(viewport.columns) * ratio,
+                          height: surface.size.height / CGFloat(viewport.rows) * ratio)
+        }
+        return .init(rows: max(1, min(1000, Int(size.height / max(1, cell.height)))),
+                     cols: max(1, min(1000, Int(size.width / max(1, cell.width)))))
+    }
+
+    // DECRQM reads the actual emulator modes through the public byte path.
+    // All responses stay local; no renderer write is ever network input.
+    func inputModes() async -> WatchInputModes? {
+        guard checkAuthority(), let surface else { return nil }
+        let identity = epoch
+        let versions = surface.modeReports.versions
+        do { try feed(Data("\u{1b}[?2004$p\u{1b}[?1$p".utf8)) } catch { return nil }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while ContinuousClock.now < deadline {
+            guard epoch == identity, checkAuthority(), !Task.isCancelled else { return nil }
+            if let modes = surface.modeReports.read(after: versions) { return modes }
+            do { try await Task.sleep(for: .milliseconds(10)) } catch { return nil }
+        }
+        return nil
+    }
+
     func readViewportText() -> String? {
         guard checkAuthority(), isIdle else { return nil }
         return surface?.session.readViewportText()
@@ -354,6 +381,7 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
     let session: InMemoryTerminalSession
     let view: WatchReadOnlyTerminalView
     let fontSize: Float
+    let modeReports = WatchModeReports()
     @Published private(set) var size: CGSize
     var viewport: InMemoryTerminalViewport?
 
@@ -375,7 +403,11 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
             .custom("keybind", "clear")
         controller = TerminalController(configSource: .none, terminalConfiguration: configuration)
         guard controller.lastConfigurationIssue == nil else { throw WatchTerminalFailure.unsafeConfiguration }
-        session = InMemoryTerminalSession(write: { bytes in discardedWrites.discard(bytes) }, resize: { value in
+        let modeReports = self.modeReports
+        session = InMemoryTerminalSession(write: { bytes in
+            discardedWrites.discard(bytes)
+            modeReports.receive(bytes)
+        }, resize: { value in
             Task { @MainActor in resized(identity, value) }
         })
         view = WatchReadOnlyTerminalView(frame: CGRect(origin: .zero, size: size))
@@ -567,5 +599,45 @@ private struct WatchNativeRepresentable: UIViewRepresentable {
     static func dismantleUIView(_ uiView: WatchReadOnlyTerminalView, coordinator: ()) {
         uiView.setSurfaceVisible(false)
         uiView.controller = nil
+    }
+}
+
+fileprivate final class WatchModeReports: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer: [UInt8] = []
+    private var paste = (version: UInt64(0), enabled: false)
+    private var cursor = (version: UInt64(0), enabled: false)
+
+    var versions: (UInt64, UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        return (paste.version, cursor.version)
+    }
+
+    func read(after versions: (UInt64, UInt64)) -> WatchInputModes? {
+        lock.lock(); defer { lock.unlock() }
+        guard paste.version > versions.0, cursor.version > versions.1 else { return nil }
+        return WatchInputModes(bracketedPaste: paste.enabled, applicationCursor: cursor.enabled)
+    }
+
+    func receive(_ bytes: Data) {
+        lock.lock(); defer { lock.unlock() }
+        for byte in bytes {
+            if byte == 0x1b { buffer = [byte]; continue }
+            guard !buffer.isEmpty else { continue }
+            buffer.append(byte)
+            if byte == 121 {
+                let report = String(decoding: buffer, as: UTF8.self)
+                for mode in ["2004", "1"] {
+                    for state in 1...4 where report == "\u{1b}[?\(mode);\(state)$y" {
+                        let isSet = state == 1 || state == 3
+                        if mode == "2004" { paste = (paste.version &+ 1, isSet) }
+                        else { cursor = (cursor.version &+ 1, isSet) }
+                    }
+                }
+                buffer.removeAll(keepingCapacity: true)
+            } else if buffer.count >= 32 {
+                buffer.removeAll(keepingCapacity: true)
+            }
+        }
     }
 }

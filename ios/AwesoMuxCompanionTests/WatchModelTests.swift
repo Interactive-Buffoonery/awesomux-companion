@@ -376,6 +376,7 @@ private struct WatchTestClient: WatchClient {
     let open: @MainActor @Sendable (@MainActor @Sendable () -> Bool) async throws -> any WatchConnection
 
     func openWatch(connectionID: UUID, paneID: UUID, targetVersion: UUID,
+                   preferredGrid: CompanionTerminalStream.Grid,
                    canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> any WatchConnection {
         try await open(canSend)
     }

@@ -386,7 +386,8 @@ so the app encodes ordinary terminal keys separately and keeps every renderer
 write local. Paste and arrow keys query mode 2004 and DECCKM from the actual
 phone emulator using local DECRQM reports. Probes wait for a complete UTF-8 and
 control-sequence boundary and a drained renderer, so they cannot interrupt
-split output. Request counts fence earlier mode reports; an unavailable probe
+split output. Fresh random marker reports fence earlier mode reports without
+reimplementing native parameter parsing; an unavailable probe
 shows not sent. The Swift paste port follows
 Ghostty's text-insertion strip set, safety checks and bracket/CR encoding. One
 paste is one frame, at most 64 KiB after encoding. Unsafe text needs Send/Cancel

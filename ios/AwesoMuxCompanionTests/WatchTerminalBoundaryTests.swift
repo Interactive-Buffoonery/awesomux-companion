@@ -18,13 +18,10 @@ final class WatchTerminalBoundaryTests: XCTestCase {
         }
     }
 
-    func testCountsModeQueriesButIgnoresStringsAndInterruptedCSI() {
+    func testQueriesAndInterruptedCSIReturnToGround() {
         var boundary = WatchTerminalBoundary()
         boundary.receive(Data("\u{1b}]2;[?2004$p\u{7}\u{1b}[?2004$p\u{1b}[?01$p".utf8))
-        XCTAssertEqual(boundary.pasteRequests, 1)
-        XCTAssertEqual(boundary.cursorRequests, 1)
         boundary.receive(Data("\u{1b}[?2004\u{18}$p".utf8))
-        XCTAssertEqual(boundary.pasteRequests, 1)
         XCTAssertTrue(boundary.canProbe)
     }
     func testC1TransitionsMatchAPCAndDCSKinds() {
@@ -37,7 +34,6 @@ final class WatchTerminalBoundaryTests: XCTestCase {
         var query = WatchTerminalBoundary()
         query.receive(Data("\u{1b}_payload".utf8) + Data([0x9b]) + Data("?2004$p".utf8))
         XCTAssertTrue(query.canProbe)
-        XCTAssertEqual(query.pasteRequests, 1)
         for prefix in ["\u{1b}]title", "\u{1b}Pqpayload", "\u{1b}P:", "\u{1b}P 1"] {
             var boundary = WatchTerminalBoundary()
             boundary.receive(Data(prefix.utf8) + Data([0x9c]))
@@ -53,16 +49,27 @@ final class WatchTerminalBoundaryTests: XCTestCase {
         XCTAssertTrue(boundary.canProbe)
         boundary.receive(Data(("\u{1b}[?" + String(repeating: "0", count: 300) + "2004$p").utf8))
         XCTAssertTrue(boundary.canProbe)
-        XCTAssertEqual(boundary.pasteRequests, 1)
     }
 
-    func testModeReportCountMatchesNativeParameterDigitWrap() {
-        for digits in [255, 256, 257] {
-            var boundary = WatchTerminalBoundary()
-            boundary.receive(Data(("\u{1b}[?" + String(repeating: "0", count: digits - 4) + "2004$p").utf8))
-            XCTAssertTrue(boundary.canProbe)
-            XCTAssertEqual(boundary.pasteRequests, digits == 256 ? 0 : 1)
-        }
+    func testModeProbeNeedsFreshReportsAndItsOrderedMarkers() {
+        let reports = WatchModeReports()
+        let first = UUID(), second = UUID()
+        let markers: [UInt16] = [40_001, 50_002, 60_003]
+        let modes = Data("\u{1b}[?2004;1$y\u{1b}[?1;1$y".utf8)
+        let end = Data(markers.map { "\u{1b}[?\($0);0$y" }.joined().utf8)
+        reports.receive(modes)
+        reports.beginProbe(first, markers: markers)
+        reports.receive(end)
+        XCTAssertNil(reports.readProbe(first))
+        reports.receive(Data("\u{1b}[?2004;2$y\u{1b}[?1;2$y".utf8))
+        reports.receive(Data("\u{1b}[?40001;0$y\u{1b}[?60003;0$y".utf8))
+        XCTAssertNil(reports.readProbe(first))
+        reports.receive(end)
+        XCTAssertEqual(reports.readProbe(first), WatchInputModes())
+        reports.beginProbe(second, markers: [40_004, 50_005, 60_006])
+        reports.receive(modes + end)
+        XCTAssertNil(reports.readProbe(first))
+        XCTAssertNil(reports.readProbe(second))
     }
 
     func testInvalidUTF8AndStrayC1DoNotLeaveOpenSequences() {

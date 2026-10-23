@@ -1,7 +1,6 @@
 import Foundation
 
-// Tracks only parser boundaries and DECRQM request counts. Modes themselves
-// are read from libghostty's reports, never inferred from the output bytes.
+// Tracks parser boundaries only. Modes are read from libghostty reports.
 struct WatchTerminalBoundary {
     private enum State {
         case ground, escape, escapeIntermediate, csi, osc, apc
@@ -9,11 +8,6 @@ struct WatchTerminalBoundary {
     }
     private var state = State.ground
     private var utf8Remaining = 0
-    private var csi: [UInt8] = []
-    private var csiTruncated = false
-    private var csiDigits: UInt8 = 0
-    private(set) var pasteRequests: UInt64 = 0
-    private(set) var cursorRequests: UInt64 = 0
     var canProbe: Bool { state == .ground && utf8Remaining == 0 }
 
     mutating func receive(_ bytes: Data) {
@@ -35,12 +29,12 @@ struct WatchTerminalBoundary {
         }
         // Ghostty's parser treats ESC and CAN/SUB as global transitions,
         // including inside OSC/DCS. High bytes inside strings are payload.
-        if byte == 0x1b { state = .escape; beginCSI(); return }
+        if byte == 0x1b { state = .escape; return }
         if byte == 0x18 || byte == 0x1a { state = .ground; return }
         if state != .ground, state != .osc, state != .dcsIgnore, state != .dcsPassthrough,
            (0x80...0x9f).contains(byte) {
             switch byte {
-            case 0x9b: state = .csi; beginCSI()
+            case 0x9b: state = .csi
             case 0x9d: state = .osc
             case 0x90: state = .dcsEntry
             case 0x98, 0x9e, 0x9f: state = .apc
@@ -52,7 +46,7 @@ struct WatchTerminalBoundary {
         case .ground: break
         case .escape:
             switch byte {
-            case 0x5b: state = .csi; beginCSI()
+            case 0x5b: state = .csi
             case 0x5d: state = .osc
             case 0x50: state = .dcsEntry
             case 0x58, 0x5e, 0x5f: state = .apc
@@ -63,17 +57,7 @@ struct WatchTerminalBoundary {
         case .escapeIntermediate:
             if (0x30...0x7e).contains(byte) { state = .ground }
         case .csi:
-            if (48...57).contains(byte) { csiDigits &+= 1 }
-            if (0x20...0x7e).contains(byte) {
-                // Normalize leading zeroes so even a long valid mode query is counted.
-                if csi == [63, 48], (48...57).contains(byte) {
-                    if byte != 48 { csi[1] = byte }
-                } else if csi.count < 256 { csi.append(byte) } else { csiTruncated = true }
-            }
-            if (0x40...0x7e).contains(byte) {
-                countModeRequest()
-                state = .ground
-            }
+            if (0x40...0x7e).contains(byte) { state = .ground }
         case .osc:
             if byte == 7 { state = .ground }
         case .dcsEntry:
@@ -98,16 +82,4 @@ struct WatchTerminalBoundary {
         }
     }
 
-    private mutating func beginCSI() {
-        csi.removeAll(keepingCapacity: true)
-        csiTruncated = false
-        csiDigits = 0
-    }
-
-    private mutating func countModeRequest() {
-        guard !csiTruncated, csiDigits > 0, csi.first == 63, csi.suffix(2).elementsEqual([36, 112]),
-              let value = Int(String(decoding: csi.dropFirst().dropLast(2), as: UTF8.self)) else { return }
-        if value == 2004 { pasteRequests &+= 1 }
-        if value == 1 { cursorRequests &+= 1 }
-    }
 }

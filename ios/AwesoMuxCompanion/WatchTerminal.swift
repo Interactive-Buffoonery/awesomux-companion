@@ -124,7 +124,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     }
 
     // Probe only between complete parser sequences, after native output drains.
-    // Request counts fence late reports from the Mac's own earlier DECRQM queries.
+    // Fresh marker reports fence replies queued by earlier Mac queries.
     func inputModes() async -> WatchInputModes? {
         guard checkAuthority(), let surface else { return nil }
         let identity = epoch
@@ -137,11 +137,13 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         guard epoch == identity, checkAuthority(), !Task.isCancelled else { return nil }
         modeProbe = probe
         defer { if modeProbe == probe { modeProbe = nil } }
-        do { try feed(Data("\u{1b}[?2004$p\u{1b}[?1$p".utf8)) } catch { return nil }
-        let expected = (boundary.pasteRequests, boundary.cursorRequests)
+        let markers = (0..<3).map { _ in UInt16.random(in: 32_768...65_535) }
+        surface.modeReports.beginProbe(probe, markers: markers)
+        let queries = "\u{1b}[?2004$p\u{1b}[?1$p" + markers.map { "\u{1b}[?\($0)$p" }.joined()
+        do { try feed(Data(queries.utf8)) } catch { return nil }
         while ContinuousClock.now < deadline {
             guard epoch == identity, checkAuthority(), !Task.isCancelled else { return nil }
-            if let modes = surface.modeReports.read(expected: expected) { return modes }
+            if let modes = surface.modeReports.readProbe(probe) { return modes }
             do { try await Task.sleep(for: .milliseconds(10)) } catch { return nil }
         }
         return nil
@@ -615,16 +617,30 @@ private struct WatchNativeRepresentable: UIViewRepresentable {
     }
 }
 
-fileprivate final class WatchModeReports: @unchecked Sendable {
+final class WatchModeReports: @unchecked Sendable {
     private let lock = NSLock()
     private var buffer: [UInt8] = []
     private var paste = (version: UInt64(0), enabled: false)
     private var cursor = (version: UInt64(0), enabled: false)
 
-    func read(expected: (UInt64, UInt64)) -> WatchInputModes? {
+    private struct Probe {
+        let id: UUID
+        let markers: [UInt16]
+        let baseline: (UInt64, UInt64)
+        var matched = 0
+        var result: WatchInputModes?
+    }
+    private var probe: Probe?
+
+    func beginProbe(_ id: UUID, markers: [UInt16]) {
         lock.lock(); defer { lock.unlock() }
-        guard paste.version >= expected.0, cursor.version >= expected.1 else { return nil }
-        return WatchInputModes(bracketedPaste: paste.enabled, applicationCursor: cursor.enabled)
+        probe = Probe(id: id, markers: markers, baseline: (paste.version, cursor.version))
+    }
+
+    func readProbe(_ id: UUID) -> WatchInputModes? {
+        lock.lock(); defer { lock.unlock() }
+        guard probe?.id == id else { return nil }
+        return probe?.result
     }
 
     func receive(_ bytes: Data) {
@@ -635,6 +651,19 @@ fileprivate final class WatchModeReports: @unchecked Sendable {
             buffer.append(byte)
             if byte == 121 {
                 let report = String(decoding: buffer, as: UTF8.self)
+                if var pending = probe, pending.result == nil, !pending.markers.isEmpty {
+                    let marker = pending.markers[pending.matched]
+                    if report == "\u{1b}[?\(marker);0$y" {
+                        pending.matched += 1
+                        if pending.matched == pending.markers.count {
+                            if paste.version > pending.baseline.0, cursor.version > pending.baseline.1 {
+                                pending.result = WatchInputModes(bracketedPaste: paste.enabled, applicationCursor: cursor.enabled)
+                            }
+                            pending.matched = 0
+                        }
+                    } else { pending.matched = 0 }
+                    probe = pending
+                }
                 for mode in ["2004", "1"] {
                     for state in 1...4 where report == "\u{1b}[?\(mode);\(state)$y" {
                         let isSet = state == 1 || state == 3

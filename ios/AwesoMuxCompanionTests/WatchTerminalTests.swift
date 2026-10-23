@@ -131,12 +131,11 @@ final class WatchTerminalTests: XCTestCase {
         defer { host.close(); terminal.clear() }
         try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
         try await idle([terminal])
-        for digits in [255, 256, 257] {
-            let before = terminal.discardedWriteByteCount
+        for digits in [255, 256, 257, 300] {
+            try terminal.feed(Data("\u{1b}[?2004h\u{1b}[?1h".utf8))
             try terminal.feed(Data(("\u{1b}[?" + String(repeating: "0", count: digits - 4) + "2004$p").utf8))
+            try terminal.feed(Data("\u{1b}[?2004l\u{1b}[?1l".utf8))
             try await idle([terminal])
-            XCTAssertEqual(terminal.discardedWriteByteCount - before,
-                           digits == 256 ? 0 : Data("\u{1b}[?2004;2$y".utf8).count)
             let modes = await terminal.inputModes()
             XCTAssertEqual(modes, WatchInputModes())
         }

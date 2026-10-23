@@ -171,9 +171,10 @@ Xcode 16 and later.
 
 This configuration is accepted only in an isolated remote job. Export uses manual
 signing with the certificate fingerprint and profile UUIDs, avoiding cloud
-signing. Archive and export retain the API authentication and provisioning-update
-flags. Remote `xcodebuild` invocations set `CFFIXED_USER_HOME` to the disposable
-HOME so Xcode discovers those profiles and keeps its home writes isolated.
+signing. Archive retains API authentication and provisioning-update flags; manual
+export omits them. With manual export configured, remote `xcodebuild` invocations
+set `CFFIXED_USER_HOME` to the disposable HOME so Xcode discovers those profiles
+and keeps its home writes isolated.
 `--check-signing` validates and installs the configured profiles before probing
 signing, using the configured distribution certificate. Without this configuration,
 export keeps automatic signing; local Xcode behavior is unchanged.

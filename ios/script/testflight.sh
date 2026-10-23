@@ -86,6 +86,7 @@ if [[ -n "${HEAVY_GATE_XCODE_EXPORT_CONFIG:-}" ]]; then
   }
   python3 - "$HEAVY_GATE_XCODE_EXPORT_CONFIG" "$WORK/export.plist" <<'PYTHON'
 import datetime, hashlib, json, os, plistlib, re, subprocess, sys, uuid
+from xml.parsers.expat import ExpatError
 from pathlib import Path
 
 team = '7CNK4YPCQX'
@@ -142,6 +143,8 @@ def prepare_export():
 
     directory = Path.home() / 'Library/Developer/Xcode/UserData/Provisioning Profiles'
     directory.mkdir(parents=True, exist_ok=True)
+    if not directory.resolve().is_relative_to(Path.home().resolve()):
+        raise ValueError()
     for profile_uuid, contents in validated.values():
         destination = directory / f'{profile_uuid}.mobileprovision'
         fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
@@ -162,7 +165,7 @@ def prepare_export():
 
 try:
     prepare_export()
-except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
+except (OSError, ValueError, KeyError, TypeError, AttributeError, ExpatError, subprocess.SubprocessError):
     raise SystemExit('Manual export configuration or App Store profiles are invalid') from None
 PYTHON
   DISTRIBUTION_IDENTITY="$(python3 - "$WORK/export.plist" <<'PYTHON'
@@ -228,15 +231,21 @@ DERIVED_DATA=()
 XCODEBUILD=(xcodebuild)
 if [[ -n "${HEAVY_GATE_REMOTE_JOB:-}" ]]; then
   DERIVED_DATA=(-derivedDataPath "$WORK/DerivedData")
-  XCODEBUILD=(env "CFFIXED_USER_HOME=$HOME" xcodebuild)
+  if [[ -n "${HEAVY_GATE_XCODE_EXPORT_CONFIG:-}" ]]; then
+    XCODEBUILD=(env "CFFIXED_USER_HOME=$HOME" xcodebuild)
+  fi
 fi
 "${XCODEBUILD[@]}" -project AwesoMuxCompanion.xcodeproj -scheme AwesoMuxCompanion -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$WORK/app.xcarchive" -allowProvisioningUpdates \
   ${DERIVED_DATA[@]+"${DERIVED_DATA[@]}"} ${AUTH[@]+"${AUTH[@]}"} ${SIGNING[@]+"${SIGNING[@]}"} \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" archive > "$OUTPUT/archive.log" 2>&1 \
   || { tail -20 "$OUTPUT/archive.log"; exit 1; }
+EXPORT_AUTH=(-allowProvisioningUpdates ${AUTH[@]+"${AUTH[@]}"})
+if [[ -n "${HEAVY_GATE_XCODE_EXPORT_CONFIG:-}" ]]; then
+  EXPORT_AUTH=()
+fi
 "${XCODEBUILD[@]}" -exportArchive -archivePath "$WORK/app.xcarchive" -exportOptionsPlist "$WORK/export.plist" \
-  -exportPath "$OUTPUT/export" -allowProvisioningUpdates ${AUTH[@]+"${AUTH[@]}"} > "$OUTPUT/export.log" 2>&1 \
+  -exportPath "$OUTPUT/export" ${EXPORT_AUTH[@]+"${EXPORT_AUTH[@]}"} > "$OUTPUT/export.log" 2>&1 \
   || { tail -20 "$OUTPUT/export.log"; exit 1; }
 
 if [[ "$EXPORT_ONLY" == true ]]; then

@@ -180,6 +180,19 @@ final class WatchInputTests: XCTestCase {
         input.disconnect()
     }
 
+    func testAckDoesNotClearRefusedKeyNotice() async {
+        let (input, wire) = fixture()
+        input.ready(); input.type(Data([65]))
+        await drain(wire, count: 2)
+        input.refuseModeRead(paste: false)
+        let refusal = input.typedNotice
+        input.acknowledge(0, generation: 10)
+        XCTAssertEqual(input.typedNotice, refusal)
+        input.dismissTypedNotice()
+        XCTAssertNil(input.typedNotice)
+        input.disconnect()
+    }
+
     func testResyncFencesSuspendedWriteWithoutCancellingSharedTransport() async {
         let (input, wire) = fixture()
         input.ready(); wire.blockGrid = true
@@ -217,6 +230,29 @@ final class WatchInputTests: XCTestCase {
         XCTAssertEqual(input.pasteDelivery, .notSent)
         XCTAssertNotNil(input.pasteError)
         XCTAssertTrue(wire.frames.isEmpty)
+        keyboard.stopInput(); input.disconnect()
+    }
+
+    func testFailedModeProbeDoesNotBlockEveryQueuedArrowBeforeControlC() async {
+        let (input, wire) = fixture()
+        input.ready()
+        let keyboard = WatchKeyboardResponder()
+        keyboard.input = input
+        var probes = 0
+        var resume: CheckedContinuation<WatchInputModes?, Never>?
+        keyboard.readModes = {
+            probes += 1
+            return await withCheckedContinuation { resume = $0 }
+        }
+        keyboard.arrow("A")
+        for _ in 0..<100 { if resume != nil { break }; await Task.yield() }
+        keyboard.arrow("A"); keyboard.arrow("A")
+        keyboard.insertText("\u{03}")
+        resume?.resume(returning: nil)
+        await drain(wire, count: 2)
+        XCTAssertEqual(probes, 1)
+        XCTAssertEqual(wire.frames[1].frame, .input(sequence: 0, bytes: Data([3])))
+        XCTAssertNotNil(input.typedNotice)
         keyboard.stopInput(); input.disconnect()
     }
 

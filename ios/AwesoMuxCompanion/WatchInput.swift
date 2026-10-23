@@ -81,7 +81,11 @@ final class WatchInput {
     private(set) var watchMessage: String?
     private(set) var pasteDelivery: Delivery?
     private(set) var pasteError: String?
-    private(set) var typedNotice: String?
+    private var typedRefusal: String?
+    private var typedUncertain = false
+    var typedNotice: String? {
+        typedRefusal ?? (typedUncertain ? "Typed input may have run. Check the terminal before typing it again." : nil)
+    }
     private(set) var confirmation: Confirmation?
     var preferredGrid = Stream.Grid(rows: 24, cols: 80)
     var leader: String?
@@ -177,7 +181,7 @@ final class WatchInput {
     }
 
     func cancelPaste() { confirmation = nil }
-    func dismissTypedNotice() { typedNotice = nil }
+    func dismissTypedNotice() { typedRefusal = nil; typedUncertain = false }
     func refuseModeRead(paste: Bool) {
         if paste {
             guard !pasteInFlight, confirmation == nil else { refuseQueuedInput(paste: true); return }
@@ -185,12 +189,12 @@ final class WatchInput {
             pasteDelivery = .notSent
             pasteError = "The terminal is still receiving a control sequence. Try pasting again when output settles."
         } else {
-            typedNotice = "Key not sent. Try again when terminal output settles."
+            typedRefusal = "Key not sent. Try again when terminal output settles."
         }
     }
     func refuseQueuedInput(paste: Bool) {
         if paste { pasteError = "A paste is already waiting. Try again after it settles." }
-        else { typedNotice = "Key not sent. Input is busy; try again after it settles." }
+        else { typedRefusal = "Key not sent. Input is busy; try again after it settles." }
     }
 
     func acknowledge(_ sequence: UInt64, generation: UInt32) {
@@ -198,14 +202,14 @@ final class WatchInput {
         highestAck = max(highestAck ?? sequence, sequence)
         outstanding = outstanding.filter { $0.key > sequence }
         if let pasteSequence, pasteSequence <= sequence { pasteDelivery = .sent }
-        if let highestTyped, highestTyped <= sequence { typedNotice = nil }
+        if let highestTyped, highestTyped <= sequence { typedUncertain = false }
     }
 
     func checkDeadlines() {
         let expired = outstanding.filter { now() - $0.value >= 2 }
         if let pasteSequence, expired[pasteSequence] != nil { pasteDelivery = .mayHaveRun }
         if expired.keys.contains(where: { $0 != pasteSequence }) {
-            typedNotice = "Typed input may have run. Check the terminal before typing it again."
+            typedUncertain = true
         }
         for sequence in expired.keys { outstanding.removeValue(forKey: sequence) }
     }
@@ -220,7 +224,7 @@ final class WatchInput {
 
     private func endGeneration() {
         if let highestTyped, highestAck.map({ highestTyped > $0 }) ?? true {
-            typedNotice = "Typed input may have run. Check the terminal before typing it again."
+            typedUncertain = true
         }
         if pasteDelivery == .sending {
             pasteDelivery = pasteSequence.map { outstanding[$0] != nil ? .mayHaveRun : .notSent } ?? .notSent

@@ -27,4 +27,42 @@ final class WatchTerminalBoundaryTests: XCTestCase {
         XCTAssertEqual(boundary.pasteRequests, 1)
         XCTAssertTrue(boundary.canProbe)
     }
+    func testC1TransitionsMatchAPCAndDCSKinds() {
+        for prefix in ["\u{1b}_payload", "\u{1b}Xpayload", "\u{1b}^payload", "\u{1b}P", "\u{1b}P1", "\u{1b}P "] {
+            var boundary = WatchTerminalBoundary()
+            boundary.receive(Data(prefix.utf8))
+            boundary.receive(Data([0x9c]))
+            XCTAssertTrue(boundary.canProbe, prefix)
+        }
+        var query = WatchTerminalBoundary()
+        query.receive(Data("\u{1b}_payload".utf8) + Data([0x9b]) + Data("?2004$p".utf8))
+        XCTAssertTrue(query.canProbe)
+        XCTAssertEqual(query.pasteRequests, 1)
+        for prefix in ["\u{1b}]title", "\u{1b}Pqpayload", "\u{1b}P:", "\u{1b}P 1"] {
+            var boundary = WatchTerminalBoundary()
+            boundary.receive(Data(prefix.utf8) + Data([0x9c]))
+            XCTAssertFalse(boundary.canProbe, prefix)
+            boundary.receive(Data("\u{1b}\\".utf8))
+            XCTAssertTrue(boundary.canProbe)
+        }
+    }
+
+    func testLongCSIRecoversAndCountsZeroPaddedModeRequests() {
+        var boundary = WatchTerminalBoundary()
+        boundary.receive(Data(("\u{1b}[" + String(repeating: "1;", count: 300) + "m").utf8))
+        XCTAssertTrue(boundary.canProbe)
+        boundary.receive(Data(("\u{1b}[?" + String(repeating: "0", count: 300) + "2004$p").utf8))
+        XCTAssertTrue(boundary.canProbe)
+        XCTAssertEqual(boundary.pasteRequests, 1)
+    }
+
+    func testInvalidUTF8AndStrayC1DoNotLeaveOpenSequences() {
+        let cases: [[UInt8]] = [[0xc0], [0xf5], [0x80], [0x9b], [0xc2, 0x1b, 0x5b, 0x6d]]
+        for bytes in cases {
+            var boundary = WatchTerminalBoundary()
+            boundary.receive(Data(bytes))
+            XCTAssertTrue(boundary.canProbe)
+        }
+    }
+
 }

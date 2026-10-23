@@ -396,7 +396,8 @@ composer/dictation and terminal reply frames are outside this layer.
 Paste status distinguishes sent (Mac ack), not sent, and may have run after two
 seconds or disconnect. Sent means forwarded to the daemon socket, not executed
 or accepted by the daemon. Late acks in the same generation can settle an
-uncertain paste. Unacked typing shows a brief disconnect notice. Nothing is
+uncertain paste. Unacked typing shows a brief notice after two seconds or
+disconnect. Nothing is
 replayed across reconnect, resync or route change.
 
 Mac integration is awesomux #788. For the driving label, the relay must map a

@@ -64,6 +64,10 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
         else { append(.key(text == "\n" ? "\r" : text, control: false, alt: false)) }
     }
 
+    func arrow(_ final: Character, control: Bool = false, alt: Bool = false) {
+        append(.arrow(final, control: control, alt: alt))
+    }
+
     func deleteBackward() { append(.key("\u{7f}", control: false, alt: false)) }
 
     override func paste(_ sender: Any?) {
@@ -96,10 +100,10 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
             case .keyboardEnd: special = "\u{1b}[F"
             case .keyboardPageUp: special = "\u{1b}[5~"
             case .keyboardPageDown: special = "\u{1b}[6~"
-            case .keyboardUpArrow: append(.arrow("A", control: control, alt: alt)); continue
-            case .keyboardDownArrow: append(.arrow("B", control: control, alt: alt)); continue
-            case .keyboardRightArrow: append(.arrow("C", control: control, alt: alt)); continue
-            case .keyboardLeftArrow: append(.arrow("D", control: control, alt: alt)); continue
+            case .keyboardUpArrow: arrow("A", control: control, alt: alt); continue
+            case .keyboardDownArrow: arrow("B", control: control, alt: alt); continue
+            case .keyboardRightArrow: arrow("C", control: control, alt: alt); continue
+            case .keyboardLeftArrow: arrow("D", control: control, alt: alt); continue
             default: special = nil
             }
             if let special { append(.key(special, control: control, alt: alt)) }
@@ -151,6 +155,7 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
         workerSessionID = sessionID
         worker = Task { [weak self] in
             guard let self else { return }
+            var modesUnavailable = false
             while self.epoch == identity, !self.actions.isEmpty, !Task.isCancelled {
                 let action = self.actions.removeFirst()
                 guard let input = self.input, input.sessionID == sessionID, input.generation == generation, input.canType else {
@@ -164,17 +169,25 @@ final class WatchKeyboardResponder: UIView, UIKeyInput {
                     if control || alt {
                         input.type(Data("\u{1b}[1;\(1 + (control ? 4 : 0) + (alt ? 2 : 0))\(final)".utf8))
                     } else {
+                        guard !modesUnavailable else { input.refuseModeRead(paste: false); continue }
                         guard let modes = await self.readModes(), !Task.isCancelled,
                               input.sessionID == sessionID, input.canType else {
-                            if !Task.isCancelled, input.sessionID == sessionID { input.refuseModeRead(paste: false) }
+                            if !Task.isCancelled, input.sessionID == sessionID {
+                                modesUnavailable = true
+                                input.refuseModeRead(paste: false)
+                            }
                             continue
                         }
                         input.type(Data(WatchKeyModifiers.arrow(final, application: modes.applicationCursor).utf8))
                     }
                 case .paste(let text):
+                    guard !modesUnavailable else { input.refuseModeRead(paste: true); continue }
                     guard let modes = await self.readModes(), !Task.isCancelled,
                           input.sessionID == sessionID, input.canType else {
-                        if !Task.isCancelled, input.sessionID == sessionID { input.refuseModeRead(paste: true) }
+                        if !Task.isCancelled, input.sessionID == sessionID {
+                            modesUnavailable = true
+                            input.refuseModeRead(paste: true)
+                        }
                         continue
                     }
                     input.paste(text, modes: modes)

@@ -1,7 +1,7 @@
 # Pending decisions (direct paired transport)
 
-`list_pending_decisions` requires a separate Mac-approved Decide grant for
-explicit workspace IDs. It returns `pendingDecisions`, fresh retained
+`list_pending_decisions` requires a separate Mac-approved Decide switch for
+the phone, which covers every workspace. It returns `pendingDecisions`, fresh retained
 `decisionOutcomes`, and `remoteDecisionsEnabled`. A disabled provider/version
 returns no actionable requests. Pairing and status access never enable Decide.
 The native-prompt race release gate is independent of transport fixture tests.

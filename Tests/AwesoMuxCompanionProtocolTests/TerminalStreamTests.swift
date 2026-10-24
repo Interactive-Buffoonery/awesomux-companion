@@ -19,6 +19,9 @@ import Testing
         .leader(.init(leader: nil)),
         .heartbeat,
         .end(.init(reason: .revoked)),
+        .input(sequence: 3, bytes: Data("ls\r".utf8)),
+        .claim(.init(grid: .init(rows: 40, cols: 60))),
+        .ack(.init(sequence: 3)),
     ]
 
     @Test(arguments: frames) func frameRoundTrips(_ frame: Stream.Frame) throws {
@@ -102,15 +105,46 @@ import Testing
         #expect(throws: Stream.Failure.invalidControl) {
             try Stream.decode(Data([Stream.FrameType.end.rawValue, 0, 0, 0, 1]) + Data("{\"reason\":\"later\"}".utf8))
         }
-        #expect(throws: Stream.Failure.invalidControl) { try Stream.encode(.phoneSent(.input), generation: 1) }
+        #expect(throws: Stream.Failure.invalidControl) { try Stream.encode(.phoneSent(.reply), generation: 1) }
     }
 
-    @Test func phoneSentTypesDecodeOnlyAsRejectable() throws {
-        for type in [Stream.FrameType.input, .reply, .claim, .ack] {
-            let decoded = try Stream.decode(Data([type.rawValue, 0, 0, 0, 2]) + Data([0, 0, 0, 0, 0, 0, 0, 1, 0x61]))
-            #expect(decoded.frame == .phoneSent(type))
-            #expect(decoded.generation == 2)
+    @Test func replyDecodesOnlyAsRejectable() throws {
+        let decoded = try Stream.decode(Data([Stream.FrameType.reply.rawValue, 0, 0, 0, 2]) + Data([0, 0, 0, 0, 0, 0, 0, 1, 0x61]))
+        #expect(decoded.frame == .phoneSent(.reply))
+        #expect(decoded.generation == 2)
+    }
+
+    @Test func inputWireLayoutStaysByteExact() throws {
+        let frame = Stream.Frame.input(sequence: 0x0102_0304_0506_0708, bytes: Data([0x1b, 0x00, 0xff]))
+        let wire = Data([0x10, 0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 4, 5, 6, 7, 8, 0x1b, 0x00, 0xff])
+        #expect(try Stream.encode(frame, generation: 0xdead_beef) == wire)
+        #expect(try Stream.decode(wire).frame == frame)
+    }
+
+    // ADR-0041: an empty input frame is a protocol error and the cap is exact.
+    @Test func inputBoundsAreEnforced() throws {
+        let header = Data([Stream.FrameType.input.rawValue, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0])
+        #expect(throws: Stream.Failure.invalidInput) { try Stream.decode(header) }
+        #expect(throws: Stream.Failure.invalidInput) { try Stream.encode(.input(sequence: 0, bytes: Data()), generation: 1) }
+        let full = Data(repeating: 0x61, count: Stream.maximumInputBytes)
+        #expect(try Stream.decode(Stream.encode(.input(sequence: 0, bytes: full), generation: 1)).frame == .input(sequence: 0, bytes: full))
+        #expect(throws: Stream.Failure.invalidInput) { try Stream.encode(.input(sequence: 0, bytes: full + [0x61]), generation: 1) }
+    }
+
+    @Test func watchReasonIsLenientAndWatchOnly() throws {
+        func accepted(_ json: String) throws -> Stream.Accepted {
+            try CompanionProtocol.decoder().decode(Stream.Accepted.self, from: Data(json.utf8))
         }
+        #expect(try accepted("{\"role\":\"watch\",\"streamVersion\":1,\"watchReason\":\"input_off\"}").watchReason == .inputOff)
+        #expect(try accepted("{\"role\":\"watch\",\"streamVersion\":1,\"watchReason\":\"later\"}").watchReason == nil)
+        #expect(try accepted("{\"role\":\"interactive\",\"streamVersion\":1,\"watchReason\":\"input_off\"}").watchReason == nil)
+        #expect(Stream.Accepted(role: .interactive, watchReason: .remotePane).watchReason == nil)
+    }
+
+    @Test func olderCapabilitiesHaveNoInput() throws {
+        let old = Data(#"{"version":1,"maximumDataBytes":65536,"maximumPendingBytes":4194304,"maximumSnapshotBytes":8388608,"heartbeatSeconds":15,"idleTimeoutSeconds":45,"maximumStreamsPerDevice":2,"maximumStreamsPerMac":4}"#.utf8)
+        #expect(try CompanionProtocol.decoder().decode(Stream.Capabilities.self, from: old).inputFrameMax == nil)
+        #expect(Stream.Capabilities().inputFrameMax == 65_536)
     }
 
     @Test func capabilityDiscoveryUsesPairedRequestEnvelope() throws {

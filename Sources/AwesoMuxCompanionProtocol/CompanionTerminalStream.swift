@@ -16,6 +16,8 @@ public enum CompanionTerminalStream {
     public static let version = 1
     public static let maximumPendingBytes = 4 * 1024 * 1024
     public static let maximumDataBytes = 64 * 1024
+    /// ADR-0041: one `input` frame carries at most this many encoded terminal bytes.
+    public static let maximumInputBytes = 64 * 1024
     public static let maximumSnapshotBytes = 8 * 1024 * 1024
     public static let heartbeatSeconds: TimeInterval = 15
     public static let idleTimeoutSeconds: TimeInterval = 45
@@ -53,6 +55,12 @@ public enum CompanionTerminalStream {
         case interactive
     }
 
+    /// Why an accepted stream is Watch-only (ADR-0041), so the phone can explain it.
+    public enum WatchReason: String, Codable, Sendable {
+        case inputOff = "input_off"
+        case remotePane = "remote_pane"
+    }
+
     public enum EndReason: String, Codable, Sendable {
         case closed
         case superseded
@@ -85,6 +93,8 @@ public enum CompanionTerminalStream {
         public let idleTimeoutSeconds: Int
         public let maximumStreamsPerDevice: Int
         public let maximumStreamsPerMac: Int
+        /// Absent from Macs that cannot accept device input.
+        public let inputFrameMax: Int?
 
         public init() {
             version = CompanionTerminalStream.version
@@ -95,6 +105,7 @@ public enum CompanionTerminalStream {
             idleTimeoutSeconds = Int(CompanionTerminalStream.idleTimeoutSeconds)
             maximumStreamsPerDevice = CompanionTerminalStream.maximumStreamsPerDevice
             maximumStreamsPerMac = CompanionTerminalStream.maximumStreamsPerMac
+            inputFrameMax = CompanionTerminalStream.maximumInputBytes
         }
     }
 
@@ -102,10 +113,20 @@ public enum CompanionTerminalStream {
     public struct Accepted: Codable, Equatable, Sendable {
         public let role: Role
         public let streamVersion: Int
+        /// Watch streams only. An unknown reason decodes as nil.
+        public let watchReason: WatchReason?
 
-        public init(role: Role, streamVersion: Int = CompanionTerminalStream.version) {
+        public init(role: Role, streamVersion: Int = CompanionTerminalStream.version, watchReason: WatchReason? = nil) {
             self.role = role
             self.streamVersion = streamVersion
+            self.watchReason = role == .watch ? watchReason : nil
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(role: try container.decode(Role.self, forKey: .role),
+                      streamVersion: try container.decode(Int.self, forKey: .streamVersion),
+                      watchReason: try? container.decodeIfPresent(WatchReason.self, forKey: .watchReason))
         }
     }
 
@@ -156,6 +177,20 @@ public enum CompanionTerminalStream {
         }
     }
 
+    /// Phone-sent Take over; the grid is applied with the claim (ADR-0041).
+    public struct Claim: Codable, Equatable, Sendable {
+        public let grid: Grid
+
+        public init(grid: Grid) { self.grid = grid }
+    }
+
+    /// Mac-sent: the highest input sequence forwarded to the daemon in this generation.
+    public struct Ack: Codable, Equatable, Sendable {
+        public let sequence: UInt64
+
+        public init(sequence: UInt64) { self.sequence = sequence }
+    }
+
     public struct End: Codable, Equatable, Sendable {
         public let reason: EndReason
 
@@ -171,8 +206,13 @@ public enum CompanionTerminalStream {
         case leader(Leader)
         case heartbeat
         case end(End)
-        /// Phone-sent frames. A Watch stream never carries them; the Mac
-        /// recognizes the type only to end the stream as a protocol error.
+        /// Phone-sent typed or pasted bytes; never empty (ADR-0041).
+        case input(sequence: UInt64, bytes: Data)
+        case claim(Claim)
+        case ack(Ack)
+        /// Frame types decoded only to be rejected; today only `reply`.
+        /// ponytail: the phone does not answer terminal queries yet; the daemon's
+        /// DA fallback covers the common case. Add reply with ADR-0041's epoch.
         case phoneSent(FrameType)
 
         public var type: FrameType {
@@ -185,6 +225,9 @@ public enum CompanionTerminalStream {
             case .leader: .leader
             case .heartbeat: .heartbeat
             case .end: .end
+            case .input: .input
+            case .claim: .claim
+            case .ack: .ack
             case .phoneSent(let type): type
             }
         }
@@ -195,6 +238,8 @@ public enum CompanionTerminalStream {
         case unknownType(UInt8)
         case tooLarge
         case invalidControl
+        /// An empty `input` frame, or one over `maximumInputBytes`.
+        case invalidInput
     }
 
     public static func encode(_ frame: Frame, generation: UInt32) throws -> Data {
@@ -219,6 +264,11 @@ public enum CompanionTerminalStream {
         case .leader(let value): try control(value)
         case .heartbeat: data.append(contentsOf: Data("{}".utf8))
         case .end(let value): try control(value)
+        case .input(let sequence, let bytes):
+            try validateInput(bytes)
+            try payload(sequence, bytes)
+        case .claim(let value): try control(value)
+        case .ack(let value): try control(value)
         case .phoneSent: throw Failure.invalidControl
         }
         guard data.count <= maximumFrameBytes else { throw Failure.tooLarge }
@@ -269,8 +319,18 @@ public enum CompanionTerminalStream {
         case .leader: frame = .leader(try control(Leader.self))
         case .heartbeat: frame = .heartbeat
         case .end: frame = .end(try control(End.self))
-        case .input, .reply, .claim, .ack: frame = .phoneSent(type)
+        case .input:
+            let (sequence, bytes) = try payload()
+            try validateInput(bytes)
+            frame = .input(sequence: sequence, bytes: bytes)
+        case .claim: frame = .claim(try control(Claim.self))
+        case .ack: frame = .ack(try control(Ack.self))
+        case .reply: frame = .phoneSent(type)
         }
         return (frame, generation)
+    }
+
+    private static func validateInput(_ bytes: Data) throws {
+        guard !bytes.isEmpty, bytes.count <= maximumInputBytes else { throw Failure.invalidInput }
     }
 }

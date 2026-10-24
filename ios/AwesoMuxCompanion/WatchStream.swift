@@ -17,34 +17,64 @@ struct WatchPacket: Sendable {
 
 protocol WatchConnection: Sendable {
     var capabilities: CompanionTerminalStream.Capabilities { get }
+    var accepted: CompanionTerminalStream.Accepted { get }
+    @MainActor func send(_ frame: CompanionTerminalStream.Frame, generation: UInt32,
+                         canSend: @escaping @MainActor @Sendable () -> Bool) async throws
     func receive() async throws -> WatchPacket
     func cancel()
 }
 
 protocol WatchClient: Sendable {
-    func openWatch(connectionID: UUID, paneID: UUID, targetVersion: UUID,
+    func openWatch(connectionID: UUID, paneID: UUID, targetVersion: UUID, preferredGrid: CompanionTerminalStream.Grid,
                    canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> any WatchConnection
+}
+
+extension WatchConnection {
+    var accepted: CompanionTerminalStream.Accepted { .init(role: .watch) }
+    @MainActor func send(_ frame: CompanionTerminalStream.Frame, generation: UInt32,
+                         canSend: @escaping @MainActor @Sendable () -> Bool) async throws {
+        throw WatchFailure.invalidStream
+    }
 }
 
 extension MacClient: WatchClient {}
 
 protocol WatchFrameConnection: Sendable {
-    @MainActor func send(_ payload: Data, canSend: (@MainActor @Sendable () -> Bool)?) async throws
+    @MainActor func send(_ payload: Data, maximum: Int, canSend: (@MainActor @Sendable () -> Bool)?) async throws
     func receiveFrame(maximum: Int) async throws -> Data
     func cancel()
 }
 
 final class MacWatchConnection: WatchConnection, Sendable {
     let capabilities: CompanionTerminalStream.Capabilities
+    let accepted: CompanionTerminalStream.Accepted
     private let connection: any WatchFrameConnection
     private let receiving = OSAllocatedUnfairLock(initialState: false)
     private let idleTimeout: Duration
 
     init(connection: any WatchFrameConnection, capabilities: CompanionTerminalStream.Capabilities,
-         idleTimeout: Duration = .seconds(45)) {
+         idleTimeout: Duration = .seconds(45),
+         accepted: CompanionTerminalStream.Accepted = .init(role: .watch)) {
         self.connection = connection
         self.capabilities = capabilities
         self.idleTimeout = idleTimeout
+        self.accepted = accepted
+    }
+
+    @MainActor func send(_ frame: CompanionTerminalStream.Frame, generation: UInt32,
+                         canSend: @escaping @MainActor @Sendable () -> Bool) async throws {
+        guard accepted.role == .interactive, let maximum = capabilities.inputFrameMax else {
+            throw WatchFailure.invalidStream
+        }
+        switch frame {
+        case .input(_, let bytes):
+            guard bytes.count <= maximum else { throw WatchFailure.invalidStream }
+        case .grid(let grid): try WatchStream.validate(grid)
+        case .claim(let claim): try WatchStream.validate(claim.grid)
+        default: throw WatchFailure.invalidStream
+        }
+        try await connection.send(CompanionTerminalStream.encode(frame, generation: generation),
+                                  maximum: CompanionTerminalStream.maximumFrameBytes, canSend: canSend)
     }
 
     func receive() async throws -> WatchPacket {
@@ -93,6 +123,7 @@ struct WatchStream {
         case grid(Stream.Grid)
         case leader(String?)
         case heartbeat
+        case ack(UInt64)
     }
 
     private enum Phase { case awaitingSnapshot, snapshot, live }
@@ -103,12 +134,14 @@ struct WatchStream {
     private let paneID: UUID
     private let targetVersion: UUID
     private let capabilities: Stream.Capabilities
+    private let role: Stream.Role
 
-    init(paneID: UUID, targetVersion: UUID, capabilities: Stream.Capabilities) throws {
+    init(paneID: UUID, targetVersion: UUID, capabilities: Stream.Capabilities, role: Stream.Role = .watch) throws {
         try Self.validate(capabilities)
         self.paneID = paneID
         self.targetVersion = targetVersion
         self.capabilities = capabilities
+        self.role = role
     }
 
     static func validate(_ limits: Stream.Capabilities) throws {
@@ -117,6 +150,7 @@ struct WatchStream {
               (1...Stream.maximumSnapshotBytes).contains(limits.maximumSnapshotBytes),
               limits.maximumPendingBytes > 0, limits.maximumStreamsPerDevice > 0,
               limits.maximumStreamsPerMac > 0,
+              limits.inputFrameMax.map({ (1...Stream.maximumInputBytes).contains($0) }) ?? true,
               (1...15).contains(limits.heartbeatSeconds), limits.idleTimeoutSeconds == 45 else {
             throw WatchFailure.unsupportedStream
         }
@@ -143,6 +177,7 @@ struct WatchStream {
             snapshotBytes = 0
             return .reset(begin)
         }
+        if case .ack = packet.frame, role == .interactive, let generation, packet.generation < generation { return .heartbeat }
         // A final end can precede snapshot_begin after the Mac advances its generation.
         if case .end(let end) = packet.frame {
             guard generation.map({ packet.generation >= $0 }) ?? true else { throw WatchFailure.invalidStream }
@@ -175,7 +210,10 @@ struct WatchStream {
         case .leader(let leader): return .leader(leader.leader)
         case .heartbeat: return .heartbeat
         case .end(let end): throw WatchFailure.ended(end.reason)
-        case .input, .claim, .ack, .phoneSent, .snapshotBegin: throw WatchFailure.invalidStream
+        case .ack(let ack):
+            guard role == .interactive, phase == .live else { throw WatchFailure.invalidStream }
+            return .ack(ack.sequence)
+        case .input, .claim, .phoneSent, .snapshotBegin: throw WatchFailure.invalidStream
         }
     }
 

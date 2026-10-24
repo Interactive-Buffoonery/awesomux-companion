@@ -6,6 +6,8 @@ import Observation
 final class WatchModel {
     enum Status: Equatable { case idle, connecting, snapshot, live, failed }
 
+    let input = WatchInput()
+
     private(set) var status = Status.idle
     private(set) var grid: CompanionTerminalStream.Grid?
     private(set) var historyIncomplete = false
@@ -115,6 +117,7 @@ final class WatchModel {
     }
 
     private func cancelAndClear() {
+        input.disconnect()
         epoch = UUID()
         task?.cancel()
         task = nil
@@ -149,14 +152,19 @@ final class WatchModel {
                 let (opened, route) = try await attach(target, epoch: epoch)
                 guard isCurrent(epoch) else { opened.cancel(); return }
                 connection = opened
+                input.attach(opened, ownLeaderID: target.record.connectionID.uuidString.lowercased(),
+                             authority: { [weak self] in self?.isCurrent(epoch) ?? false })
                 activeRoute = route
                 if route.transport == .tailscale { lanFailed = true }
                 var stream = try WatchStream(paneID: target.paneID, targetVersion: target.targetVersion,
-                                             capabilities: opened.capabilities)
+                                             capabilities: opened.capabilities, role: opened.accepted.role)
                 while isCurrent(epoch) {
                     let packet = try await opened.receive()
                     guard isCurrent(epoch) else { opened.cancel(); return }
                     let event = try stream.consume(packet)
+                    if case .reset(let begin) = event {
+                        input.begin(generation: packet.generation, leader: begin.leader)
+                    }
                     do {
                         try render(event)
                     } catch let failure as WatchTerminalFailure where Self.isTransientRendererFailure(failure) {
@@ -174,6 +182,7 @@ final class WatchModel {
                 return
             } catch {
                 guard isCurrent(epoch) else { return }
+                input.disconnect()
                 connection?.cancel()
                 connection = nil
                 if activeRoute?.transport == .lan, !Self.isTransientRendererFailure(error) {
@@ -205,7 +214,7 @@ final class WatchModel {
             do {
                 let client = try makeClient(target.record, route)
                 let opened = try await client.openWatch(connectionID: target.record.connectionID,
-                    paneID: target.paneID, targetVersion: target.targetVersion,
+                    paneID: target.paneID, targetVersion: target.targetVersion, preferredGrid: input.preferredGrid,
                     canSend: { [weak self] in self?.isCurrent(epoch) ?? false })
                 return (opened, route)
             } catch let failure as MacClientFailure where [.unreachable, .closed, .handshakeRejected].contains(failure) {
@@ -228,11 +237,13 @@ final class WatchModel {
             error = nil
             try renderer.reset(grid: begin.grid, scrollbackBound: begin.scrollbackBound)
         case .bytes(let bytes): try renderer.feed(bytes)
-        case .ready: status = .live; error = nil
+        case .ready: status = .live; error = nil; input.ready()
         case .grid(let grid):
             try renderer.resize(grid)
             self.grid = grid
-        case .leader(let leader): self.leader = leader
+        case .leader(let leader): self.leader = leader; input.leader = leader
+        case .ack(let sequence):
+            if let generation = input.generation { input.acknowledge(sequence, generation: generation) }
         case .heartbeat: break
         }
     }
@@ -254,7 +265,7 @@ final class WatchModel {
         if let failure = error as? WatchFailure {
             switch failure {
             case .unsupportedStream, .invalidDimensions: return false
-            case .ended(let reason): return reason == .overflow || reason == .closed
+            case .ended(let reason): return reason == .overflow || reason == .roleChanged
             default: return true
             }
         }
@@ -274,7 +285,8 @@ final class WatchModel {
             case .invalidDimensions: return String(localized: "This terminal's dimensions can't be displayed.")
             case .ended(.revoked): return String(localized: "Watch access was removed on your Mac.")
             case .ended(.paneUnavailable), .ended(.sessionEnded): return String(localized: "This terminal is no longer available.")
-            case .ended(.roleChanged): return String(localized: "Terminal permissions changed. Reconnect to continue watching.")
+            case .ended(.closed): return String(localized: "Disconnected from the Mac")
+            case .ended(.roleChanged): return String(localized: "Terminal permissions changed. Reconnecting…")
             case .ended(.superseded): return String(localized: "This terminal was opened in another Watch view.")
             default: return String(localized: "The terminal stream was interrupted. Reconnecting…")
             }

@@ -137,6 +137,17 @@ final class WatchStreamTests: XCTestCase {
         }
     }
 
+    func testInteractiveAcksAreSeparateFromOutputSequenceAndStaleAcksAreIgnored() throws {
+        var stream = try WatchStream(paneID: paneID, targetVersion: targetVersion, capabilities: .init(), role: .interactive)
+        _ = try stream.consume(packet(.snapshotBegin(begin()), generation: 7))
+        XCTAssertThrowsError(try stream.consume(packet(.ack(.init(sequence: 0)), generation: 7)))
+        _ = try stream.consume(packet(.snapshotEnd(.init(bytes: 0)), generation: 7))
+        XCTAssertEqual(try stream.consume(packet(.ack(.init(sequence: 0)), generation: 7)), .ack(0))
+        XCTAssertEqual(try stream.consume(packet(.ack(.init(sequence: 0)), generation: 6)), .heartbeat)
+        XCTAssertEqual(try stream.consume(packet(.output(sequence: 0, bytes: Data([65])), generation: 7)), .bytes(Data([65])))
+        XCTAssertThrowsError(try stream.consume(packet(.ack(.init(sequence: 0)), generation: 8)))
+    }
+
     private func makeStream(limits: Stream.Capabilities = .init()) throws -> WatchStream {
         try WatchStream(paneID: paneID, targetVersion: targetVersion, capabilities: limits)
     }

@@ -6,9 +6,7 @@ import UIKit
 /// `Sources/DesignSystem/Tokens/AwColor.swift`; keep them in step.
 enum Cat {
     static let base = dynamic(mocha: "#1e1e2e", latte: "#eff1f5")
-    static let mantle = dynamic(mocha: "#181825", latte: "#e6e9ef")
     static let crust = dynamic(mocha: "#11111b", latte: "#dce0e8")
-    static let surface0 = dynamic(mocha: "#313244", latte: "#ccd0da")
 
     // Roles: Latte has nothing lighter than base, so light mode lifts cards by sinking the page.
     static let page = dynamic(mocha: "#1e1e2e", latte: "#dce0e8")

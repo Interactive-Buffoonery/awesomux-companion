@@ -125,6 +125,18 @@ final class WatchTerminalTests: XCTestCase {
         XCTAssertEqual(after, restored.readViewportText())
     }
 
+    func testModeProbesRecoverAfterNativeParameterDigitWrap() async throws {
+        let terminal = try await readyTerminal()
+        for digits in [255, 256, 257, 300] {
+            try terminal.feed(Data("\u{1b}[?2004h\u{1b}[?1h".utf8))
+            try terminal.feed(Data(("\u{1b}[?" + String(repeating: "0", count: digits - 4) + "2004$p").utf8))
+            try terminal.feed(Data("\u{1b}[?2004l\u{1b}[?1l".utf8))
+            try await idle([terminal])
+            let modes = await terminal.inputModes()
+            XCTAssertEqual(modes, WatchInputModes())
+        }
+    }
+
     func testSplitControlSequencesAndWideCombiningUTF8KeepParserState() async throws {
         let whole = WatchTerminal(), split = WatchTerminal()
         let host = try mount([whole, split])
@@ -208,6 +220,52 @@ final class WatchTerminalTests: XCTestCase {
         // verifies clipboard/query behavior, not operating-system notification UI.
     }
 
+    func testInputReadsPasteAndCursorModesFromNativeEmulatorAndResetsThem() async throws {
+        let terminal = try await readyTerminal()
+        let initial = await terminal.inputModes()
+        XCTAssertEqual(initial, WatchInputModes())
+        try terminal.feed(Data("\u{1b}[?2004h\u{1b}[?1h".utf8))
+        let enabled = await terminal.inputModes()
+        XCTAssertEqual(enabled, WatchInputModes(bracketedPaste: true, applicationCursor: true))
+        try terminal.feed(Data("\u{1b}[?2004l\u{1b}[?1l".utf8))
+        let disabled = await terminal.inputModes()
+        XCTAssertEqual(disabled, WatchInputModes())
+        let phone = terminal.phoneGrid(for: CGSize(width: 390, height: 500))
+        XCTAssertTrue((20...60).contains(phone.cols))
+        XCTAssertTrue((10...40).contains(phone.rows))
+    }
+
+    func testModeProbeAccountsForQueriesInAbortedDCSHeaders() async throws {
+        let terminal = try await readyTerminal()
+        try terminal.feed(Data("\u{1b}[?2004h\u{1b}[?1h\u{1b}P".utf8) + Data([0x9b])
+                          + Data("?2004$p\u{1b}P".utf8) + Data([0x9b])
+                          + Data("?1$p\u{1b}[?2004l\u{1b}[?1l".utf8))
+        try await idle([terminal])
+        let modes = await terminal.inputModes()
+        XCTAssertEqual(modes, WatchInputModes())
+    }
+
+    func testModeProbesWaitForSplitControlStringsAndUTF8WithoutChangingOutput() async throws {
+        let terminal = try await readyTerminal()
+        for (prefix, suffix) in [(Data("\u{1b}[?2004".utf8), Data("h".utf8)),
+                                 (Data("\u{1b}]2;title".utf8), Data("\u{1b}\\".utf8)),
+                                 (Data([0xe7, 0x95]), Data([0x8c]))] {
+            try terminal.feed(prefix)
+            let read = Task { await terminal.inputModes() }
+            await Task.yield()
+            try terminal.feed(suffix)
+            let modes = await read.value
+            XCTAssertEqual(modes?.bracketedPaste, true)
+        }
+        try await idle([terminal])
+        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("界"))
+        XCTAssertFalse(try XCTUnwrap(terminal.readViewportText()).contains("�"))
+        // Earlier Mac queries must not satisfy the local probe with stale modes.
+        try terminal.feed(Data("\u{1b}[?2004$p\u{1b}[?2004l".utf8))
+        let latest = await terminal.inputModes()
+        XCTAssertEqual(latest?.bracketedPaste, false)
+    }
+
     func testAuthorityIsRecheckedByPendingDrainAndCopy() async throws {
         let terminal = WatchTerminal()
         var allowed = true
@@ -240,6 +298,15 @@ final class WatchTerminalTests: XCTestCase {
         XCTAssertNotNil(failure)
         XCTAssertFalse(terminal.isReady)
         XCTAssertNil(terminal.readViewportText())
+    }
+
+    private func readyTerminal() async throws -> WatchTerminal {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        addTeardownBlock { await MainActor.run { host.close(); terminal.clear() } }
+        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
+        try await idle([terminal])
+        return terminal
     }
 
     private func fixture(_ name: String) throws -> Data {

@@ -19,6 +19,8 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         case grid(CompanionTerminalStream.Grid)
     }
 
+    private var boundary = WatchTerminalBoundary()
+    private var modeProbe: UUID?
     private var operations: [Operation] = []
     private var queuedBytes = 0
     private var epoch = UUID()
@@ -75,6 +77,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
             throw invalidate(.overflow)
         }
         guard !bytes.isEmpty else { return }
+        boundary.receive(bytes)
         operations.append(.bytes(bytes))
         queuedBytes += bytes.count
         pump()
@@ -94,6 +97,8 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         epoch = UUID()
         deadline?.cancel()
         deadline = nil
+        boundary = WatchTerminalBoundary()
+        modeProbe = nil
         operations.removeAll(keepingCapacity: false)
         queuedBytes = 0
         target = nil
@@ -105,6 +110,43 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         surface = nil
         // An uncancellable package drain may still be returning. Keep its token
         // until completion so repeated resets cannot accumulate blocked workers.
+    }
+
+    func phoneGrid(for size: CGSize) -> CompanionTerminalStream.Grid {
+        var cell = WatchDrawableBudget.cellSize(fontSize: WatchDrawableBudget.maximumFontSize)
+        if let surface, let viewport = surface.viewport, viewport.columns > 0, viewport.rows > 0 {
+            let ratio = CGFloat(WatchDrawableBudget.maximumFontSize / surface.fontSize)
+            cell = CGSize(width: surface.size.width / CGFloat(viewport.columns) * ratio,
+                          height: surface.size.height / CGFloat(viewport.rows) * ratio)
+        }
+        return .init(rows: max(1, min(1000, Int(size.height / max(1, cell.height)))),
+                     cols: max(1, min(1000, Int(size.width / max(1, cell.width)))))
+    }
+
+    // Probe only between complete parser sequences, after native output drains.
+    // Fresh marker reports fence replies queued by earlier Mac queries.
+    func inputModes() async -> WatchInputModes? {
+        guard checkAuthority(), let surface else { return nil }
+        let identity = epoch
+        let probe = UUID()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !isIdle || !boundary.canProbe || modeProbe != nil {
+            guard epoch == identity, checkAuthority(), !Task.isCancelled, ContinuousClock.now < deadline else { return nil }
+            do { try await Task.sleep(for: .milliseconds(10)) } catch { return nil }
+        }
+        guard epoch == identity, checkAuthority(), !Task.isCancelled else { return nil }
+        modeProbe = probe
+        defer { if modeProbe == probe { modeProbe = nil } }
+        let markers = (0..<3).map { _ in UInt16.random(in: 32_768...65_535) }
+        surface.modeReports.beginProbe(probe, markers: markers)
+        let queries = "\u{1b}[?2004$p\u{1b}[?1$p" + markers.map { "\u{1b}[?\($0)$p" }.joined()
+        do { try feed(Data(queries.utf8)) } catch { return nil }
+        while ContinuousClock.now < deadline {
+            guard epoch == identity, checkAuthority(), !Task.isCancelled else { return nil }
+            if let modes = surface.modeReports.readProbe(probe) { return modes }
+            do { try await Task.sleep(for: .milliseconds(10)) } catch { return nil }
+        }
+        return nil
     }
 
     func readViewportText() -> String? {
@@ -354,6 +396,7 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
     let session: InMemoryTerminalSession
     let view: WatchReadOnlyTerminalView
     let fontSize: Float
+    let modeReports = WatchModeReports()
     @Published private(set) var size: CGSize
     var viewport: InMemoryTerminalViewport?
 
@@ -375,7 +418,11 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
             .custom("keybind", "clear")
         controller = TerminalController(configSource: .none, terminalConfiguration: configuration)
         guard controller.lastConfigurationIssue == nil else { throw WatchTerminalFailure.unsafeConfiguration }
-        session = InMemoryTerminalSession(write: { bytes in discardedWrites.discard(bytes) }, resize: { value in
+        let modeReports = self.modeReports
+        session = InMemoryTerminalSession(write: { bytes in
+            discardedWrites.discard(bytes)
+            modeReports.receive(bytes)
+        }, resize: { value in
             Task { @MainActor in resized(identity, value) }
         })
         view = WatchReadOnlyTerminalView(frame: CGRect(origin: .zero, size: size))
@@ -567,5 +614,67 @@ private struct WatchNativeRepresentable: UIViewRepresentable {
     static func dismantleUIView(_ uiView: WatchReadOnlyTerminalView, coordinator: ()) {
         uiView.setSurfaceVisible(false)
         uiView.controller = nil
+    }
+}
+
+final class WatchModeReports: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer: [UInt8] = []
+    private var paste = (version: UInt64(0), enabled: false)
+    private var cursor = (version: UInt64(0), enabled: false)
+
+    private struct Probe {
+        let id: UUID
+        let markers: [UInt16]
+        let baseline: (UInt64, UInt64)
+        var matched = 0
+        var result: WatchInputModes?
+    }
+    private var probe: Probe?
+
+    func beginProbe(_ id: UUID, markers: [UInt16]) {
+        lock.lock(); defer { lock.unlock() }
+        probe = Probe(id: id, markers: markers, baseline: (paste.version, cursor.version))
+    }
+
+    func readProbe(_ id: UUID) -> WatchInputModes? {
+        lock.lock(); defer { lock.unlock() }
+        guard probe?.id == id else { return nil }
+        return probe?.result
+    }
+
+    func receive(_ bytes: Data) {
+        lock.lock(); defer { lock.unlock() }
+        for byte in bytes {
+            if byte == 0x1b { buffer = [byte]; continue }
+            guard !buffer.isEmpty else { continue }
+            buffer.append(byte)
+            if byte == 121 {
+                let report = String(decoding: buffer, as: UTF8.self)
+                if var pending = probe, pending.result == nil, !pending.markers.isEmpty {
+                    let marker = pending.markers[pending.matched]
+                    if report == "\u{1b}[?\(marker);0$y" {
+                        pending.matched += 1
+                        if pending.matched == pending.markers.count {
+                            if paste.version > pending.baseline.0, cursor.version > pending.baseline.1 {
+                                pending.result = WatchInputModes(bracketedPaste: paste.enabled, applicationCursor: cursor.enabled)
+                            }
+                            pending.matched = 0
+                        }
+                    } else { pending.matched = 0 }
+                    probe = pending
+                }
+                for mode in ["2004", "1"] {
+                    for state in 1...4 where report == "\u{1b}[?\(mode);\(state)$y" {
+                        let isSet = state == 1 || state == 3
+                        if mode == "2004" { paste = (paste.version &+ 1, isSet) }
+                        else { cursor = (cursor.version &+ 1, isSet) }
+                    }
+                }
+                buffer.removeAll(keepingCapacity: true)
+            } else if buffer.count >= 32 {
+                buffer.removeAll(keepingCapacity: true)
+            }
+        }
     }
 }

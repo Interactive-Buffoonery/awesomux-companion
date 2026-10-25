@@ -46,7 +46,7 @@ fi
 SIGNING=()
 if [[ -n "${HEAVY_GATE_SIGNING_KEYCHAIN:-}" ]]; then
   [[ -n "${HEAVY_GATE_REMOTE_JOB:-}" ]] || {
-    echo "Runner signing requires an isolated heavy-gate remote job" >&2; exit 1;
+    echo "Runner signing requires an isolated process-gate remote job" >&2; exit 1;
   }
   # These preferences belong to the disposable job HOME, not the user's login.
   mkdir -p "$HOME/Library/Preferences"
@@ -60,7 +60,7 @@ fi
 DISTRIBUTION_IDENTITY='Apple Distribution'
 if [[ -n "${HEAVY_GATE_XCODE_EXPORT_CONFIG:-}" ]]; then
   [[ -n "${HEAVY_GATE_REMOTE_JOB:-}" ]] || {
-    echo "Manual export requires an isolated heavy-gate remote job" >&2; exit 1;
+    echo "Manual export requires an isolated process-gate remote job" >&2; exit 1;
   }
   DISTRIBUTION_IDENTITY="$(python3 "$IOS_DIR/script/testflight.py" prepare-export \
     "$HEAVY_GATE_XCODE_EXPORT_CONFIG" "$WORK/export.plist")"

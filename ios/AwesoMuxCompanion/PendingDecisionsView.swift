@@ -19,7 +19,7 @@ struct PendingDecisionsSection: View {
             case .unsupported:
                 Text("This Mac does not provide remote permission requests.")
             case .denied:
-                Text("Your Mac could not authorize Decide access. Check this iPhone’s workspace grant in Mac settings.")
+                Text("Your Mac could not authorize answers from this iPhone. Turn on Allow answering permission requests in Mac settings.")
             case .unavailable:
                 Text("Permission status is unavailable. Refresh when your Mac is reachable.")
             case .capacity:

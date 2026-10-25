@@ -294,7 +294,7 @@ There are no notification or lock-screen actions in this layer.
 state without calling the currently denied production list. Missing capability
 metadata is unsupported, not permission to answer. An enabled Mac must also
 return a complete fresh pending/outcome list under a separate Mac-approved
-Decide grant for the selected workspaces. Pairing and agent attention never
+Decide switch for this phone, which covers every workspace. Pairing and agent attention never
 create decision authority. ADR-0038's real Claude native-prompt race acceptance
 is still required before any provider/version can be enabled on the Mac.
 
@@ -318,7 +318,7 @@ separately: recorded means the Mac accepted an answer, delivered means the hook
 acknowledged it, and neither proves that Claude executed a tool. Expired,
 cancelled and unknown states are inert.
 
-Decide workspace denial clears decision content and invalidates decision
+Decide denial clears decision content and invalidates decision
 operations without changing agent, pane, widget or Live Activity connectivity.
 Authentication generations are separate from pairing identity: a temporary
 authority loss retains the same pairing's bounded retry tuples and deadline
@@ -353,8 +353,9 @@ VoiceOver still need separate acceptance.
 ## Watch
 
 Tap an attached terminal in Sessions to watch its real paired snapshot and live
-output over the direct LAN/Tailscale connection. Watch access is granted per
-workspace in Mac Companion settings, separately from terminal previews. A Mac
+output over the direct LAN/Tailscale connection. Watch is one switch per phone
+in Mac Companion settings, covering every workspace, separately from terminal
+previews. A Mac
 without the stream contract needs an update. Documents and unknown pane kinds
 remain metadata-only.
 

@@ -46,11 +46,11 @@ final class WatchInputTests: XCTestCase {
         input.takeOver()
         await drain(wire, count: 1)
         XCTAssertEqual(wire.frames.first?.frame, .claim(.init(grid: .init(rows: 22, cols: 38))))
-        XCTAssertEqual(input.drivingText, "Mac is driving")
+        XCTAssertEqual(input.drivingText, "Mac has control")
         input.leader = "phone"
-        XCTAssertEqual(input.drivingText, "You're driving")
+        XCTAssertEqual(input.drivingText, "You have control")
         input.leader = nil
-        XCTAssertEqual(input.drivingText, "No one is driving")
+        XCTAssertEqual(input.drivingText, "No one has control")
         input.disconnect()
     }
 

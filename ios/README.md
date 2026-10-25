@@ -130,7 +130,7 @@ The build number is the current UTC time, so it always increases. The script wai
 
 ### Minimighty runner
 
-From a clean repository root, `heavy-gate ./ios/script/testflight.sh` can run on
+From a clean repository root, `process-gate ./ios/script/testflight.sh` can run on
 minimighty using its dedicated signing keychain and App Store Connect API key.
 Use `--export-only` to archive and export an IPA without uploading or assigning
 it to a testing group. Logs and the IPA return under `.build/testflight/`.

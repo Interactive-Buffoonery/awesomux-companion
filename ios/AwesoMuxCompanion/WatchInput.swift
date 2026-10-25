@@ -117,9 +117,9 @@ final class WatchInput {
     var canType: Bool { isInteractive && isLive && generation != nil && authority() }
     var pasteInFlight: Bool { pasteDelivery == .sending }
     var drivingText: String {
-        guard let leader else { return "No one is driving" }
-        if let ownLeaderID, leader.caseInsensitiveCompare(ownLeaderID) == .orderedSame { return "You're driving" }
-        return leader == "mac" ? "Mac is driving" : "Another terminal is driving"
+        guard let leader else { return "No one has control" }
+        if let ownLeaderID, leader.caseInsensitiveCompare(ownLeaderID) == .orderedSame { return "You have control" }
+        return leader == "mac" ? "Mac has control" : "Another terminal has control"
     }
 
     func attach(_ connection: any WatchConnection, ownLeaderID: String,

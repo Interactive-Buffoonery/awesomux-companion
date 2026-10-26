@@ -94,11 +94,16 @@ then follows each refresh:
 
 - updates when counts or the top item change, plus a 60 second heartbeat;
 - content goes stale 15 minutes after the last update, and the card then shows
-  "Offline";
+  its update age (for example, "Updated 20 min ago");
 - once nothing needs you or is working, it ends and keeps the final card for 5
   minutes;
-- it ends immediately on a host change, on disconnect, or after 30 minutes
-  offline.
+- it ends immediately on a host change or unpairing, or when a confirmed
+  foreground connection failure leaves data more than 30 minutes old.
+
+A failed refresh only marks shared agent metadata offline if the read started
+and failed during the same active scene session. Inactive transitions and
+background failures preserve the last snapshot; age alone does not establish
+that the Mac is offline.
 
 ## TestFlight
 
@@ -250,9 +255,9 @@ Only active foreground polling requests `list_panes`; background refresh still
 reads agents and attention events. These reads use the same paired mutual TLS
 client and direct LAN/Tailscale routes. Pane failures have their own display state
 and do not mark a successful agent refresh offline. An authorization denial
-clears pane content and marks existing agent/widget metadata offline, preserving
-the cache. The next valid poll can recover: a changed Mac lease or a temporary
-Keychain failure can also cause a denial. Transport failures clear the pane list; they cannot establish whether a
+clears pane content and, within an uninterrupted active session, marks existing
+agent/widget metadata offline, preserving the cache. The next valid poll can
+recover: a changed Mac lease or a temporary Keychain failure can also cause a denial. Transport failures clear the pane list; they cannot establish whether a
 phone was revoked or its Mac is offline.
 
 Terminal previews are off unless the Mac explicitly reports permission. Sessions

@@ -1,6 +1,7 @@
 import Foundation
 
-/// Last known roster for one pairing; never establishes that the Mac is reachable.
+/// Last known roster for one pairing. Restored as saved: age alone isn't a failure, and
+/// `CompanionStore.reachable` (not `connected`) says whether the Mac answered this launch.
 struct SessionSnapshotCache {
     private struct Entry: Codable {
         let connectionID: UUID
@@ -24,7 +25,7 @@ struct SessionSnapshotCache {
             clear()
             return nil
         }
-        return entry.snapshot.offline()
+        return entry.snapshot
     }
 
     func save(_ snapshot: GlanceSnapshot, for record: PairingRecord) {

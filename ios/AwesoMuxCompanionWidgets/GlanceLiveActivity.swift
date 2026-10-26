@@ -79,10 +79,9 @@ private struct TopItemLine: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            if !state.connected || isStale {
-                Label("Offline", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Cat.needs)
-                Spacer()
-                if let updatedAt = state.updatedAt { Text("Updated \(AgeText.text(since: updatedAt))") }
+            let status = GlanceStatus(connected: state.connected, updatedAt: state.updatedAt, isStale: isStale)
+            if status != .current {
+                GlanceStatusLabel(status: status)
             } else if let top = state.top {
                 // Workspace names truncate first so the reason ("Needs permission") stays readable.
                 Text(top.workspaceName).lineLimit(1).truncationMode(.middle)

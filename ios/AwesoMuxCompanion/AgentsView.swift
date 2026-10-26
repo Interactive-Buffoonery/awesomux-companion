@@ -93,9 +93,9 @@ struct AgentsView: View {
 
     @ViewBuilder private func agentSections(_ snapshot: GlanceSnapshot) -> some View {
         if snapshot.agents.isEmpty {
-            let title = snapshot.connected
+            let title = store.isConnected
                 ? String(localized: "No agents running") : String(localized: "No agents when last checked")
-            let detail = if snapshot.connected {
+            let detail = if store.isConnected {
                 String(localized: "Agents you start in awesoMux on \(snapshot.hostName) show up here.")
             } else if let updatedAt = snapshot.updatedAt {
                 String(localized: "Last update from \(snapshot.hostName) at \(lastUpdate(updatedAt)).")

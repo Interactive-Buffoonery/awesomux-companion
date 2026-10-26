@@ -106,6 +106,8 @@ final class CompanionStore {
             identityTag = record.identityTag
         }
     }
+    /// A failure confirms connectivity only within one uninterrupted active scene.
+    @ObservationIgnored private var foregroundSession: UUID?
     @ObservationIgnored private var panePollID: UUID?
     @ObservationIgnored private var paneReadTask: Task<Void, Never>?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
@@ -355,6 +357,7 @@ final class CompanionStore {
 
     private func read(_ record: PairingRecord, revision started: Int) async {
         guard revision == started else { return }
+        let foregroundStarted = foregroundSession
         do {
             let next = try await readFeed(record: record, revision: started)
             guard revision == started else { return }
@@ -365,6 +368,7 @@ final class CompanionStore {
             reachable = false
             activeRoute = nil
             message = Self.readMessage(for: error, macName: record.macName)
+            guard isStillForeground(since: foregroundStarted) else { return }
             if let snapshot {
                 if snapshot.connected {
                     let offline = snapshot.offline()
@@ -381,7 +385,8 @@ final class CompanionStore {
     /// read that recovery requires succeeds.
     private func readFeed(record: PairingRecord, revision started: Int) async throws -> GlanceSnapshot {
         func call(_ operation: String, limit: Int? = nil, cursor: String? = nil) async throws -> APIResponse {
-            try await sessionCall(operation, record: record, revision: started, limit: limit, cursor: cursor)
+            try await sessionCall(operation, record: record, revision: started, limit: limit, cursor: cursor,
+                                  reportOffline: false)
         }
         if record.routes != nil, Date.now.timeIntervalSince(routesCheckedAt) > Self.routesCheckInterval {
             updateRoutes(try await call("get_connection_status").routes, record: record)
@@ -438,13 +443,20 @@ final class CompanionStore {
     // MARK: Foreground pane content
 
     func resumePanes() {
+        if foregroundSession == nil { foregroundSession = UUID() }
         panes.lifecycle = .active
         if previewMutationTask != nil, let previewChoice, previewChoice.pairingRevision == revision {
             panes.permission = .updating(previewChoice.allowed)
         }
     }
 
+    /// A failure confirms the Mac is offline only if the call began and ended in one active scene.
+    private func isStillForeground(since started: UUID?) -> Bool {
+        started != nil && foregroundSession == started
+    }
+
     func suspendPanes() {
+        foregroundSession = nil
         panePollID = nil
         invalidatePaneRead()
         panes.suspend()
@@ -603,7 +615,9 @@ final class CompanionStore {
 
     private func sessionCall(_ operation: String, record: PairingRecord, revision started: Int,
                              limit: Int? = nil, cursor: String? = nil, previewAllowed: Bool? = nil, paneGeneration: Int? = nil,
-                             canRead: (@MainActor @Sendable () -> Bool)? = nil, scopedDecision: Bool = false) async throws -> APIResponse {
+                             canRead: (@MainActor @Sendable () -> Bool)? = nil, scopedDecision: Bool = false,
+                             reportOffline: Bool = true) async throws -> APIResponse {
+        let foregroundStarted = foregroundSession
         let permissionStarted = permissionRevision
         func checkCurrent() throws {
             try Task.checkCancellation()
@@ -635,7 +649,7 @@ final class CompanionStore {
             if scopedDecision, (error as? MacClientFailure) == .api("permission_denied") {
                 handleDecisionDenial()
             } else if error.isCompanionAuthorizationFailure {
-                handleAuthorizationFailure(error)
+                handleAuthorizationFailure(error, reportOffline: reportOffline && isStillForeground(since: foregroundStarted))
             }
             throw error
         }
@@ -646,7 +660,7 @@ final class CompanionStore {
         decisionSessionID = UUID()
     }
 
-    private func handleAuthorizationFailure(_ error: Error) {
+    private func handleAuthorizationFailure(_ error: Error, reportOffline: Bool) {
         decisionAccessDenied = true
         decisionSessionID = UUID()
         permissionRevision += 1
@@ -656,7 +670,7 @@ final class CompanionStore {
         reachable = false
         activeRoute = nil
         message = Self.readMessage(for: error, macName: record?.macName ?? "Mac")
-        if let snapshot, snapshot.connected {
+        if reportOffline, let snapshot, snapshot.connected {
             let offline = snapshot.offline()
             self.snapshot = offline
             writeShared(offline)
@@ -692,6 +706,7 @@ final class CompanionStore {
     /// explicit authenticated retry; firstAnswering must never replay this call.
     func submitDecision(_ answer: CompanionDecisionAnswer, session: UUID,
                         canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse {
+        let foregroundStarted = foregroundSession
         guard decisionSession == session, let record, canSend(),
               let route = activeRoute ?? orderedRoutes(record).first else { throw CancellationError() }
         let client = try client(for: route, record: record)
@@ -707,7 +722,7 @@ final class CompanionStore {
             if (error as? MacClientFailure) == .api("permission_denied") {
                 handleDecisionDenial()
             } else if error.isCompanionAuthorizationFailure {
-                handleAuthorizationFailure(error)
+                handleAuthorizationFailure(error, reportOffline: isStillForeground(since: foregroundStarted))
             }
             throw error
         }

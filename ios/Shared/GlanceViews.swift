@@ -78,3 +78,17 @@ struct AgeText: View {
         Text(.currentDate, format: .offset(to: date, allowedFields: [.minute, .hour, .day], maxFieldCount: 1, sign: .never))
     }
 }
+
+/// Uses a live date format so the age continues advancing while the app is suspended.
+struct GlanceStatusLabel: View {
+    let status: GlanceStatus
+
+    var body: some View {
+        switch status {
+        case .current: EmptyView()
+        case .updated(let date): Text("Updated \(AgeText.text(since: date)) ago")
+        case .offline:
+            Label("Offline", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Cat.needs)
+        }
+    }
+}

@@ -601,6 +601,91 @@ final class PaneRosterTests: XCTestCase {
         XCTAssertEqual(previews(store), [])
     }
 
+    func testBackgroundAgentFailurePreservesConnectedGlance() async {
+        for error in [MacClientFailure.unreachable, .api("permission_denied")] {
+            let client = PaneClientFixture()
+            var shared: [GlanceSnapshot] = []
+            let store = store(client, writeShared: { shared.append($0) })
+            await store.refresh()
+            let original = store.snapshot
+            let writes = shared.count
+            client.errors["list_agents"] = error
+
+            await store.refresh()
+
+            XCTAssertEqual(store.snapshot, original)
+            XCTAssertEqual(shared.count, writes)
+        }
+    }
+
+    func testAgentFailureAcrossInactivityPreservesConnectedGlance() async {
+        for error in [MacClientFailure.unreachable, .api("permission_denied")] {
+            for returnsActive in [false, true] {
+                let client = PaneClientFixture()
+                var shared: [GlanceSnapshot] = []
+                let store = store(client, writeShared: { shared.append($0) })
+                store.resumePanes()
+                await store.refresh()
+                let original = store.snapshot
+                let writes = shared.count
+                client.errors["list_agents"] = error
+                let gate = RequestGate("agent failure across inactivity")
+                client.holdNext["list_agents"] = gate
+                let read = Task { await store.refresh() }
+                await fulfillment(of: [gate.started], timeout: 3)
+
+                store.suspendPanes()
+                if returnsActive { store.resumePanes() }
+                gate.release()
+                await read.value
+
+                XCTAssertEqual(store.snapshot, original)
+                XCTAssertEqual(shared.count, writes)
+            }
+        }
+    }
+
+    func testBackgroundReadFailureAfterForegroundReturnPreservesGlance() async {
+        for error in [MacClientFailure.unreachable, .api("permission_denied")] {
+            let client = PaneClientFixture()
+            var shared: [GlanceSnapshot] = []
+            let store = store(client, writeShared: { shared.append($0) })
+            await store.refresh()
+            let original = store.snapshot
+            let writes = shared.count
+            client.errors["list_agents"] = error
+            let gate = RequestGate("background read returning after foreground")
+            client.holdNext["get_attention_events"] = gate
+            let read = Task { await store.refresh() }
+            await fulfillment(of: [gate.started], timeout: 3)
+
+            store.resumePanes()
+            gate.release()
+            await read.value
+
+            XCTAssertEqual(store.snapshot, original)
+            XCTAssertEqual(shared.count, writes)
+        }
+    }
+
+    func testActiveAgentFailurePublishesOfflineGlance() async {
+        for error in [MacClientFailure.unreachable, .api("permission_denied")] {
+            let client = PaneClientFixture()
+            var shared: [GlanceSnapshot] = []
+            let store = store(client, writeShared: { shared.append($0) })
+            store.resumePanes()
+            await store.refresh()
+            let original = store.snapshot
+            client.errors["list_agents"] = error
+
+            await store.refresh()
+
+            XCTAssertEqual(store.snapshot, original?.offline())
+            XCTAssertEqual(shared.last, original?.offline())
+            XCTAssertFalse(store.reachable)
+        }
+    }
+
     func testAuthorizationFailureClearsPreviewsPreservesOfflineAgentsAndRecovers() async {
         for operation in ["list_agents", "list_panes", "set_terminal_preview"] {
             let client = PaneClientFixture()

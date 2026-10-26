@@ -54,7 +54,7 @@ struct GlanceSnapshot: Codable, Equatable, Sendable {
     /// Agents are ordered oldest-first within `needsYou`, so the first match is the longest wait.
     var topAgent: GlanceAgent? { agents.first { $0.group == .needsYou } ?? agents.first { $0.group == .working } }
 
-    /// The same agents marked offline, for when the Mac can't be reached or the data has aged out.
+    /// The same agents marked disconnected, preserving their last successful update.
     func offline() -> GlanceSnapshot {
         GlanceSnapshot(schemaVersion: schemaVersion, hostName: hostName, connected: false,
                        error: error ?? "unreachable", updatedAt: updatedAt, agents: agents)
@@ -85,7 +85,7 @@ struct GlanceSnapshot: Codable, Equatable, Sendable {
 /// The latest snapshot, shared with the widget extension through the App Group container.
 enum SharedSnapshot {
     static let appGroup = "group.com.interactivebuffoonery.awesomux.companion"
-    /// The widget shows a connected snapshot as offline once it is this old.
+    /// The widget shows the update age once a connected snapshot is this old.
     static let freshFor: TimeInterval = 15 * 60
 
     private static var fileURL: URL? {
@@ -106,5 +106,22 @@ enum SharedSnapshot {
     static func clear() {
         guard let fileURL else { return }
         try? FileManager.default.removeItem(at: fileURL)
+    }
+}
+
+/// Age is not evidence of a failed connection while the app is suspended.
+enum GlanceStatus: Equatable {
+    case current
+    case updated(Date)
+    case offline
+
+    init(connected: Bool, updatedAt: Date?, isStale: Bool = false, now: Date = .now) {
+        if !connected {
+            self = .offline
+        } else if let updatedAt, isStale || now.timeIntervalSince(updatedAt) >= SharedSnapshot.freshFor {
+            self = .updated(updatedAt)
+        } else {
+            self = .current
+        }
     }
 }

@@ -11,7 +11,7 @@ final class SessionSnapshotCacheTests: XCTestCase {
         try await body(defaults)
     }
 
-    func testSaveRestoresOfflineWithoutChangingAgentsOrTimestamp() async {
+    func testSaveRestoresSnapshotUnchanged() async {
         await withDefaults { defaults in
             let record = pairing()
             let original = snapshot()
@@ -19,7 +19,7 @@ final class SessionSnapshotCacheTests: XCTestCase {
 
             let restored = SessionSnapshotCache(defaults: defaults).restore(for: record)
 
-            XCTAssertEqual(restored, original.offline())
+            XCTAssertEqual(restored, original)
             XCTAssertEqual(restored?.agents.first?.workspaceName, "Cached workspace")
             XCTAssertEqual(restored?.updatedAt, original.updatedAt)
         }
@@ -72,7 +72,7 @@ final class SessionSnapshotCacheTests: XCTestCase {
             cache.save(snapshot(), for: record)
             let client = SessionClientStub()
             let store = self.store(defaults: defaults, record: record, client: client)
-            XCTAssertEqual(store.snapshot, snapshot().offline())
+            XCTAssertEqual(store.snapshot, snapshot())
             XCTAssertTrue(store.isSnapshotCached)
             XCTAssertFalse(store.reachable)
             XCTAssertFalse(store.isConnected)
@@ -84,7 +84,7 @@ final class SessionSnapshotCacheTests: XCTestCase {
             XCTAssertFalse(store.isSnapshotCached)
             XCTAssertEqual(store.snapshot?.agents.first?.workspaceName, "Live workspace")
             let relaunched = self.store(defaults: defaults, record: record, client: client)
-            XCTAssertEqual(relaunched.snapshot, store.snapshot?.offline())
+            XCTAssertEqual(relaunched.snapshot, store.snapshot)
             XCTAssertTrue(relaunched.isSnapshotCached)
             XCTAssertFalse(relaunched.isConnected)
         }
@@ -135,19 +135,19 @@ final class SessionSnapshotCacheTests: XCTestCase {
                                         identityStorage: original.identityStorage, pairedAt: original.pairedAt)
             SessionSnapshotCache(defaults: defaults).save(snapshot(), for: original)
             let store = self.store(defaults: defaults, record: updated, client: SessionClientStub())
-            XCTAssertEqual(store.snapshot, snapshot().offline())
+            XCTAssertEqual(store.snapshot, snapshot())
             XCTAssertTrue(store.isSnapshotCached)
         }
     }
 
-    func testStoreFailedReadKeepsCacheOffline() async {
+    func testStoreFailedReadKeepsCacheUnconfirmed() async {
         await withDefaults { defaults in
             let record = pairing()
             SessionSnapshotCache(defaults: defaults).save(snapshot(), for: record)
             let client = SessionClientStub(fails: true)
             let store = self.store(defaults: defaults, record: record, client: client)
             await store.refresh()
-            XCTAssertEqual(store.snapshot, snapshot().offline())
+            XCTAssertEqual(store.snapshot, snapshot())
             XCTAssertTrue(store.isSnapshotCached)
             XCTAssertFalse(store.reachable)
             XCTAssertNotNil(store.message)
@@ -169,7 +169,7 @@ final class SessionSnapshotCacheTests: XCTestCase {
                                              liveActivity: nil, writeShared: { _ in }, clearShared: {})
             XCTAssertNil(unreadable.snapshot)
             XCTAssertNotNil(unreadable.message)
-            XCTAssertEqual(cache.restore(for: record), snapshot().offline(),
+            XCTAssertEqual(cache.restore(for: record), snapshot(),
                            "A transient Keychain read failure must preserve the cache for a later launch")
         }
     }

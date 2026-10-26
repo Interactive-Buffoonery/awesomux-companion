@@ -704,7 +704,8 @@ final class PaneRosterTests: XCTestCase {
             XCTAssertEqual(store.snapshot, original?.offline())
             XCTAssertEqual(shared.last, original?.offline())
             XCTAssertFalse(store.reachable)
-            XCTAssertEqual(SessionSnapshotCache(defaults: defaults).restore(for: store.record), original?.offline())
+            XCTAssertEqual(SessionSnapshotCache(defaults: defaults).restore(for: store.record), original,
+                           "The cache keeps the last good roster; offline is per launch")
             client.errors = [:]
             await store.refresh()
             await store.refreshPanes()

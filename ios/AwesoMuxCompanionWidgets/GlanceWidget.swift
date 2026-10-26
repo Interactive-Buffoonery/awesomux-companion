@@ -53,17 +53,14 @@ struct GlanceWidgetView: View {
     let snapshot: GlanceSnapshot?
     let date: Date
 
-    private func status(_ snapshot: GlanceSnapshot) -> GlanceStatus {
-        GlanceStatus(connected: snapshot.connected, updatedAt: snapshot.updatedAt, now: date)
-    }
-
     var body: some View {
         if let snapshot {
+            let status = GlanceStatus(connected: snapshot.connected, updatedAt: snapshot.updatedAt, now: date)
             switch family {
-            case .accessoryCircular: circular(snapshot)
-            case .accessoryRectangular: rectangular(snapshot)
-            case .systemMedium: medium(snapshot).foregroundStyle(Cat.text)
-            default: small(snapshot).foregroundStyle(Cat.text)
+            case .accessoryCircular: circular(snapshot, status)
+            case .accessoryRectangular: rectangular(snapshot, status)
+            case .systemMedium: medium(snapshot, status).foregroundStyle(Cat.text)
+            default: small(snapshot, status).foregroundStyle(Cat.text)
             }
         } else {
             switch family {
@@ -75,28 +72,26 @@ struct GlanceWidgetView: View {
         }
     }
 
-    private func small(_ snapshot: GlanceSnapshot) -> some View {
+    private func small(_ snapshot: GlanceSnapshot, _ status: GlanceStatus) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             counts(snapshot)
             Spacer(minLength: 0)
-            if status(snapshot) != .current {
-                offlineOrHost(snapshot)
-            } else if let top = snapshot.agents(in: .needsYou).first {
+            if status == .current, let top = snapshot.agents(in: .needsYou).first {
                 Text(top.workspaceName).font(.footnote.weight(.semibold)).lineLimit(1)
                 Text(top.status).font(.caption2).foregroundStyle(Cat.needs).lineLimit(1)
             } else {
-                offlineOrHost(snapshot)
+                offlineOrHost(snapshot, status)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func medium(_ snapshot: GlanceSnapshot) -> some View {
+    private func medium(_ snapshot: GlanceSnapshot, _ status: GlanceStatus) -> some View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 counts(snapshot)
                 Spacer(minLength: 0)
-                offlineOrHost(snapshot)
+                offlineOrHost(snapshot, status)
             }
             VStack(alignment: .leading, spacing: 8) {
                 GroupBar(needsYou: snapshot.count(.needsYou), working: snapshot.count(.working), done: snapshot.count(.done))
@@ -124,12 +119,12 @@ struct GlanceWidgetView: View {
         }
     }
 
-    private func rectangular(_ snapshot: GlanceSnapshot) -> some View {
+    private func rectangular(_ snapshot: GlanceSnapshot, _ status: GlanceStatus) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text("\(snapshot.count(.needsYou)) need you · \(snapshot.count(.working)) working")
                 .font(.headline).widgetAccentable()
-            if status(snapshot) != .current {
-                GlanceStatusLabel(status: status(snapshot)).lineLimit(1)
+            if status != .current {
+                GlanceStatusLabel(status: status).lineLimit(1)
             } else if let top = snapshot.agents(in: .needsYou).first {
                 Text("\(top.workspaceName) · \(top.status)").lineLimit(1)
             } else {
@@ -139,11 +134,11 @@ struct GlanceWidgetView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func circular(_ snapshot: GlanceSnapshot) -> some View {
+    private func circular(_ snapshot: GlanceSnapshot, _ status: GlanceStatus) -> some View {
         ZStack {
             AccessoryWidgetBackground()
             VStack(spacing: 0) {
-                switch status(snapshot) {
+                switch status {
                 case .current:
                     Image(systemName: snapshot.count(.needsYou) > 0 ? "bell.badge.fill" : "terminal.fill")
                     Text("\(snapshot.count(.needsYou) > 0 ? snapshot.count(.needsYou) : snapshot.count(.working))")
@@ -158,11 +153,11 @@ struct GlanceWidgetView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(circularAccessibilityLabel(snapshot))
+        .accessibilityLabel(circularAccessibilityLabel(snapshot, status))
     }
 
-    private func circularAccessibilityLabel(_ snapshot: GlanceSnapshot) -> Text {
-        switch status(snapshot) {
+    private func circularAccessibilityLabel(_ snapshot: GlanceSnapshot, _ status: GlanceStatus) -> Text {
+        switch status {
         case .current:
             Text("\(snapshot.count(.needsYou)) need you, \(snapshot.count(.working)) working")
         case .updated(let date): Text("Updated \(AgeText.text(since: date)) ago")
@@ -183,11 +178,11 @@ struct GlanceWidgetView: View {
         }
     }
 
-    @ViewBuilder private func offlineOrHost(_ snapshot: GlanceSnapshot) -> some View {
-        if status(snapshot) == .current {
+    @ViewBuilder private func offlineOrHost(_ snapshot: GlanceSnapshot, _ status: GlanceStatus) -> some View {
+        if status == .current {
             Text(snapshot.hostName).font(.caption2).foregroundStyle(Cat.subtext0).lineLimit(1)
         } else {
-            GlanceStatusLabel(status: status(snapshot)).font(.caption2).foregroundStyle(Cat.subtext0).lineLimit(1)
+            GlanceStatusLabel(status: status).font(.caption2).foregroundStyle(Cat.subtext0).lineLimit(1)
         }
     }
 }

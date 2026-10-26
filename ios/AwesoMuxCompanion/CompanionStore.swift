@@ -368,7 +368,7 @@ final class CompanionStore {
             reachable = false
             activeRoute = nil
             message = Self.readMessage(for: error, macName: record.macName)
-            guard let foregroundStarted, foregroundSession == foregroundStarted else { return }
+            guard isStillForeground(since: foregroundStarted) else { return }
             if let snapshot {
                 if snapshot.connected {
                     let offline = snapshot.offline()
@@ -448,6 +448,11 @@ final class CompanionStore {
         if previewMutationTask != nil, let previewChoice, previewChoice.pairingRevision == revision {
             panes.permission = .updating(previewChoice.allowed)
         }
+    }
+
+    /// A failure confirms the Mac is offline only if the call began and ended in one active scene.
+    private func isStillForeground(since started: UUID?) -> Bool {
+        started != nil && foregroundSession == started
     }
 
     func suspendPanes() {
@@ -644,8 +649,7 @@ final class CompanionStore {
             if scopedDecision, (error as? MacClientFailure) == .api("permission_denied") {
                 handleDecisionDenial()
             } else if error.isCompanionAuthorizationFailure {
-                handleAuthorizationFailure(error, reportOffline: reportOffline && foregroundStarted != nil
-                    && foregroundSession == foregroundStarted)
+                handleAuthorizationFailure(error, reportOffline: reportOffline && isStillForeground(since: foregroundStarted))
             }
             throw error
         }
@@ -718,8 +722,7 @@ final class CompanionStore {
             if (error as? MacClientFailure) == .api("permission_denied") {
                 handleDecisionDenial()
             } else if error.isCompanionAuthorizationFailure {
-                handleAuthorizationFailure(error, reportOffline: foregroundStarted != nil
-                    && foregroundSession == foregroundStarted)
+                handleAuthorizationFailure(error, reportOffline: isStillForeground(since: foregroundStarted))
             }
             throw error
         }

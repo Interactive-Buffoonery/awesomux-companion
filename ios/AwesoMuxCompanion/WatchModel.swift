@@ -15,7 +15,7 @@ final class WatchModel {
     private(set) var activeRoute: CompanionRoute?
     private(set) var error: String?
 
-    @ObservationIgnored private let opening: TerminalOpening
+    @ObservationIgnored private var opening: TerminalOpening
     @ObservationIgnored private let canInput: @MainActor () -> Bool
     @ObservationIgnored private let renderer: any WatchRendering
     @ObservationIgnored private let canWatch: @MainActor () -> Bool
@@ -77,7 +77,13 @@ final class WatchModel {
 
     func updateInputPermission() {
         guard status == .live else { return }
+        applyOpening()
+    }
+
+    // The opening choice applies once; a reconnect must not take control back from the Mac.
+    private func applyOpening() {
         input.openIfReady(canInput() ? opening : .watch)
+        if input.keyboardRequested { opening = .watch }
     }
 
     func reconnect() {
@@ -250,7 +256,7 @@ final class WatchModel {
             error = nil
             try renderer.reset(grid: begin.grid, scrollbackBound: begin.scrollbackBound)
         case .bytes(let bytes): try renderer.feed(bytes)
-        case .ready: status = .live; error = nil; input.ready(opening: canInput() ? opening : .watch)
+        case .ready: status = .live; error = nil; input.ready(); applyOpening()
         case .grid(let grid):
             try renderer.resize(grid)
             self.grid = grid

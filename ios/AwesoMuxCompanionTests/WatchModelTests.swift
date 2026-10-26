@@ -75,6 +75,29 @@ final class WatchModelTests: XCTestCase {
         await task?.value
     }
 
+    func testReconnectDoesNotReapplyInputOpening() async {
+        let f = WatchModelFixture()
+        f.opening = .input
+        f.inputAllowed = true
+        let firstWait = expectation(description: "first live")
+        let nextWait = expectation(description: "fresh live")
+        let first = f.connection(waiting: firstWait, role: .interactive)
+        let second = f.connection(waiting: nextWait, role: .interactive)
+        f.sleep = { _ in }
+        f.open = { _ in f.openCount == 1 ? first : second }
+        let task = f.start()
+        await fulfillment(of: [firstWait], timeout: 2)
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(first.sent.count, 1)
+        first.deliver(.init(frame: .output(sequence: 8, bytes: Data([9])), generation: 1))
+        await fulfillment(of: [nextWait], timeout: 2)
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertTrue(second.sent.isEmpty)
+        XCTAssertFalse(f.model.input.keyboardRequested)
+        f.model.stop()
+        await task?.value
+    }
+
     func testMacOpeningRefusalLeavesVisibleReasonWithoutRetrying() async {
         for code in ["pane_exited", "pane_disconnected", "terminal_unavailable", "stale_target", "timeout"] {
             let f = WatchModelFixture()

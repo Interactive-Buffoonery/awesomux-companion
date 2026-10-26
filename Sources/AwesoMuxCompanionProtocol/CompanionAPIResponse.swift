@@ -141,6 +141,9 @@ public struct CompanionAPIResponse: Codable, Sendable {
     public let attentionEvents: AttentionPage?
     public let workspaces: [Workspace]?
     public let terminalPreviewAllowed: Bool?
+    public let terminalInputAllowed: Bool?
+    public let createWorkspaceAllowed: Bool?
+    public let createPaneAllowed: Bool?
     /// v2 grants only. Malformed route metadata decodes as `nil` so the rest of the response survives.
     public let routes: CompanionRoutes?
     public let alertPreferences: CompanionAlertPreferences?
@@ -163,6 +166,9 @@ public struct CompanionAPIResponse: Codable, Sendable {
         alertPreferences: CompanionAlertPreferences? = nil,
         workspaces: [Workspace]? = nil,
         terminalPreviewAllowed: Bool? = nil,
+        terminalInputAllowed: Bool? = nil,
+        createWorkspaceAllowed: Bool? = nil,
+        createPaneAllowed: Bool? = nil,
         pendingDecisions: [CompanionPendingDecision]? = nil,
         decisionOutcomes: [CompanionDecisionReceipt]? = nil,
         decisionReceipt: CompanionDecisionReceipt? = nil,
@@ -187,6 +193,9 @@ public struct CompanionAPIResponse: Codable, Sendable {
         self.alertPreferences = alertPreferences
         self.workspaces = workspaces
         self.terminalPreviewAllowed = terminalPreviewAllowed
+        self.terminalInputAllowed = terminalInputAllowed
+        self.createWorkspaceAllowed = createWorkspaceAllowed
+        self.createPaneAllowed = createPaneAllowed
         self.terminalStream = terminalStream
         self.terminalStreamAccepted = terminalStreamAccepted
     }
@@ -210,6 +219,9 @@ public struct CompanionAPIResponse: Codable, Sendable {
         routes = (try? container.decodeIfPresent(CompanionRoutes.self, forKey: .routes)) ?? nil
         workspaces = try container.decodeIfPresent([Workspace].self, forKey: .workspaces)
         terminalPreviewAllowed = try container.decodeIfPresent(Bool.self, forKey: .terminalPreviewAllowed)
+        terminalInputAllowed = try container.decodeIfPresent(Bool.self, forKey: .terminalInputAllowed)
+        createWorkspaceAllowed = try container.decodeIfPresent(Bool.self, forKey: .createWorkspaceAllowed)
+        createPaneAllowed = try container.decodeIfPresent(Bool.self, forKey: .createPaneAllowed)
         terminalStream = (try? container.decodeIfPresent(CompanionTerminalStream.Capabilities.self, forKey: .terminalStream)) ?? nil
         terminalStreamAccepted = (try? container.decodeIfPresent(CompanionTerminalStream.Accepted.self, forKey: .terminalStreamAccepted)) ?? nil
     }

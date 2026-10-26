@@ -8,6 +8,110 @@ import XCTest
 final class WatchModelTests: XCTestCase {
     private typealias Stream = CompanionTerminalStream
 
+    func testSnapshotCompletionUsesOpeningChoiceAndCurrentInputGrant() async {
+        for opening in [TerminalOpening.input, .watch] {
+            for allowed in [false, true] {
+                let f = WatchModelFixture()
+                f.opening = opening
+                f.inputAllowed = allowed
+                let waiting = expectation(description: "snapshot completed")
+                let connection = f.connection(waiting: waiting, role: .interactive)
+                f.open = { _ in connection }
+                f.model.input.preferredGrid = .init(rows: 31, cols: 43)
+                let task = f.start()
+                await fulfillment(of: [waiting], timeout: 2)
+                for _ in 0..<100 { await Task.yield() }
+                if opening == .input && allowed {
+                    XCTAssertEqual(connection.sent.map(\.frame), [.claim(.init(grid: .init(rows: 31, cols: 43)))])
+                    XCTAssertTrue(f.model.input.keyboardRequested)
+                } else {
+                    XCTAssertTrue(connection.sent.isEmpty)
+                    XCTAssertFalse(f.model.input.keyboardRequested)
+                }
+                f.model.stop()
+                await task?.value
+            }
+        }
+    }
+
+    func testMissingInputGrantBlocksManualWritesOnInteractiveStream() async {
+        let f = WatchModelFixture()
+        f.opening = .watch
+        let waiting = expectation(description: "snapshot completed")
+        let connection = f.connection(waiting: waiting, role: .interactive)
+        f.open = { _ in connection }
+        let task = f.start()
+        await fulfillment(of: [waiting], timeout: 2)
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertFalse(f.model.input.canType)
+        f.model.input.takeOver()
+        f.model.input.type(Data("a".utf8))
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertTrue(connection.sent.isEmpty)
+        f.inputAllowed = true
+        XCTAssertTrue(f.model.input.canType)
+        f.model.stop()
+        await task?.value
+    }
+
+    func testFreshForegroundGrantAfterSnapshotAppliesOpeningOnlyOnce() async {
+        let f = WatchModelFixture()
+        f.opening = .input
+        let waiting = expectation(description: "snapshot before permission refresh")
+        let connection = f.connection(waiting: waiting, role: .interactive)
+        f.open = { _ in connection }
+        let task = f.start()
+        await fulfillment(of: [waiting], timeout: 2)
+        XCTAssertTrue(connection.sent.isEmpty)
+        f.inputAllowed = true
+        f.model.updateInputPermission()
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(connection.sent.count, 1)
+        XCTAssertTrue(f.model.input.keyboardRequested)
+        f.model.updateInputPermission()
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(connection.sent.count, 1)
+        f.model.stop()
+        await task?.value
+    }
+
+    func testReconnectDoesNotReapplyInputOpening() async {
+        let f = WatchModelFixture()
+        f.opening = .input
+        f.inputAllowed = true
+        let firstWait = expectation(description: "first live")
+        let nextWait = expectation(description: "fresh live")
+        let first = f.connection(waiting: firstWait, role: .interactive)
+        let second = f.connection(waiting: nextWait, role: .interactive)
+        f.sleep = { _ in }
+        f.open = { _ in f.openCount == 1 ? first : second }
+        let task = f.start()
+        await fulfillment(of: [firstWait], timeout: 2)
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(first.sent.count, 1)
+        first.deliver(.init(frame: .output(sequence: 8, bytes: Data([9])), generation: 1))
+        await fulfillment(of: [nextWait], timeout: 2)
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertTrue(second.sent.isEmpty)
+        XCTAssertFalse(f.model.input.keyboardRequested)
+        f.model.stop()
+        await task?.value
+    }
+
+    func testMacOpeningRefusalLeavesVisibleReasonWithoutRetrying() async {
+        for code in ["pane_exited", "pane_disconnected", "terminal_unavailable", "stale_target", "timeout"] {
+            let f = WatchModelFixture()
+            f.open = { _ in throw MacClientFailure.api(code) }
+            let task = f.start()
+            await task?.value
+            XCTAssertEqual(f.model.status, .failed)
+            XCTAssertEqual(f.model.error, WatchModel.message(for: MacClientFailure.api(code)))
+            XCTAssertFalse(f.model.error?.isEmpty ?? true)
+            XCTAssertEqual(f.openCount, 1)
+            f.model.stop()
+        }
+    }
+
     func testLifecycleGatesAttachAndClearsImmediatelyOnInactiveLockAndDismissal() async throws {
         for reason in 0..<3 {
             let f = WatchModelFixture()
@@ -334,6 +438,8 @@ private final class WatchModelFixture {
     let targetVersion = UUID()
     let renderer = WatchTestRenderer()
     var authorized = true
+    var inputAllowed = false
+    var opening = TerminalOpening.watch
     var routes: [CompanionRoute] = []
     var openCount = 0
     var open: @MainActor (CompanionRoute) async throws -> any WatchConnection = { _ in throw MacClientFailure.unreachable }
@@ -344,7 +450,7 @@ private final class WatchModelFixture {
     lazy var model = makeModel()
 
     private func makeModel() -> WatchModel {
-        WatchModel(renderer: renderer, canWatch: { [unowned self] in authorized },
+        WatchModel(renderer: renderer, opening: opening, canInput: { [unowned self] in inputAllowed }, canWatch: { [unowned self] in authorized },
             makeClient: { [unowned self] _, route in
                 routes.append(route)
                 return WatchTestClient { [unowned self] canSend in
@@ -361,14 +467,14 @@ private final class WatchModelFixture {
     }
 
     func connection(waiting: XCTestExpectation? = nil, ignoreCancellation: Bool = false,
-                    bytes: Data = Data([1, 2])) -> WatchTestConnection {
+                    bytes: Data = Data([1, 2]), role: CompanionTerminalStream.Role = .watch) -> WatchTestConnection {
         let begin = CompanionTerminalStream.SnapshotBegin(paneID: paneID.uuidString,
             targetVersion: targetVersion.uuidString, grid: .init(rows: 24, cols: 80), leader: nil,
             scrollbackBound: CompanionTerminalStream.maximumSnapshotBytes)
         return WatchTestConnection(packets: [.init(frame: .snapshotBegin(begin), generation: 1),
             .init(frame: .snapshot(sequence: 0, bytes: bytes), generation: 1),
             .init(frame: .snapshotEnd(.init(bytes: bytes.count)), generation: 1)],
-            waiting: waiting, ignoreCancellation: ignoreCancellation)
+            waiting: waiting, ignoreCancellation: ignoreCancellation, role: role)
     }
 }
 
@@ -410,8 +516,15 @@ private final class WatchTestRenderer: WatchRendering {
     func clear() { bytes = Data() }
 }
 
-private final class WatchTestConnection: WatchConnection, Sendable {
+private final class WatchTestConnection: WatchConnection, @unchecked Sendable {
     let capabilities = CompanionTerminalStream.Capabilities()
+    let accepted: CompanionTerminalStream.Accepted
+    @MainActor var sent: [WatchPacket] = []
+    @MainActor func send(_ frame: CompanionTerminalStream.Frame, generation: UInt32,
+                         canSend: @escaping @MainActor @Sendable () -> Bool) async throws {
+        guard canSend() else { throw CancellationError() }
+        sent.append(.init(frame: frame, generation: generation))
+    }
     private struct State {
         var packets: [WatchPacket]
         var waiter: CheckedContinuation<WatchPacket, Error>?
@@ -422,7 +535,9 @@ private final class WatchTestConnection: WatchConnection, Sendable {
     private let ignoreCancellation: Bool
     var cancelled: Bool { state.withLock { $0.cancelled } }
 
-    init(packets: [WatchPacket], waiting: XCTestExpectation?, ignoreCancellation: Bool) {
+    init(packets: [WatchPacket], waiting: XCTestExpectation?, ignoreCancellation: Bool,
+         role: CompanionTerminalStream.Role = .watch) {
+        accepted = .init(role: role)
         state = OSAllocatedUnfairLock(initialState: State(packets: packets))
         self.waiting = waiting
         self.ignoreCancellation = ignoreCancellation

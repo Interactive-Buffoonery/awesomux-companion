@@ -19,6 +19,72 @@ final class PaneRosterTests: XCTestCase {
                        removePairing: removePairing, liveActivity: nil, writeShared: writeShared, clearShared: {})
     }
 
+    func testEveryVersionedTerminalCanOpenIncludingAwaitingHydration() {
+        let id = UUID().uuidString
+        let version = UUID().uuidString
+        for availability in ["attached", "awaitingHydration", "unavailable", "stale"] {
+            let pane = ListedPane(id: id, title: "Shell", kind: .terminal,
+                availability: availability, state: nil, targetVersion: version)
+            XCTAssertEqual(pane.terminalTarget?.paneID.uuidString, id)
+            XCTAssertEqual(pane.terminalTarget?.targetVersion.uuidString, version)
+        }
+        XCTAssertNil(ListedPane(id: id, title: "Shell", kind: .terminal,
+            availability: "attached", state: nil).terminalTarget)
+        XCTAssertNil(ListedPane(id: id, title: "Notes", kind: .documents,
+            availability: "attached", state: nil, targetVersion: version).terminalTarget)
+    }
+
+    func testTerminalGrantsDefaultOffAndClearOnSuspensionAndReadFailure() async {
+        let client = PaneClientFixture()
+        let store = store(client)
+        store.resumePanes()
+        await store.refreshPanes()
+        XCTAssertFalse(store.panes.terminalAccess.inputAllowed)
+        XCTAssertFalse(store.panes.terminalAccess.createWorkspaceAllowed)
+        XCTAssertFalse(store.panes.terminalAccess.createPaneAllowed)
+        client.terminalStatus = APIResponse(terminalInputAllowed: true,
+            createWorkspaceAllowed: true, createPaneAllowed: true)
+        await store.refreshPanes()
+        XCTAssertTrue(store.panes.terminalAccess.inputAllowed)
+        XCTAssertTrue(store.panes.terminalAccess.createWorkspaceAllowed)
+        XCTAssertTrue(store.panes.terminalAccess.createPaneAllowed)
+        client.errors["get_connection_status"] = .closed
+        await store.refreshPanes()
+        XCTAssertEqual(store.panes.terminalAccess, TerminalAccess())
+        client.errors = [:]
+        await store.refreshPanes()
+        store.suspendPanes()
+        XCTAssertEqual(store.panes.terminalAccess, TerminalAccess())
+    }
+
+    func testCreateUsesOneRouteAndReturnsExactTargetWithoutReplayingLostReply() async throws {
+        let client = PaneClientFixture()
+        client.terminalStatus = APIResponse(terminalInputAllowed: true,
+            createWorkspaceAllowed: true, createPaneAllowed: true)
+        let record = panePairing(routes: [.init(transport: .lan, host: "lan.invalid"),
+                                          .init(transport: .tailscale, host: "100.64.0.1")])
+        let store = store(client, record: record)
+        store.resumePanes()
+        await store.refreshPanes()
+        let workspaceID = UUID()
+        let created = try await store.createTerminal(workspaceID: workspaceID, canSend: { true })
+        XCTAssertEqual(created, client.created)
+        XCTAssertEqual(client.createdWorkspaces, [workspaceID])
+        client.createFailure = .closed
+        do {
+            _ = try await store.createTerminal(workspaceID: nil, canSend: { true })
+            XCTFail("Expected lost acknowledgement")
+        } catch { XCTAssertEqual(error as? MacClientFailure, .closed) }
+        XCTAssertEqual(client.createdWorkspaces, [workspaceID, nil])
+        XCTAssertEqual(client.createConnections, [record.connectionID, record.connectionID])
+        store.suspendPanes()
+        do {
+            _ = try await store.createTerminal(workspaceID: nil, canSend: { true })
+            XCTFail("Suspended scene must not create")
+        } catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(client.createdWorkspaces.count, 2)
+    }
+
     func testProjectionPreservesHostOrderAndRejectsUnknownOrUnavailablePreviews() {
         let projected = PaneRoster.project([
             .init(workspaceID: "b", name: "Second alphabetically", panes: [
@@ -888,9 +954,24 @@ final class RequestGate {
 @MainActor
 final class PaneClientFixture: CompanionSessionClient {
     struct Call { let operation: String; let connectionID: UUID; let allowed: Bool? }
+    let created = CreatedTerminal(workspaceID: UUID(), paneID: UUID(), targetVersion: UUID())
+    var createdWorkspaces: [UUID?] = []
+    var createConnections: [UUID] = []
+    var createFailure: MacClientFailure?
+
+    func createTerminal(connectionID: UUID, workspaceID: UUID?,
+                        canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> CreatedTerminal {
+        guard canSend() else { throw CancellationError() }
+        createdWorkspaces.append(workspaceID)
+        createConnections.append(connectionID)
+        if let createFailure { throw createFailure }
+        return created
+    }
+
     var calls: [Call] = []
     var agentState = "running"
     var capturedAt = Date.now
+    var terminalStatus: APIResponse?
     var allowed: Bool? = true
     var receiptOverride: Bool?
     var mutationStatusOverride: Bool?
@@ -902,7 +983,7 @@ final class PaneClientFixture: CompanionSessionClient {
         calls.append(Call(operation: operation, connectionID: connectionID, allowed: nil))
         let response: APIResponse
         switch operation {
-        case "get_connection_status": response = APIResponse(terminalPreviewAllowed: allowed)
+        case "get_connection_status": response = terminalStatus ?? APIResponse(terminalPreviewAllowed: allowed)
         case "list_panes": response = APIResponse(workspaces: workspaces)
         case "get_attention_events":
             response = APIResponse(attentionEvents: .init(events: [], nextCursor: "cursor", cursorStatus: "initial", hasMore: false, currentStateRecoveryRequired: false))

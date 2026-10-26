@@ -247,7 +247,23 @@ device, including sheets, backgrounding during authentication and a grace return
 
 Sessions lists the Mac's workspaces and panes in their native order, including
 plain shells, split terminals and document groups. Each row shows availability
-and terminal/agent status. Unknown pane kinds remain metadata-only. Tap an attached terminal to open Watch. The iPad-specific layout remains #11.
+and terminal/agent status. Unknown pane kinds remain metadata-only. Every
+terminal with a target version opens, including panes awaiting hydration on the Mac. When Input is on, opening
+claims control at the phone's grid after the snapshot and raises the keyboard.
+Choose Watch from the row's context menu to open without claiming. Input off or
+missing permission metadata keeps the existing Watch behavior.
+
+Sessions offers New Workspace under + when the Mac permits workspace creation,
+and New Pane in each workspace when pane creation is permitted. Both require
+Input. The phone opens the returned target ready to type. Creation uses one
+route with no automatic retry; after a missing acknowledgement, Sessions refreshes
+so you can check whether the terminal was created before trying again. Remote-owned
+workspaces cannot be identified from the roster and show the Mac's refusal.
+
+The Mac must send optional `terminalInputAllowed`, `createWorkspaceAllowed` and
+`createPaneAllowed` Booleans on `get_connection_status`; absent fields mean false.
+The `create_terminal` endpoint uses phone-local Codable envelopes and does not add
+a shared operation. The iPad-specific layout remains #11.
 The Agents tab, notification focus, cached agents, widgets and Live Activity keep
 their existing roles.
 

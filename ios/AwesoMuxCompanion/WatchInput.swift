@@ -82,6 +82,7 @@ final class WatchInput {
 
     private(set) var isInteractive = false
     private(set) var isLive = false
+    private(set) var keyboardRequested = false
     private(set) var generation: UInt32?
     private(set) var watchMessage: String?
     private(set) var pasteDelivery: Delivery?
@@ -93,7 +94,7 @@ final class WatchInput {
     }
     private(set) var confirmation: Confirmation?
     var preferredGrid = Stream.Grid(rows: 24, cols: 80)
-    var leader: String?
+    var leader: String? { didSet { claimPending = false } }
     var ownLeaderID: String?
 
     @ObservationIgnored private var connection: (any WatchConnection)?
@@ -108,6 +109,7 @@ final class WatchInput {
     @ObservationIgnored private var highestTyped: UInt64?
     @ObservationIgnored private var highestAck: UInt64?
     @ObservationIgnored private var lastSentGrid: Stream.Grid?
+    @ObservationIgnored private var claimPending = false
     @ObservationIgnored private var maximum = Stream.maximumInputBytes
     @ObservationIgnored private let now: () -> TimeInterval
 
@@ -118,8 +120,13 @@ final class WatchInput {
     var pasteInFlight: Bool { pasteDelivery == .sending }
     var drivingText: String {
         guard let leader else { return "No one has control" }
-        if let ownLeaderID, leader.caseInsensitiveCompare(ownLeaderID) == .orderedSame { return "You have control" }
+        if hasControl { return "You have control" }
         return leader == "mac" ? "Mac has control" : "Another terminal has control"
+    }
+
+    private var hasControl: Bool {
+        guard let leader, let ownLeaderID else { return false }
+        return leader.caseInsensitiveCompare(ownLeaderID) == .orderedSame
     }
 
     func attach(_ connection: any WatchConnection, ownLeaderID: String,
@@ -131,8 +138,8 @@ final class WatchInput {
         maximum = min(Stream.maximumInputBytes, connection.capabilities.inputFrameMax ?? 0)
         isInteractive = connection.accepted.role == .interactive && maximum > 0
         switch connection.accepted.watchReason {
-        case .inputOff: watchMessage = "Typing from this iPhone is off. Allow it on the Mac in Settings › Companion."
-        case .remotePane: watchMessage = "Typing isn't available for this remote pane."
+        case .inputOff: watchMessage = String(localized: "Typing from this iPhone is off. Allow it on the Mac in Settings › Companion.")
+        case .remotePane: watchMessage = String(localized: "Typing isn't available for this remote pane.")
         case nil: watchMessage = nil
         }
     }
@@ -141,6 +148,7 @@ final class WatchInput {
         endGeneration()
         self.generation = generation
         self.leader = leader
+        claimPending = false
         nextSequence = 0
         highestAck = nil
         highestTyped = nil
@@ -148,11 +156,32 @@ final class WatchInput {
         lastSentGrid = nil
     }
 
-    func ready() { isLive = true }
+    func ready(opening: TerminalOpening = .watch) {
+        isLive = true
+        openIfReady(opening)
+    }
+
+    func openIfReady(_ opening: TerminalOpening) {
+        if opening == .input, canType, !keyboardRequested {
+            takeOver()
+            keyboardRequested = true
+        }
+    }
+
+    func updatePhoneGrid(_ grid: Stream.Grid) {
+        guard preferredGrid != grid else { return }
+        preferredGrid = grid
+        guard keyboardRequested, canType, jobs.count < 64 else { return }
+        // The Mac only caches a bare grid frame; re-claiming applies the keyboard-sized grid now.
+        let frame: Stream.Frame = claimPending || hasControl ? .claim(.init(grid: grid)) : .grid(grid)
+        jobs.append(Job(frame: frame, sequence: nil, paste: false))
+        runWorker()
+    }
 
     func takeOver() {
         guard canType, jobs.count < 64 else { return }
         jobs.append(Job(frame: .claim(.init(grid: preferredGrid)), sequence: nil, paste: false))
+        claimPending = true
         runWorker()
     }
 
@@ -226,6 +255,7 @@ final class WatchInput {
     }
 
     private func endGeneration() {
+        keyboardRequested = false
         if let highestTyped, highestAck.map({ highestTyped > $0 }) ?? true {
             typedUncertain = true
         }
@@ -291,6 +321,7 @@ final class WatchInput {
                     }
                     guard self.token == identity else { return }
                     if case .claim(let claim) = job.frame { self.lastSentGrid = claim.grid }
+                    if case .grid(let grid) = job.frame { self.lastSentGrid = grid }
                 }
                 guard self.token == identity else { return }
                 self.worker = nil

@@ -22,6 +22,9 @@ struct CompanionTabs: View {
 struct SessionsView: View {
     let store: CompanionStore
     @Environment(TerminalLockModel.self) private var terminalLock
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var creation = TerminalCreationModel()
+    @State private var destination: TerminalDestination?
 
     var body: some View {
         NavigationStack {
@@ -52,7 +55,29 @@ struct SessionsView: View {
                 }
             }
             .navigationTitle("Sessions")
+            .navigationDestination(item: $destination) { target in
+                WatchView(store: store, paneID: target.paneID, targetVersion: target.targetVersion,
+                          title: target.title, terminalLock: terminalLock, opening: target.opening)
+            }
+            .onChange(of: creation.destination) { _, target in
+                if let target { destination = target; creation.destination = nil }
+            }
+            .alert("Couldn't create terminal", isPresented: Binding(
+                get: { creation.error != nil }, set: { if !$0 { creation.error = nil } })) {
+                Button("OK", role: .cancel) { creation.error = nil }
+            } message: { Text(creation.error ?? "") }
             .toolbar {
+                if store.panes.terminalAccess.createWorkspaceAllowed {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button("New Workspace", systemImage: "plus.rectangle") { createTerminal(in: nil) }
+                                .accessibilityLabel("New Workspace")
+                        } label: {
+                            Image(systemName: "plus").accessibilityLabel("New terminal")
+                        }
+                        .disabled(creation.isCreating)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink { SettingsView(store: store) } label: {
                         Image(systemName: "gearshape").accessibilityLabel("Settings")
@@ -60,6 +85,24 @@ struct SessionsView: View {
                 }
             }
             .refreshable { await store.refreshPanes() }
+        }
+    }
+
+    private func createTerminal(in workspaceID: UUID?) {
+        let pairing = store.decisionPairing
+        let current: @MainActor @Sendable () -> Bool = {
+            scenePhase == .active && terminalLock.isActive && !terminalLock.isLocked
+                && pairing != nil && store.decisionPairing == pairing
+                && !store.showingPairing && store.pairingStep == .idle
+        }
+        let permitted: @MainActor @Sendable () -> Bool = {
+            guard current() else { return false }
+            return workspaceID == nil ? store.panes.terminalAccess.createWorkspaceAllowed : store.panes.terminalAccess.createPaneAllowed
+        }
+        Task {
+            await creation.create(workspaceID: workspaceID, isCurrent: current, canCreate: permitted, send: { workspaceID in
+                try await store.createTerminal(workspaceID: workspaceID, canSend: permitted)
+            }, refresh: { await store.refreshPanes() })
         }
     }
 
@@ -97,18 +140,28 @@ struct SessionsView: View {
                     }
                     ForEach(workspace.panes) { pane in
                         Group {
-                            if pane.kind == .terminal, pane.availability == "attached",
-                               let paneID = UUID(uuidString: pane.id),
-                               let version = pane.targetVersion.flatMap(UUID.init(uuidString:)) {
-                                NavigationLink {
-                                    WatchView(store: store, paneID: paneID, targetVersion: version, title: pane.title, terminalLock: terminalLock)
-                                } label: { PaneRow(pane: pane) }
+                            if let target = pane.terminalTarget {
+                                Button { destination = target } label: { PaneRow(pane: pane) }
+                                    .contextMenu {
+                                        Button("Watch", systemImage: "eye") {
+                                            var watch = target
+                                            watch.opening = .watch
+                                            destination = watch
+                                        }
+                                        .accessibilityLabel("Watch")
+                                    }
                             } else {
                                 PaneRow(pane: pane)
                             }
                         }
                             .id(pane.id)
                             .listRowBackground(store.focusedPaneID == pane.id ? Cat.needs.opacity(0.18) : Cat.card)
+                    }
+                    if store.panes.terminalAccess.createPaneAllowed,
+                       let workspaceID = UUID(uuidString: workspace.id) {
+                        Button("New Pane", systemImage: "plus") { createTerminal(in: workspaceID) }
+                            .accessibilityLabel("New Pane")
+                            .disabled(creation.isCreating)
                     }
                 } header: { Text(workspace.name).foregroundStyle(Cat.subtext0) }
                 .listRowBackground(Cat.card)

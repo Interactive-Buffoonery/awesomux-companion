@@ -219,7 +219,7 @@ final class SessionSnapshotCacheTests: XCTestCase {
         }
     }
 
-    func testEmptyCacheStaysOfflineUntilSuccessfulEmptyRead() async {
+    func testEmptyCacheStaysUnconfirmedUntilSuccessfulEmptyRead() async {
         await withDefaults { defaults in
             let record = pairing()
             let empty = GlanceSnapshot(schemaVersion: 1, hostName: record.macName, connected: true,
@@ -227,11 +227,11 @@ final class SessionSnapshotCacheTests: XCTestCase {
             SessionSnapshotCache(defaults: defaults).save(empty, for: record)
             let store = self.store(defaults: defaults, record: record, client: SessionClientStub(empty: true))
             XCTAssertEqual(store.snapshot?.agents, [])
-            XCTAssertEqual(store.snapshot?.connected, false)
+            XCTAssertFalse(store.isConnected, "An empty cache must not read as \"No agents running\"")
             XCTAssertTrue(store.isSnapshotCached)
             await store.refresh()
             XCTAssertEqual(store.snapshot?.agents, [])
-            XCTAssertEqual(store.snapshot?.connected, true)
+            XCTAssertTrue(store.isConnected)
             XCTAssertFalse(store.isSnapshotCached)
         }
     }

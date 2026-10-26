@@ -36,14 +36,42 @@ final class WatchInputTests: XCTestCase {
         input.updatePhoneGrid(.init(rows: 24, cols: 42))
         await drain(wire, count: 2)
         XCTAssertEqual(wire.frames.map(\.frame), [
-            .claim(.init(grid: .init(rows: 40, cols: 42))), .grid(.init(rows: 24, cols: 42))])
+            .claim(.init(grid: .init(rows: 40, cols: 42))), .claim(.init(grid: .init(rows: 24, cols: 42)))])
+        input.leader = "mac"
+        input.updatePhoneGrid(.init(rows: 30, cols: 42))
+        await drain(wire, count: 3)
+        XCTAssertEqual(wire.frames.last?.frame, .grid(.init(rows: 30, cols: 42)))
+        input.updatePhoneGrid(.init(rows: 24, cols: 42))
+        await drain(wire, count: 4)
         input.updatePhoneGrid(.init(rows: 24, cols: 42))
         await Task.yield()
-        XCTAssertEqual(wire.frames.count, 2)
+        XCTAssertEqual(wire.frames.count, 4)
         input.disconnect()
         input.updatePhoneGrid(.init(rows: 40, cols: 42))
         await Task.yield()
-        XCTAssertEqual(wire.frames.count, 2)
+        XCTAssertEqual(wire.frames.count, 4)
+    }
+
+    func testRevokedInputStopsQueuedAndManualWrites() async {
+        let wire = InputTestConnection()
+        wire.blockGrid = true
+        var allowed = true
+        let input = WatchInput()
+        input.attach(wire, ownLeaderID: "phone", authority: { allowed })
+        input.begin(generation: 1, leader: "mac")
+        input.ready()
+        input.preferredGrid = .init(rows: 30, cols: 40)
+        input.type(Data("a".utf8))
+        await drain(wire, count: 1)
+        allowed = false
+        wire.releaseGrid()
+        await Task.yield(); await Task.yield()
+        XCTAssertEqual(wire.frames.map(\.frame), [.grid(.init(rows: 30, cols: 40))])
+        XCTAssertFalse(input.canType)
+        input.takeOver(); input.type(Data("b".utf8))
+        await Task.yield()
+        XCTAssertEqual(wire.frames.count, 1)
+        input.disconnect()
     }
 
     func testWatchChoiceAndInputOffNeverClaimOrRaiseKeyboard() async {

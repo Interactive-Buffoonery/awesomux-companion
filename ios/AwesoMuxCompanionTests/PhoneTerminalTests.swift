@@ -38,7 +38,7 @@ final class PhoneTerminalTests: XCTestCase {
     func testCreateSuccessOpensReturnedPaneReadyToType() async throws {
         let created = CreatedTerminal(workspaceID: UUID(), paneID: UUID(), targetVersion: UUID())
         let model = TerminalCreationModel()
-        await model.create(workspaceID: nil, canCreate: { true }, send: { workspace in
+        await model.create(workspaceID: nil, isCurrent: { true }, canCreate: { true }, send: { workspace in
             XCTAssertNil(workspace)
             return created
         }, refresh: {})
@@ -57,23 +57,45 @@ final class PhoneTerminalTests: XCTestCase {
             calls += 1
             throw MacClientFailure.closed
         }
-        await model.create(workspaceID: nil, canCreate: { false }, send: send, refresh: { refreshes += 1 })
+        await model.create(workspaceID: nil, isCurrent: { true }, canCreate: { false }, send: send, refresh: { refreshes += 1 })
         XCTAssertEqual(calls, 0)
-        await model.create(workspaceID: UUID(), canCreate: { true }, send: send, refresh: { refreshes += 1 })
+        await model.create(workspaceID: UUID(), isCurrent: { true }, canCreate: { true }, send: send, refresh: { refreshes += 1 })
         XCTAssertEqual(calls, 1)
         XCTAssertEqual(refreshes, 1)
         XCTAssertNil(model.destination)
         XCTAssertNotNil(model.error)
     }
 
-    func testCreateCompletionAfterAuthorityLossCannotOpenPane() async {
+    func testGrantLossMidCreateExplainsAndRefreshesWithoutOpening() async {
         let model = TerminalCreationModel()
         var allowed = true
-        await model.create(workspaceID: nil, canCreate: { allowed }, send: { _ in
+        var refreshes = 0
+        await model.create(workspaceID: nil, isCurrent: { true }, canCreate: { allowed }, send: { _ in
             allowed = false
+            return CreatedTerminal(workspaceID: UUID(), paneID: UUID(), targetVersion: UUID())
+        }, refresh: { refreshes += 1 })
+        XCTAssertNil(model.destination)
+        XCTAssertNotNil(model.error)
+        XCTAssertEqual(refreshes, 1)
+
+        allowed = true
+        await model.create(workspaceID: nil, isCurrent: { true }, canCreate: { allowed }, send: { _ in
+            allowed = false
+            throw MacClientFailure.api("permission_denied")
+        }, refresh: { refreshes += 1 })
+        XCTAssertNotNil(model.error)
+        XCTAssertEqual(refreshes, 2)
+    }
+
+    func testCreateCompletionAfterLeavingPairingStaysSilent() async {
+        let model = TerminalCreationModel()
+        var current = true
+        await model.create(workspaceID: nil, isCurrent: { current }, canCreate: { true }, send: { _ in
+            current = false
             return CreatedTerminal(workspaceID: UUID(), paneID: UUID(), targetVersion: UUID())
         }, refresh: {})
         XCTAssertNil(model.destination)
+        XCTAssertNil(model.error)
     }
 
     func testCreationRefusalIsShownAndConcurrentTapDoesNotSendTwice() async {
@@ -86,11 +108,11 @@ final class PhoneTerminalTests: XCTestCase {
             throw MacClientFailure.api("remote_workspace_unsupported")
         }
         let first = Task {
-            await model.create(workspaceID: UUID(), canCreate: { true }, send: send, refresh: {})
+            await model.create(workspaceID: UUID(), isCurrent: { true }, canCreate: { true }, send: send, refresh: {})
         }
         await fulfillment(of: [gate.started], timeout: 2)
         XCTAssertTrue(model.isCreating)
-        await model.create(workspaceID: UUID(), canCreate: { true }, send: send, refresh: {})
+        await model.create(workspaceID: UUID(), isCurrent: { true }, canCreate: { true }, send: send, refresh: {})
         XCTAssertEqual(calls, 1)
         gate.release()
         await first.value

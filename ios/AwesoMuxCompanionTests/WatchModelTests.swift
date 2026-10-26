@@ -34,6 +34,26 @@ final class WatchModelTests: XCTestCase {
         }
     }
 
+    func testMissingInputGrantBlocksManualWritesOnInteractiveStream() async {
+        let f = WatchModelFixture()
+        f.opening = .watch
+        let waiting = expectation(description: "snapshot completed")
+        let connection = f.connection(waiting: waiting, role: .interactive)
+        f.open = { _ in connection }
+        let task = f.start()
+        await fulfillment(of: [waiting], timeout: 2)
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertFalse(f.model.input.canType)
+        f.model.input.takeOver()
+        f.model.input.type(Data("a".utf8))
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertTrue(connection.sent.isEmpty)
+        f.inputAllowed = true
+        XCTAssertTrue(f.model.input.canType)
+        f.model.stop()
+        await task?.value
+    }
+
     func testFreshForegroundGrantAfterSnapshotAppliesOpeningOnlyOnce() async {
         let f = WatchModelFixture()
         f.opening = .input

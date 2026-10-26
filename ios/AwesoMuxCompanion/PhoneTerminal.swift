@@ -52,19 +52,25 @@ final class TerminalCreationModel {
     var destination: TerminalDestination?
     var error: String?
 
-    func create(workspaceID: UUID?, canCreate: @escaping @MainActor () -> Bool,
+    /// `isCurrent` is the same visible pairing; `canCreate` is the Mac's grant, which may change mid-request.
+    func create(workspaceID: UUID?, isCurrent: @escaping @MainActor () -> Bool,
+                canCreate: @escaping @MainActor () -> Bool,
                 send: (UUID?) async throws -> CreatedTerminal, refresh: () async -> Void) async {
-        guard !isCreating, canCreate() else { return }
+        guard !isCreating, isCurrent(), canCreate() else { return }
         isCreating = true
         error = nil
         defer { isCreating = false }
         do {
             let created = try await send(workspaceID)
-            guard !Task.isCancelled, canCreate() else { return }
-            destination = TerminalDestination(paneID: created.paneID, targetVersion: created.targetVersion,
-                                              title: String(localized: "Terminal"))
+            guard !Task.isCancelled, isCurrent() else { return }
+            if canCreate() {
+                destination = TerminalDestination(paneID: created.paneID, targetVersion: created.targetVersion,
+                                                  title: String(localized: "Terminal"))
+            } else {
+                self.error = String(localized: "Access changed on the Mac. Check Sessions for the new terminal.")
+            }
         } catch {
-            guard !Task.isCancelled, canCreate() else { return }
+            guard !Task.isCancelled, isCurrent() else { return }
             if let failure = error as? MacClientFailure, case .api = failure {
                 self.error = WatchModel.message(for: error)
             } else {

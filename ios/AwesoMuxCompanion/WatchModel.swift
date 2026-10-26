@@ -163,7 +163,10 @@ final class WatchModel {
                 guard isCurrent(epoch) else { opened.cancel(); return }
                 connection = opened
                 input.attach(opened, ownLeaderID: target.record.connectionID.uuidString.lowercased(),
-                             authority: { [weak self] in self?.isCurrent(epoch) ?? false })
+                             authority: { [weak self] in
+                                 guard let self else { return false }
+                                 return self.isCurrent(epoch) && self.canInput()
+                             })
                 activeRoute = route
                 if route.transport == .tailscale { lanFailed = true }
                 var stream = try WatchStream(paneID: target.paneID, targetVersion: target.targetVersion,

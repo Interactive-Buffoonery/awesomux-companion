@@ -90,14 +90,17 @@ struct SessionsView: View {
 
     private func createTerminal(in workspaceID: UUID?) {
         let pairing = store.decisionPairing
+        let current: @MainActor @Sendable () -> Bool = {
+            scenePhase == .active && terminalLock.isActive && !terminalLock.isLocked
+                && pairing != nil && store.decisionPairing == pairing
+                && !store.showingPairing && store.pairingStep == .idle
+        }
         let permitted: @MainActor @Sendable () -> Bool = {
-            guard scenePhase == .active, terminalLock.isActive, !terminalLock.isLocked,
-                  pairing != nil, store.decisionPairing == pairing,
-                  !store.showingPairing, store.pairingStep == .idle else { return false }
+            guard current() else { return false }
             return workspaceID == nil ? store.panes.terminalAccess.createWorkspaceAllowed : store.panes.terminalAccess.createPaneAllowed
         }
         Task {
-            await creation.create(workspaceID: workspaceID, canCreate: permitted, send: { workspaceID in
+            await creation.create(workspaceID: workspaceID, isCurrent: current, canCreate: permitted, send: { workspaceID in
                 try await store.createTerminal(workspaceID: workspaceID, canSend: permitted)
             }, refresh: { await store.refreshPanes() })
         }

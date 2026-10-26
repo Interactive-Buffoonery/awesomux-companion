@@ -23,6 +23,8 @@ protocol CompanionSessionClient: Sendable {
     func answerDecision(_ answer: CompanionDecisionAnswer, connectionID: UUID,
                         canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse
     func setTerminalPreview(_ allowed: Bool, connectionID: UUID) async throws -> APIResponse
+    func createTerminal(connectionID: UUID, workspaceID: UUID?,
+                        canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> CreatedTerminal
 }
 
 extension CompanionSessionClient {
@@ -34,6 +36,11 @@ extension CompanionSessionClient {
 
     func answerDecision(_ answer: CompanionDecisionAnswer, connectionID: UUID,
                         canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> APIResponse {
+        throw MacClientFailure.api("unsupported_operation")
+    }
+
+    func createTerminal(connectionID: UUID, workspaceID: UUID?,
+                        canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> CreatedTerminal {
         throw MacClientFailure.api("unsupported_operation")
     }
 
@@ -473,6 +480,7 @@ final class CompanionStore {
                 // v1 pairings need permission readback too, independently of route discovery.
                 let status = try await sessionCall("get_connection_status", record: record, revision: started, paneGeneration: generation)
                 guard acceptsPaneRead(generation, revision: started) else { return }
+                panes.terminalAccess = TerminalAccess(status)
                 if panes.previewIntent == .keepOff, status.terminalPreviewAllowed == true {
                     panes.permission = .failed(String(localized: "Previews stay hidden on this iPhone. Turn them off on your Mac or confirm enabling them again."))
                 } else {
@@ -492,6 +500,7 @@ final class CompanionStore {
                 reconcilePaneFocus()
             } catch {
                 guard acceptsPaneRead(generation, revision: started) else { return }
+                panes.terminalAccess = TerminalAccess()
                 if (error as? MacClientFailure) == .api("unsupported_operation") {
                     panes.state = .unsupported
                     panes.permission = .unsupported
@@ -505,6 +514,24 @@ final class CompanionStore {
         paneReadTask = task
         await task.value
         if panes.generation == generation { paneReadTask = nil }
+    }
+
+    func createTerminal(workspaceID: UUID?, canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> CreatedTerminal {
+        guard let record, let pairing = decisionPairing else { throw CancellationError() }
+        let started = revision
+        let generation = panes.generation
+        let permitted: @MainActor @Sendable () -> Bool = { [weak self] in
+            guard let self, self.revision == started, self.panes.generation == generation,
+                  self.decisionPairing == pairing, self.panes.lifecycle == .active,
+                  !self.showingPairing, self.pairingStep == .idle, canSend() else { return false }
+            return workspaceID == nil ? self.panes.terminalAccess.createWorkspaceAllowed : self.panes.terminalAccess.createPaneAllowed
+        }
+        guard permitted(), let route = activeRoute ?? orderedRoutes(record).first else { throw CancellationError() }
+        // Creation is a write: a dropped reply must never fall through to another route.
+        let created = try await client(for: route, record: record).createTerminal(
+            connectionID: record.connectionID, workspaceID: workspaceID, canSend: permitted)
+        guard !Task.isCancelled, permitted() else { throw CancellationError() }
+        return created
     }
 
     var focusedPaneDestination: FocusedPaneDestination? {
@@ -653,6 +680,7 @@ final class CompanionStore {
         invalidatePaneRead()
         panes.state = .failed(Self.readMessage(for: error, macName: record?.macName ?? "Mac"))
         panes.permission = .unknown
+        panes.terminalAccess = TerminalAccess()
         reachable = false
         activeRoute = nil
         message = Self.readMessage(for: error, macName: record?.macName ?? "Mac")

@@ -31,6 +31,12 @@ struct ListedPane: Identifiable, Equatable {
     var preview: String?
     var targetVersion: String? = nil
 
+    var terminalTarget: TerminalDestination? {
+        guard kind == .terminal, let paneID = UUID(uuidString: id),
+              let version = targetVersion.flatMap(UUID.init(uuidString:)) else { return nil }
+        return TerminalDestination(paneID: paneID, targetVersion: version, title: title)
+    }
+
     var status: String {
         switch availability {
         case "awaitingHydration": return String(localized: "Loading on Mac")
@@ -68,6 +74,7 @@ enum PaneRosterState: Equatable {
 struct PaneRoster {
     enum Lifecycle { case suspended, active }
     enum PreviewIntent { case followHost, keepOff }
+    var terminalAccess = TerminalAccess()
     var state: PaneRosterState = .idle
     var permission: TerminalPreviewPermission = .unknown
     var previewIntent: PreviewIntent = .followHost
@@ -79,6 +86,7 @@ struct PaneRoster {
     mutating func reset() {
         invalidate()
         state = .idle
+        terminalAccess = TerminalAccess()
         permission = .unknown
         previewIntent = .followHost
     }
@@ -87,6 +95,7 @@ struct PaneRoster {
         lifecycle = .suspended
         invalidate()
         state = .idle
+        terminalAccess = TerminalAccess()
         permission = .unknown
     }
 

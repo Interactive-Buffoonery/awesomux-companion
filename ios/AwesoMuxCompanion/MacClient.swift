@@ -166,6 +166,31 @@ struct MacClient: Sendable {
         }
     }
 
+    func createTerminal(connectionID: UUID, workspaceID: UUID?,
+                        canSend: @escaping @MainActor @Sendable () -> Bool) async throws -> CreatedTerminal {
+        guard await canSend() else { throw CancellationError() }
+        let request = CreateTerminalRequest(connectionID: connectionID, workspaceID: workspaceID)
+        let connection = try await FramedConnection.open(client: self)
+        defer { connection.cancel() }
+        try await connection.send(CompanionProtocol.encoder().encode(request), canSend: canSend)
+        let data = try await withTimeout(Self.requestTimeout) {
+            try await connection.receiveFrame(maximum: Self.maximumResponseBytes)
+        }
+        try Task.checkCancellation()
+        guard await canSend() else { throw CancellationError() }
+        return try Self.createdTerminal(from: data, requestID: request.requestID)
+    }
+
+    static func createdTerminal(from data: Data, requestID: UUID) throws -> CreatedTerminal {
+        guard let response = try? CompanionProtocol.decoder().decode(CreateTerminalResponse.self, from: data),
+              response.schemaVersion == CompanionProtocol.version, response.requestID == requestID else {
+            throw MacClientFailure.invalidResponse
+        }
+        if let error = response.error { throw MacClientFailure.api(error) }
+        guard let created = response.createdTerminal else { throw MacClientFailure.invalidResponse }
+        return created
+    }
+
     private func exchange(_ request: CompanionAPIRequest,
                           canSend: (@MainActor @Sendable () -> Bool)? = nil) async throws -> APIResponse {
         let connection = try await FramedConnection.open(client: self)

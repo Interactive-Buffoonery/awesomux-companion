@@ -15,6 +15,8 @@ final class WatchModel {
     private(set) var activeRoute: CompanionRoute?
     private(set) var error: String?
 
+    @ObservationIgnored private let opening: TerminalOpening
+    @ObservationIgnored private let canInput: @MainActor () -> Bool
     @ObservationIgnored private let renderer: any WatchRendering
     @ObservationIgnored private let canWatch: @MainActor () -> Bool
     @ObservationIgnored private let makeClient: (PairingRecord, CompanionRoute) throws -> any WatchClient
@@ -33,12 +35,15 @@ final class WatchModel {
         let targetVersion: UUID
     }
 
-    init(renderer: any WatchRendering, canWatch: @escaping @MainActor () -> Bool = { true },
+    init(renderer: any WatchRendering, opening: TerminalOpening = .watch,
+         canInput: @escaping @MainActor () -> Bool = { false }, canWatch: @escaping @MainActor () -> Bool = { true },
          makeClient: @escaping (PairingRecord, CompanionRoute) throws -> any WatchClient = { record, route in
              try MacClient(host: route.host, port: record.port, macFingerprint: record.macFingerprint,
                            identity: PhoneIdentity.load(tag: record.identityTag, storage: record.identityStorage))
          },
          sleep: @escaping @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
+        self.opening = opening
+        self.canInput = canInput
         self.renderer = renderer
         self.canWatch = canWatch
         self.makeClient = makeClient
@@ -68,6 +73,11 @@ final class WatchModel {
         } else {
             cancelAndClear()
         }
+    }
+
+    func updateInputPermission() {
+        guard status == .live else { return }
+        input.openIfReady(canInput() ? opening : .watch)
     }
 
     func reconnect() {
@@ -237,7 +247,7 @@ final class WatchModel {
             error = nil
             try renderer.reset(grid: begin.grid, scrollbackBound: begin.scrollbackBound)
         case .bytes(let bytes): try renderer.feed(bytes)
-        case .ready: status = .live; error = nil; input.ready()
+        case .ready: status = .live; error = nil; input.ready(opening: canInput() ? opening : .watch)
         case .grid(let grid):
             try renderer.resize(grid)
             self.grid = grid
@@ -272,7 +282,7 @@ final class WatchModel {
         return error is CompanionTerminalStream.Failure
     }
 
-    private static func message(for error: Error) -> String {
+    static func message(for error: Error) -> String {
         if (error as? WatchTerminalFailure) == .nativeBusy {
             return String(localized: "The previous terminal is still stopping. Reconnecting…")
         }
@@ -293,6 +303,14 @@ final class WatchModel {
         }
         if let failure = error as? MacClientFailure {
             switch failure {
+            case .api("pane_exited"): return String(localized: "This pane has exited.")
+            case .api("pane_disconnected"): return String(localized: "This pane is disconnected. Reconnect it on your Mac.")
+            case .api("terminal_unavailable"): return String(localized: "This terminal isn't available on your Mac.")
+            case .api("remote_workspace_unsupported"): return String(localized: "New panes aren't available in this remote workspace.")
+            case .api("input_off"): return String(localized: "Typing from this iPhone is off. Allow it on the Mac in Settings › Companion.")
+            case .api("stale_target"): return String(localized: "This pane has changed. Open it again from Sessions.")
+            case .api("timeout"): return String(localized: "Your Mac took too long to open this terminal. Try again.")
+            case .api("unsupported_operation"): return String(localized: "Update awesoMux on your Mac to open new terminals.")
             case .api, .denied: return String(localized: "Your Mac didn't allow this terminal. Check Watch access on your Mac.")
             case .handshakeRejected: return String(localized: "Your Mac didn't match this pairing. Check your connection or pair again.")
             default: break

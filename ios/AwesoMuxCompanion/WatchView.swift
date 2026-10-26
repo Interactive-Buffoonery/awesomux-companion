@@ -16,7 +16,8 @@ struct WatchView: View {
     @State private var terminalSize = CGSize.zero
     @State private var securityObserver: UUID?
 
-    init(store: CompanionStore, paneID: UUID, targetVersion: UUID, title: String, terminalLock: TerminalLockModel) {
+    init(store: CompanionStore, paneID: UUID, targetVersion: UUID, title: String, terminalLock: TerminalLockModel,
+         opening: TerminalOpening = .input) {
         self.store = store
         self.paneID = paneID
         self.targetVersion = targetVersion
@@ -31,7 +32,8 @@ struct WatchView: View {
         }
         renderer.canRender = canRender
         _terminal = StateObject(wrappedValue: renderer)
-        _model = State(initialValue: WatchModel(renderer: renderer, canWatch: canRender))
+        _model = State(initialValue: WatchModel(renderer: renderer, opening: opening,
+            canInput: { [weak store] in store?.panes.terminalAccess.inputAllowed == true }, canWatch: canRender))
     }
 
     private var canWatch: Bool {
@@ -81,11 +83,11 @@ struct WatchView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                     terminalSize = size
-                    model.input.preferredGrid = terminal.phoneGrid(for: size)
+                    model.input.updatePhoneGrid(terminal.phoneGrid(for: size))
                     if model.status == .idle { connect() }
                 }
                 .onChange(of: terminal.isReady) { _, ready in
-                    if ready { model.input.preferredGrid = terminal.phoneGrid(for: terminalSize) }
+                    if ready { model.input.updatePhoneGrid(terminal.phoneGrid(for: terminalSize)) }
                 }
                 .background(WatchKeyboard(input: model.input, terminal: terminal, isShown: $keyboardShown)
                     .frame(width: 1, height: 1))
@@ -108,7 +110,7 @@ struct WatchView: View {
                 connect()
             }
                 .disabled(!canWatch)
-                .accessibilityHint("Starts a new snapshot from your Mac as a follower.")
+                .accessibilityHint("Starts a new snapshot from your Mac.")
         }
         .padding()
         .foregroundStyle(Cat.text)
@@ -135,10 +137,12 @@ struct WatchView: View {
             model.stop()
         }
         .onChange(of: canWatch) { _, _ in updateLifecycle() }
+        .onChange(of: store.panes.terminalAccess.inputAllowed) { _, _ in model.updateInputPermission() }
         .onChange(of: store.decisionPairing) { _, _ in model.stop() }
         .onChange(of: inputAnnouncement) { _, message in
             if !message.isEmpty { UIAccessibility.post(notification: .announcement, argument: message) }
         }
+        .onChange(of: model.input.keyboardRequested) { _, requested in keyboardShown = requested }
         .onChange(of: model.input.canType) { _, canType in if !canType { keyboardShown = false } }
         .sheet(item: Binding(get: { model.input.confirmation }, set: { _ in model.input.cancelPaste() })) { confirmation in
             NavigationStack {

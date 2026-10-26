@@ -9,6 +9,62 @@ import os
 final class WatchInputTests: XCTestCase {
     typealias Stream = CompanionTerminalStream
 
+    func testInputOpeningClaimsPhoneGridOnlyAfterSnapshotAndOncePerGeneration() async {
+        let (input, wire) = fixture()
+        input.preferredGrid = .init(rows: 30, cols: 42)
+        XCTAssertTrue(wire.frames.isEmpty)
+        XCTAssertFalse(input.keyboardRequested)
+        input.ready(opening: .input)
+        await drain(wire, count: 1)
+        XCTAssertEqual(wire.frames.map(\.frame), [.claim(.init(grid: .init(rows: 30, cols: 42)))])
+        XCTAssertTrue(input.keyboardRequested)
+        input.ready(opening: .input)
+        await Task.yield()
+        XCTAssertEqual(wire.frames.count, 1)
+        input.begin(generation: 11, leader: "mac")
+        XCTAssertFalse(input.keyboardRequested)
+        input.ready(opening: .input)
+        await drain(wire, count: 2)
+        XCTAssertEqual(wire.frames.map(\.generation), [10, 11])
+        input.disconnect()
+    }
+
+    func testKeyboardLayoutGridFollowsOpeningClaimWithoutAKeypress() async {
+        let (input, wire) = fixture()
+        input.preferredGrid = .init(rows: 40, cols: 42)
+        input.ready(opening: .input)
+        input.updatePhoneGrid(.init(rows: 24, cols: 42))
+        await drain(wire, count: 2)
+        XCTAssertEqual(wire.frames.map(\.frame), [
+            .claim(.init(grid: .init(rows: 40, cols: 42))), .grid(.init(rows: 24, cols: 42))])
+        input.updatePhoneGrid(.init(rows: 24, cols: 42))
+        await Task.yield()
+        XCTAssertEqual(wire.frames.count, 2)
+        input.disconnect()
+        input.updatePhoneGrid(.init(rows: 40, cols: 42))
+        await Task.yield()
+        XCTAssertEqual(wire.frames.count, 2)
+    }
+
+    func testWatchChoiceAndInputOffNeverClaimOrRaiseKeyboard() async {
+        for opening in [TerminalOpening.input, .watch] {
+            for role in [Stream.Role.interactive, .watch] {
+                let wire = InputTestConnection(accepted: .init(role: role,
+                    watchReason: role == .watch ? .inputOff : nil))
+                let input = WatchInput()
+                input.attach(wire, ownLeaderID: "phone", authority: { true })
+                input.begin(generation: 1, leader: "mac")
+                if opening == .watch || role == .watch {
+                    input.ready(opening: opening)
+                    await Task.yield()
+                    XCTAssertTrue(wire.frames.isEmpty)
+                    XCTAssertFalse(input.keyboardRequested)
+                }
+                input.disconnect()
+            }
+        }
+    }
+
     func testAttachAndSnapshotNeverSendAndWatchReasonExplainsPermission() async {
         let wire = InputTestConnection(accepted: .init(role: .watch, watchReason: .inputOff))
         let input = WatchInput()

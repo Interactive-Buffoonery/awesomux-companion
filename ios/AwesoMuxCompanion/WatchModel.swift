@@ -78,6 +78,7 @@ final class WatchModel {
             retrySeconds = 1
             launchIfAllowed()
         } else {
+            WatchDiagnostics.watch.notice("retry_suppressed origin=lifecycle reason=authority_lost")
             cancelAndClear(origin: "lifecycle", reason: "authority_lost")
         }
     }
@@ -126,6 +127,7 @@ final class WatchModel {
             }
             return
         }
+        WatchDiagnostics.watch.notice("retry_suppressed origin=renderer reason=\(WatchDiagnostics.reason(error), privacy: .public)")
         if let failure = error as? WatchTerminalFailure,
            failure == .invalidGrid || failure == .drawableTooLarge {
             self.error = String(localized: "This terminal's dimensions can't be displayed.")

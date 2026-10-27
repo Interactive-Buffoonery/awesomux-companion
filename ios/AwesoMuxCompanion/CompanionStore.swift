@@ -670,7 +670,9 @@ final class CompanionStore {
                 return try await client.call(operation, connectionID: record.connectionID, limit: limit, cursor: cursor)
             }
             try checkCurrent()
-            WatchDiagnostics.routing.notice("route_selected transport=\(route.transport.rawValue, privacy: .public)")
+            if activeRoute != route {
+                WatchDiagnostics.routing.notice("route_selected transport=\(route.transport.rawValue, privacy: .public)")
+            }
             activeRoute = route
             if route.transport == .tailscale { lanFailed = true }
             return response

@@ -172,7 +172,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
 
     private func validate(_ grid: CompanionTerminalStream.Grid) throws {
         guard (1...1000).contains(grid.cols), (1...1000).contains(grid.rows),
-              grid.cols * grid.rows <= 250_000 else { throw diagnosticFailure(.invalidGrid) }
+              grid.cols * grid.rows <= 250_000 else { throw diagnosticFailure(.invalidGrid, grid: grid) }
     }
 
     private func makeSurface(size: CGSize, fontSize: Float, displayScale: CGFloat = 3) throws -> WatchNativeSurface {
@@ -328,8 +328,9 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         }
     }
 
-    private func diagnosticFailure(_ error: WatchTerminalFailure) -> WatchTerminalFailure {
-        WatchDiagnostics.renderer.error("renderer_failed reason=\(WatchDiagnostics.reason(error), privacy: .public) rows=\(self.target?.rows ?? 0) cols=\(self.target?.cols ?? 0) queue_bytes=\(self.queuedBytes) queue_ops=\(self.operations.count) deadline_age_ms=\(self.deadlineStarted.map { WatchDiagnostics.milliseconds(.now - $0) } ?? -1)")
+    private func diagnosticFailure(_ error: WatchTerminalFailure, grid: CompanionTerminalStream.Grid? = nil) -> WatchTerminalFailure {
+        let diagnosticGrid = grid ?? target
+        WatchDiagnostics.renderer.error("renderer_failed reason=\(WatchDiagnostics.reason(error), privacy: .public) rows=\(diagnosticGrid?.rows ?? 0) cols=\(diagnosticGrid?.cols ?? 0) queue_bytes=\(self.queuedBytes) queue_ops=\(self.operations.count) deadline_age_ms=\(self.deadlineStarted.map { WatchDiagnostics.milliseconds(.now - $0) } ?? -1)")
         return error
     }
 

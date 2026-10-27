@@ -66,11 +66,15 @@ final class MacWatchConnection: WatchConnection, Sendable {
     @MainActor func send(_ frame: CompanionTerminalStream.Frame, generation: UInt32,
                          canSend: @escaping @MainActor @Sendable () -> Bool) async throws {
         guard accepted.role == .interactive, let maximum = capabilities.inputFrameMax else {
+            WatchDiagnostics.input.error("stream_invariant name=input_permission expected=interactive_with_input_limit actual_role=\(self.accepted.role.rawValue, privacy: .public) has_limit=\(self.capabilities.inputFrameMax != nil)")
             throw WatchFailure.invalidStream
         }
         switch frame {
         case .input(_, let bytes):
-            guard bytes.count <= maximum else { throw WatchFailure.invalidStream }
+            guard bytes.count <= maximum else {
+                WatchDiagnostics.input.error("stream_invariant name=input_limit expected_max_bytes=\(maximum) actual_bytes=\(bytes.count)")
+                throw WatchFailure.invalidStream
+            }
         case .grid(let grid): try WatchStream.validate(grid)
         case .claim(let claim): try WatchStream.validate(claim.grid)
         default: throw WatchFailure.invalidStream
@@ -90,7 +94,10 @@ final class MacWatchConnection: WatchConnection, Sendable {
             guard !value else { return false }
             value = true
             return true
-        }) else { throw WatchFailure.invalidStream }
+        }) else {
+            WatchDiagnostics.transport.error("stream_invariant name=single_receiver expected=1 actual=2")
+            throw WatchFailure.invalidStream
+        }
         defer { receiving.withLock { $0 = false } }
         do {
             try Task.checkCancellation()
@@ -163,13 +170,17 @@ struct WatchStream {
               limits.maximumStreamsPerMac > 0,
               limits.inputFrameMax.map({ (1...Stream.maximumInputBytes).contains($0) }) ?? true,
               (1...15).contains(limits.heartbeatSeconds), limits.idleTimeoutSeconds == 45 else {
+            WatchDiagnostics.watch.error("stream_invariant name=capabilities expected_version=\(Stream.version) actual_version=\(limits.version) expected_idle_seconds=45 actual_idle_seconds=\(limits.idleTimeoutSeconds) actual_heartbeat_seconds=\(limits.heartbeatSeconds) actual_data_limit=\(limits.maximumDataBytes) actual_snapshot_limit=\(limits.maximumSnapshotBytes)")
             throw WatchFailure.unsupportedStream
         }
     }
 
     static func validate(_ grid: Stream.Grid) throws {
         guard (1...Int(UInt16.max)).contains(grid.rows), (1...Int(UInt16.max)).contains(grid.cols),
-              grid.rows * grid.cols <= 1_048_576 else { throw WatchFailure.invalidDimensions }
+              grid.rows * grid.cols <= 1_048_576 else {
+            WatchDiagnostics.watch.error("stream_invariant name=grid expected_max_cells=1048576 actual_rows=\(grid.rows) actual_cols=\(grid.cols)")
+            throw WatchFailure.invalidDimensions
+        }
     }
 
     mutating func consume(_ packet: WatchPacket) throws -> Event {
@@ -193,7 +204,11 @@ struct WatchStream {
         if case .ack = packet.frame, role == .interactive, let generation, packet.generation < generation { return .heartbeat }
         // A final end can precede snapshot_begin after the Mac advances its generation.
         if case .end(let end) = packet.frame {
-            guard generation.map({ packet.generation >= $0 }) ?? true else { throw WatchFailure.invalidStream }
+            guard generation.map({ packet.generation >= $0 }) ?? true else {
+                let expected = generation ?? 0
+                WatchDiagnostics.watch.error("stream_invariant name=end_generation expected_min=\(expected) actual=\(packet.generation)")
+                throw WatchFailure.invalidStream
+            }
             throw WatchFailure.ended(end.reason)
         }
         guard generation == packet.generation, phase != .awaitingSnapshot else {
@@ -250,7 +265,9 @@ struct WatchStream {
                 throw WatchFailure.invalidStream
             }
             return .ack(ack.sequence)
-        case .input, .claim, .phoneSent, .snapshotBegin: throw WatchFailure.invalidStream
+        case .input, .claim, .phoneSent, .snapshotBegin:
+            WatchDiagnostics.watch.error("stream_invariant name=frame_direction expected=mac_output actual=phone_or_duplicate_begin")
+            throw WatchFailure.invalidStream
         }
     }
 

@@ -3,6 +3,11 @@ import XCTest
 @testable import AwesoMuxCompanion
 
 final class PairingStoreTests: XCTestCase {
+    private lazy var defaults: UserDefaults = {
+        let suite = "PairingStoreTests.\(UUID().uuidString)"
+        addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        return UserDefaults(suiteName: suite)!
+    }()
     private let macA = Data(repeating: 0xA1, count: 32).base64URLEncodedString
     private let macB = Data(repeating: 0xB2, count: 32).base64URLEncodedString
 
@@ -165,6 +170,91 @@ final class PairingStoreTests: XCTestCase {
         XCTAssertThrowsError(try PairingStore(keychain: keychain).loadAll(), "A record under another Mac's item is unusable")
     }
 
+    func testReadFailureAfterCopyKeepsLegacyPairingAndFinishesLater() throws {
+        let keychain = KeychainFixture()
+        let legacy = record(macA)
+        try keychain.put(legacy, account: PairingStore.legacyAccount)
+        keychain.fault = .failReadAfterWrite
+        let store = PairingStore(keychain: keychain)
+
+        XCTAssertEqual(try store.load(), legacy, "The copy can't be verified, so the legacy item is used as is")
+        XCTAssertEqual(try keychain.record(PairingStore.legacyAccount), legacy)
+
+        keychain.fault = nil
+        let writes = keychain.writes
+        XCTAssertEqual(try store.loadAll(), [legacy])
+        XCTAssertEqual(Set(keychain.stored.keys), [account(macA)])
+        XCTAssertEqual(keychain.writes, writes, "The copy was already complete, so only the legacy item is deleted")
+    }
+
+    /// Pair A, then pair B while A's item can't be deleted, unpair B and relaunch: A must not come back.
+    @MainActor
+    func testReplacedMacNeverReturnsWhenItsCleanupFails() async throws {
+        for storedAs in [account(macA), PairingStore.legacyAccount] {
+            let keychain = KeychainFixture()
+            let store = PairingStore(keychain: keychain)
+            let a = record(macA, pairedAt: 100, tag: "a")
+            let b = record(macB, pairedAt: 200, tag: "b")
+            try keychain.put(a, account: storedAs)
+            keychain.failDeletes = [storedAs]
+            let client = PaneClientFixture()
+            let defaults = defaults
+            let launch = {
+                CompanionStore(defaults: defaults, loadPairing: { try store.load() }, makeClient: { _, _ in client },
+                               removePairing: { try store.clear(macFingerprint: $0.macFingerprint) },
+                               liveActivity: nil, writeShared: { _ in }, clearShared: {})
+            }
+
+            XCTAssertTrue(try store.replace(a, with: b), storedAs)
+            let paired = launch()
+            XCTAssertEqual(paired.record, b, storedAs)
+            await paired.unpair()
+            XCTAssertNil(paired.record, storedAs)
+            XCTAssertNil(paired.message, storedAs)
+            XCTAssertNil(launch().record, "\(storedAs): a replaced Mac never comes back")
+            XCTAssertEqual(try store.loadAll(), [], storedAs)
+
+            keychain.failDeletes = []
+            XCTAssertEqual(try store.loadAll(), [], storedAs)
+            XCTAssertEqual(keychain.stored, [:], "\(storedAs): a later load finishes deleting A")
+        }
+    }
+
+    func testReplacementThatCantRetireThePreviousMacKeepsItWhole() throws {
+        let keychain = KeychainFixture()
+        let store = PairingStore(keychain: keychain)
+        let a = record(macA, pairedAt: 100, tag: "a")
+        let b = record(macB, pairedAt: 200, tag: "b")
+        try store.save(a)
+        keychain.failDeletes = [account(macA)]
+        keychain.failWrites = [PairingStore.retiredAccount]
+
+        XCTAssertThrowsError(try store.replace(a, with: b))
+        XCTAssertEqual(try store.loadAll(), [a], "B is taken back and A stays in use")
+        XCTAssertEqual(try keychain.record(account(macA)), a)
+
+        keychain.failDeletes.insert(account(macB))
+        XCTAssertFalse(try store.replace(a, with: b), "B can't be taken back, so it stays and A isn't retired")
+        XCTAssertEqual(try store.loadAll(), [a, b])
+        XCTAssertEqual(try store.load(), b)
+    }
+
+    func testPairingAgainWithAReplacedMacIsNeverHidden() throws {
+        let keychain = KeychainFixture()
+        let store = PairingStore(keychain: keychain)
+        let a = record(macA, pairedAt: 100, tag: "a")
+        let b = record(macB, pairedAt: 200, tag: "b")
+        try store.save(a)
+        keychain.failDeletes = [account(macA)]
+        XCTAssertTrue(try store.replace(a, with: b))
+        XCTAssertEqual(try store.loadAll(), [b])
+
+        let again = record(macA, pairedAt: 300, tag: "again")
+        XCTAssertTrue(try store.replace(b, with: again))
+        XCTAssertEqual(try store.loadAll(), [again])
+        XCTAssertEqual(Set(keychain.stored.keys), [account(macA)], "Nothing retired is left")
+    }
+
     /// The real Keychain, in a service of its own.
     func testSystemKeychainMigratesAndKeepsThisDeviceOnlyAccess() throws {
         let keychain = SystemPairingKeychain(service: "PairingStoreTests.\(UUID().uuidString)")
@@ -206,20 +296,23 @@ final class PairingStoreTests: XCTestCase {
 /// In-memory items with the same account semantics as the Keychain: one item per account, and each fault
 /// fails the operation the real Keychain could fail.
 private final class KeychainFixture: PairingKeychain, @unchecked Sendable {
-    enum Fault { case failRead, failWrite, writeGarbage }
+    enum Fault { case failRead, failReadAfterWrite, failWrite, writeGarbage }
 
     var stored: [String: Data] = [:]
     var fault: Fault?
     var failDeletes: Set<String> = []
+    var failWrites: Set<String> = []
     private(set) var writes = 0
 
     func items() throws -> [String: Data] {
-        if fault == .failRead { throw PairingStoreFailure.keychain(errSecInteractionNotAllowed) }
+        if fault == .failRead || fault == .failReadAfterWrite && writes > 0 {
+            throw PairingStoreFailure.keychain(errSecInteractionNotAllowed)
+        }
         return stored
     }
 
     func write(_ data: Data, account: String) throws {
-        if fault == .failWrite { throw PairingStoreFailure.keychain(errSecIO) }
+        if fault == .failWrite || failWrites.contains(account) { throw PairingStoreFailure.keychain(errSecIO) }
         writes += 1
         stored[account] = fault == .writeGarbage ? Data("{".utf8) : data
     }

@@ -148,8 +148,9 @@ final class CompanionStore {
                           identity: PhoneIdentity.load(tag: record.identityTag, storage: record.identityStorage))
         },
         removePairing: @escaping (PairingRecord) throws -> Void = { record in
-            try PhoneIdentity.delete(tag: record.identityTag)
+            // Record first: if it can't be cleared, the identity it names is still there for another try.
             try PairingStore.system.clear(macFingerprint: record.macFingerprint)
+            try PhoneIdentity.delete(tag: record.identityTag)
         },
         liveActivity: LiveActivityController? = LiveActivityController(),
         writeShared: @escaping (GlanceSnapshot) -> Void = {
@@ -238,14 +239,10 @@ final class CompanionStore {
                 macName: reply.macName ?? link.macName, host: v1?.host, port: link.port,
                 macFingerprint: link.macFingerprint, transport: v1?.transport, routes: v1 == nil ? link.routes : nil,
                 connectionID: connectionID, identityTag: created.tag, identityStorage: created.storage, pairedAt: .now)
-            try PairingStore.system.save(next)
             let previous = record
+            let previousGone = try PairingStore.system.replace(previous, with: next)
             replacePairing(with: next)
-            if let previous, previous.identityTag != next.identityTag { revoke(previous) }
-            // ponytail: pairing another Mac still replaces this one; multi-host adds it alongside instead.
-            if let previous, previous.macFingerprint != next.macFingerprint {
-                try? PairingStore.system.clear(macFingerprint: previous.macFingerprint)
-            }
+            if let previous, previousGone, previous.identityTag != next.identityTag { revoke(previous) }
             unpairMessage = nil
             defaults.removeObject(forKey: Keys.revokedConnectionID)
             message = nil

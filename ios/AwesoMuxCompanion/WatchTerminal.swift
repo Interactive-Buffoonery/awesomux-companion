@@ -4,6 +4,7 @@ import Foundation
 import GhosttyTerminal
 import SwiftUI
 import UIKit
+import os
 
 @MainActor
 final class WatchTerminal: ObservableObject, WatchRendering {
@@ -27,6 +28,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     private var target: CompanionTerminalStream.Grid?
     private var scrollbackBound = 0
     private var sizingAttempts = 0
+    private var deadlineStarted: ContinuousClock.Instant?
     private var deadline: Task<Void, Never>?
     private var drainToken: UUID?
     private let drainQueue = DispatchQueue(label: "app.awesomux.watch-renderer-drain")
@@ -97,6 +99,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         epoch = UUID()
         deadline?.cancel()
         deadline = nil
+        deadlineStarted = nil
         boundary = WatchTerminalBoundary()
         modeProbe = nil
         operations.removeAll(keepingCapacity: false)
@@ -156,6 +159,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
 
     fileprivate func checkAuthority() -> Bool {
         guard canRender() else {
+            WatchDiagnostics.renderer.notice("authority_lost origin=lifecycle phase=renderer")
             clear()
             return false
         }
@@ -314,6 +318,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     }
 
     private func armDeadline(_ error: WatchTerminalFailure) {
+        deadlineStarted = .now
         deadline?.cancel()
         let identity = epoch
         deadline = Task { @MainActor [weak self] in
@@ -325,6 +330,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
 
     @discardableResult
     private func invalidate(_ error: WatchTerminalFailure) -> WatchTerminalFailure {
+        WatchDiagnostics.renderer.error("renderer_failed reason=\(WatchDiagnostics.reason(error), privacy: .public) rows=\(self.target?.rows ?? 0) cols=\(self.target?.cols ?? 0) queue_bytes=\(self.queuedBytes) queue_ops=\(self.operations.count) deadline_age_ms=\(self.deadlineStarted.map { WatchDiagnostics.milliseconds(.now - $0) } ?? -1)")
         clear()
         failure = error
         onFailure?(error)

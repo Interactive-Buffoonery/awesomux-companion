@@ -1,3 +1,4 @@
+import os
 import AwesoMuxCompanionProtocol
 import Foundation
 import Observation
@@ -326,6 +327,7 @@ final class WatchInput {
                 guard self.token == identity else { return }
                 self.worker = nil
             } catch {
+                WatchDiagnostics.input.error("input_worker_failed generation=\(generation) reason=\(WatchDiagnostics.reason(error), privacy: .public) queued_ops=\(self.jobs.count) outstanding=\(self.outstanding.count)")
                 guard self.token == identity else { return }
                 self.connection?.cancel()
                 self.disconnect()

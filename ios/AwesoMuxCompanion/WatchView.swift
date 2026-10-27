@@ -1,3 +1,4 @@
+import os
 import AwesoMuxCompanionProtocol
 import SwiftUI
 import UIKit
@@ -130,6 +131,7 @@ struct WatchView: View {
             connect()
         }
         .onDisappear {
+            WatchDiagnostics.lifecycle.notice("authority_lost origin=lifecycle source=watch_disappear")
             isVisible = false
             if let securityObserver { terminalLock.removeSecurityObserver(securityObserver) }
             securityObserver = nil
@@ -138,7 +140,10 @@ struct WatchView: View {
         }
         .onChange(of: canWatch) { _, _ in updateLifecycle() }
         .onChange(of: store.panes.terminalAccess.inputAllowed) { _, _ in model.updateInputPermission() }
-        .onChange(of: store.decisionPairing) { _, _ in model.stop() }
+        .onChange(of: store.decisionPairing) { _, _ in
+            WatchDiagnostics.lifecycle.notice("authority_lost origin=lifecycle source=pairing_changed")
+            model.stop()
+        }
         .onChange(of: inputAnnouncement) { _, message in
             if !message.isEmpty { UIAccessibility.post(notification: .announcement, argument: message) }
         }

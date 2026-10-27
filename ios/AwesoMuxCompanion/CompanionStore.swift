@@ -1,3 +1,4 @@
+import os
 import AwesoMuxCompanionProtocol
 import Foundation
 import Network
@@ -179,7 +180,8 @@ final class CompanionStore {
         } catch {
             message = String(localized: "This iPhone's pairing couldn't be read. Pair again to continue.")
         }
-        pathMonitor.pathUpdateHandler = { [weak self] _ in
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            WatchDiagnostics.routing.notice("path_changed satisfied=\(path.status == .satisfied) expensive=\(path.isExpensive) constrained=\(path.isConstrained)")
             Task { @MainActor in self?.lanFailed = false }
         }
         pathMonitor.start(queue: .main)
@@ -668,7 +670,8 @@ final class CompanionStore {
                 return try await client.call(operation, connectionID: record.connectionID, limit: limit, cursor: cursor)
             }
             try checkCurrent()
-            activeRoute = route
+            WatchDiagnostics.routing.notice("route_selected transport=\(route.transport.rawValue, privacy: .public)")
+        activeRoute = route
             if route.transport == .tailscale { lanFailed = true }
             return response
         } catch {

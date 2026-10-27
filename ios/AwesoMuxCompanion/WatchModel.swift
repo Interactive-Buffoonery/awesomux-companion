@@ -1,6 +1,7 @@
 import AwesoMuxCompanionProtocol
 import Foundation
 import Observation
+import os
 
 @MainActor @Observable
 final class WatchModel {
@@ -22,12 +23,15 @@ final class WatchModel {
     @ObservationIgnored private let makeClient: (PairingRecord, CompanionRoute) throws -> any WatchClient
     @ObservationIgnored private let sleep: @MainActor (Duration) async throws -> Void
     @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var diagnostics: WatchDiagnostics?
     @ObservationIgnored private var connection: (any WatchConnection)?
     @ObservationIgnored private var epoch = UUID()
     @ObservationIgnored private var target: Target?
     @ObservationIgnored private var allowed = false
     @ObservationIgnored private var lanFailed = false
     @ObservationIgnored private var retrySeconds = 1
+    @ObservationIgnored private var diagnosticRetryCount = 0
+    @ObservationIgnored private var diagnosticWatchID = UUID()
 
     private struct Target: Equatable {
         let record: PairingRecord
@@ -56,6 +60,8 @@ final class WatchModel {
         guard next != target || task == nil else { return task }
         cancelAndClear()
         target = next
+        diagnosticWatchID = UUID()
+        diagnosticRetryCount = 0
         lanFailed = false
         retrySeconds = 1
         launchIfAllowed()
@@ -63,6 +69,7 @@ final class WatchModel {
     }
 
     func updateLifecycle(isActive: Bool, isUnlocked: Bool, isVisible: Bool) {
+        WatchDiagnostics.lifecycle.notice("scene_changed origin=lifecycle active=\(isActive) unlocked=\(isUnlocked) visible=\(isVisible) allowed_before=\(self.allowed)")
         let next = isActive && isUnlocked && isVisible
         guard allowed != next else { return }
         allowed = next
@@ -71,7 +78,7 @@ final class WatchModel {
             retrySeconds = 1
             launchIfAllowed()
         } else {
-            cancelAndClear()
+            cancelAndClear(origin: "lifecycle", reason: "authority_lost")
         }
     }
 
@@ -87,7 +94,9 @@ final class WatchModel {
     }
 
     func reconnect() {
-        cancelAndClear()
+        cancelAndClear(reason: "manual_reconnect")
+        diagnosticWatchID = UUID()
+        diagnosticRetryCount = 0
         lanFailed = false
         retrySeconds = 1
         launchIfAllowed()
@@ -95,18 +104,19 @@ final class WatchModel {
 
     func stop() {
         target = nil
-        cancelAndClear()
+        cancelAndClear(reason: "stop")
     }
 
     /// Native renderer readiness failures can arrive after a synchronous feed.
     func rendererFailed(_ error: Error) {
-        cancelAndClear()
+        cancelAndClear(origin: "renderer", reason: WatchDiagnostics.reason(error))
         status = .failed
         if Self.isTransientRendererFailure(error) {
             self.error = Self.message(for: error)
             guard allowed, canWatch(), let target else { return }
             let epoch = epoch
             let delay = retrySeconds
+            WatchDiagnostics.watch.notice("retry_scheduled origin=renderer delay_seconds=\(delay)")
             task = Task { [weak self] in
                 guard let self, self.isCurrent(epoch) else { return }
                 do { try await self.sleep(.seconds(delay)) } catch { return }
@@ -132,7 +142,9 @@ final class WatchModel {
         task = Task { [weak self] in await self?.run(target, epoch: epoch) }
     }
 
-    private func cancelAndClear() {
+    private func cancelAndClear(origin: String = "watch", reason: String = "cancel_and_clear") {
+        diagnostics?.end(origin: origin, phase: "cancel", reason: reason)
+        diagnostics = nil
         input.disconnect()
         epoch = UUID()
         task?.cancel()
@@ -155,7 +167,7 @@ final class WatchModel {
     private func isCurrent(_ epoch: UUID) -> Bool {
         guard self.epoch == epoch else { return false }
         guard allowed, canWatch(), !Task.isCancelled else {
-            cancelAndClear()
+            cancelAndClear(origin: "lifecycle", reason: "authority_lost")
             return false
         }
         return true
@@ -180,6 +192,7 @@ final class WatchModel {
                 while isCurrent(epoch) {
                     let packet = try await opened.receive()
                     guard isCurrent(epoch) else { opened.cancel(); return }
+                    diagnostics?.received(packet)
                     let event = try stream.consume(packet)
                     if case .reset(let begin) = event {
                         input.begin(generation: packet.generation, leader: begin.leader)
@@ -201,6 +214,7 @@ final class WatchModel {
                 return
             } catch {
                 guard isCurrent(epoch) else { return }
+                diagnostics?.end(origin: "watch", phase: "stream", reason: WatchDiagnostics.reason(error))
                 input.disconnect()
                 connection?.cancel()
                 connection = nil
@@ -211,7 +225,11 @@ final class WatchModel {
                 clearTerminal()
                 self.error = Self.message(for: error)
                 status = .failed
-                guard Self.canRetry(error) else { task = nil; return }
+                guard Self.canRetry(error) else {
+                    WatchDiagnostics.watch.notice("retry_suppressed reason=\(WatchDiagnostics.reason(error), privacy: .public)")
+                    task = nil; return
+                }
+                WatchDiagnostics.watch.notice("retry_scheduled delay_seconds=\(self.retrySeconds) reason=\(WatchDiagnostics.reason(error), privacy: .public)")
                 do {
                     try await sleep(.seconds(retrySeconds))
                 } catch { return }
@@ -227,18 +245,28 @@ final class WatchModel {
             ? routes.filter { $0.transport == .tailscale } + routes.filter { $0.transport != .tailscale }
             : routes
         var failures: [MacClientFailure] = []
-        for route in ordered {
+        for (index, route) in ordered.enumerated() {
             try Task.checkCancellation()
             guard isCurrent(epoch) else { throw CancellationError() }
+            let diagnostic = WatchDiagnostics()
+            diagnosticRetryCount += 1
+            diagnostics = diagnostic
+            WatchDiagnostics.watch.notice("watch_attach attempt_id=\(diagnostic.id, privacy: .public) watch_id=\(self.diagnosticWatchID, privacy: .public) retry_count=\(self.diagnosticRetryCount - 1) route_index=\(index) transport=\(route.transport.rawValue, privacy: .public) retry_delay_seconds=\(self.retrySeconds)")
             do {
                 let client = try makeClient(target.record, route)
-                let opened = try await client.openWatch(connectionID: target.record.connectionID,
-                    paneID: target.paneID, targetVersion: target.targetVersion, preferredGrid: input.preferredGrid,
-                    canSend: { [weak self] in self?.isCurrent(epoch) ?? false })
+                let opened = try await WatchDiagnostics.$current.withValue(diagnostic) {
+                    try await client.openWatch(connectionID: target.record.connectionID,
+                        paneID: target.paneID, targetVersion: target.targetVersion, preferredGrid: input.preferredGrid,
+                        canSend: { [weak self] in self?.isCurrent(epoch) ?? false })
+                }
                 return (opened, route)
             } catch let failure as MacClientFailure where [.unreachable, .closed, .handshakeRejected].contains(failure) {
                 try Task.checkCancellation()
+                diagnostic.end(origin: "transport", phase: "attach", reason: WatchDiagnostics.reason(failure))
                 failures.append(failure)
+            } catch {
+                diagnostic.end(origin: "watch", phase: "attach", reason: WatchDiagnostics.reason(error))
+                throw error
             }
         }
         throw failures.first { $0 != .handshakeRejected } ?? failures.first ?? MacClientFailure.unreachable

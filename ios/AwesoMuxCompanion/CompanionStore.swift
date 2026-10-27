@@ -184,6 +184,8 @@ final class CompanionStore {
         // Keep the record until key deletion succeeds, so a failed removal can be retried after relaunch.
         self.removePairing = removePairing ?? { record in
             try deleteIdentity(record.identityTag)
+            defaults.set(record.connectionID.uuidString,
+                         forKey: HostRegistry.hostKey(Keys.removalPending, record.macFingerprint))
             try pairingStore.clear(macFingerprint: record.macFingerprint)
         }
         self.revokePrevious = revokePrevious
@@ -341,8 +343,6 @@ final class CompanionStore {
         unpairMessage = notifiedMac ? nil : String(localized:
             "To finish, also choose Unpair in awesoMux Settings on your Mac.")
         do {
-            removalPending = true
-            defaults.set(record.connectionID.uuidString, forKey: HostRegistry.hostKey(Keys.removalPending, record.macFingerprint))
             try removePairing(record)
             discardPreviewSuppression()
             for key in HostRegistry.hostKeys(record.macFingerprint) { defaults.removeObject(forKey: key) }
@@ -351,6 +351,8 @@ final class CompanionStore {
             message = nil
             didUnpair(self, record)
         } catch {
+            removalPending = defaults.string(forKey: HostRegistry.hostKey(Keys.removalPending, record.macFingerprint))
+                == record.connectionID.uuidString
             message = String(localized: "This iPhone couldn’t finish unpairing. Choose Unpair This iPhone to try again.")
         }
     }

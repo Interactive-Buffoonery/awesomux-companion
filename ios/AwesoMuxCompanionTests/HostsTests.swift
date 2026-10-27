@@ -333,12 +333,14 @@ final class HostsTests: XCTestCase {
             await hosts.store(for: macB)?.unpair()
             let relaunched = launchPending()
             let pending = try XCTUnwrap(relaunched.store(for: macB))
-            XCTAssertTrue(pending.removalPending, failure)
-            XCTAssertNil(pending.decisionPairing)
-            XCTAssertNil(pending.decisionSession)
-            let reads = client.calls.count
-            await pending.refresh()
-            XCTAssertEqual(client.calls.count, reads, "A partially removed pairing never reads or gains authority")
+            XCTAssertEqual(pending.removalPending, failure == "record", failure)
+            if failure == "record" {
+                XCTAssertNil(pending.decisionPairing)
+                XCTAssertNil(pending.decisionSession)
+                let reads = client.calls.count
+                await pending.refresh()
+                XCTAssertEqual(client.calls.count, reads, "A partially removed pairing never reads or gains authority")
+            }
             failIdentity = false; keychain.failDeletes = []
             await pending.unpair()
             XCTAssertNil(relaunched.store(for: macB))

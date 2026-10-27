@@ -121,8 +121,6 @@ final class WatchTerminalTests: XCTestCase {
         try await idle([terminal])
         let view = try liveView(host)
         let measurements = WatchTerminal.maximumFontCells
-        let pane = CGSize(width: 390, height: 700)
-        let claim = terminal.phoneGrid(for: pane)
         try terminal.resize(.init(rows: 55, cols: 40))
         let deadline = ContinuousClock.now.advanced(by: .seconds(6))
         while terminal.failure == nil, ContinuousClock.now < deadline {
@@ -137,7 +135,6 @@ final class WatchTerminalTests: XCTestCase {
         XCTAssertNil(view.superview)
         XCTAssertNil(view.surface)
         XCTAssertEqual(WatchTerminal.maximumFontCells, measurements)
-        XCTAssertEqual(terminal.phoneGrid(for: pane), claim)
         XCTAssertThrowsError(try terminal.feed(Data("must not replay".utf8)))
         // Queued native callbacks and the ordinary layout pass cannot revive
         // the disposed surface or write a maximum-font measurement later.

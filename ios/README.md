@@ -264,8 +264,8 @@ The Mac must send optional `terminalInputAllowed`, `createWorkspaceAllowed` and
 `createPaneAllowed` Booleans on `get_connection_status`; absent fields mean false.
 The `create_terminal` endpoint uses phone-local Codable envelopes and does not add
 a shared operation. The iPad-specific layout remains #11.
-The Agents tab, notification focus, cached agents, widgets and Live Activity keep
-their existing roles.
+Agents appear as ◆ rows in Sessions. Notification focus, cached agents, widgets
+and Live Activity keep their existing roles.
 
 Only active foreground polling requests `list_panes`; background refresh still
 reads agents and attention events. These reads use the same paired mutual TLS
@@ -290,8 +290,8 @@ cancelled or its scene suspends. New choices suppress immediately and wait for
 older writes to settle. Polling cannot release ownership between queued choices.
 A replacement pairing has independent ownership; late old completions are fenced.
 Permission and pairing epochs reject late responses. The active poll reads
-permission again for both v1 and v2 pairings. Older Macs keep the Agents tab and
-show an update message for unsupported pane lists.
+permission again for both v1 and v2 pairings. Older Macs list agents from the glance
+snapshot under an update message for unsupported pane lists.
 
 Pane rosters and previews stay in process memory, outside `GlanceSnapshot`, the
 cached agent snapshot and App Group/widget storage. Backgrounding clears them
@@ -303,7 +303,7 @@ verification. Accessibility polish remains deferred.
 
 ## Inline Claude permission answers (issue #22, first layer)
 
-Agents includes once-only Allow and Deny for requests issued by the Mac's
+Sessions links to once-only Allow and Deny (also in Settings) for requests issued by the Mac's
 permission core over the existing paired LAN/Tailscale connection. Requests
 show a bounded, plain-text untrusted summary, workspace and pane names joined
 by exact IDs (or the IDs when names are unavailable), and the invocation ID and

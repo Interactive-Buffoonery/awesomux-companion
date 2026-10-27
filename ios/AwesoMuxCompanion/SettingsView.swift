@@ -49,7 +49,15 @@ struct SettingsView: View {
                 Toggle("Live Activity", isOn: $store.liveActivityEnabled).foregroundStyle(Cat.text)
             } header: { Text("Alerts").foregroundStyle(Cat.subtext0) }
             .listRowBackground(Cat.card)
-            if store.record != nil { TerminalPreviewSection(store: store) }
+            if store.record != nil {
+                TerminalPreviewSection(store: store)
+                Section {
+                    NavigationLink("Permission requests") { DecisionsView(store: store) }.foregroundStyle(Cat.text)
+                } footer: {
+                    Text("Answer Claude's once-only permission requests from this iPhone.").foregroundStyle(Cat.subtext0)
+                }
+                .listRowBackground(Cat.card)
+            }
             Section {
                 TerminalProtectionToggle(model: terminalLock).foregroundStyle(Cat.text)
                 if let message = terminalLock.authenticationFailureMessage {
@@ -112,7 +120,7 @@ struct SettingsView: View {
     }
 }
 
-/// "● Tailscale · checked in 1 min ago", shared by the Agents header and Settings. Names the route in use.
+/// "● Tailscale · checked in 1 min ago", shown in Settings. Names the route in use.
 struct MacStatusLine: View {
     let store: CompanionStore
 

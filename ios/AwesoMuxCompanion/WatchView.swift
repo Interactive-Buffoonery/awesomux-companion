@@ -43,140 +43,89 @@ struct WatchView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(model.input.isInteractive ? "Terminal" : "Watch only").font(.headline)
-            Text("Earlier history incomplete")
-                .font(.callout)
-                .accessibilityHint("The Mac snapshot preserves terminal cells, but earlier command history and line wraps are unavailable.")
-            if let grid = model.grid {
-                Text("Mac grid: \(grid.cols) × \(grid.rows)")
-                    .font(.caption.monospaced())
+        WatchTerminalView(terminal: terminal)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityHint("The Mac snapshot preserves terminal cells, but earlier command history and line wraps are unavailable.")
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                terminalSize = size
+                model.input.updatePhoneGrid(terminal.phoneGrid(for: size))
+                if model.status == .idle { connect() }
             }
-            Text(model.input.drivingText)
-                .font(.caption)
-            Text(statusText).font(.caption).accessibilityAddTraits(.updatesFrequently)
-            if let message = model.input.watchMessage { Text(message).font(.callout) }
-            if model.input.isInteractive {
-                HStack {
-                    Button("Take over") { model.input.takeOver() }
-                        .disabled(!model.input.canType)
-                    Button("Paste") {
-                        guard let text = UIPasteboard.general.string else { return }
-                        let sessionID = model.input.sessionID
-                        Task { @MainActor in
-                            guard let modes = await terminal.inputModes() else {
-                                if model.input.sessionID == sessionID { model.input.refuseModeRead(paste: true) }
-                                return
-                            }
-                            guard model.input.sessionID == sessionID else { return }
-                            model.input.paste(text, modes: modes)
-                        }
+            .onChange(of: terminal.isReady) { _, ready in
+                if ready { model.input.updatePhoneGrid(terminal.phoneGrid(for: terminalSize)) }
+            }
+            .background(WatchKeyboard(input: model.input, terminal: terminal, isShown: $keyboardShown)
+                .frame(width: 1, height: 1))
+            .overlay(alignment: .top) { notices }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !keyboardShown { bottomBar }
+            }
+            .foregroundStyle(Cat.text)
+            .background(Cat.page)
+            .terminalTitle(title.isEmpty ? String(localized: "Terminal") : title)
+            .toolbarBackground(Cat.page, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { ModeChip(driving: model.input.hasControl) }
+            }
+            .onAppear {
+                isVisible = true
+                if securityObserver == nil {
+                    securityObserver = terminalLock.observeSecurityChanges { [weak model, weak terminalLock] in
+                        guard let terminalLock, !terminalLock.isActive || terminalLock.isLocked else { return }
+                        model?.updateLifecycle(isActive: terminalLock.isActive,
+                                               isUnlocked: !terminalLock.isLocked, isVisible: true)
                     }
-                    .disabled(!model.input.canType || model.input.pasteInFlight || model.input.confirmation != nil)
-                    Spacer()
-                    Button(keyboardShown ? "Hide keyboard" : "Show keyboard",
-                           systemImage: "keyboard") { keyboardShown.toggle() }
-                        .disabled(!model.input.canType)
                 }
-                .font(.callout)
-            }
-            WatchTerminalView(terminal: terminal)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-                    terminalSize = size
-                    model.input.updatePhoneGrid(terminal.phoneGrid(for: size))
-                    if model.status == .idle { connect() }
-                }
-                .onChange(of: terminal.isReady) { _, ready in
-                    if ready { model.input.updatePhoneGrid(terminal.phoneGrid(for: terminalSize)) }
-                }
-                .background(WatchKeyboard(input: model.input, terminal: terminal, isShown: $keyboardShown)
-                    .frame(width: 1, height: 1))
-            if let pasteDeliveryText {
-                Text(pasteDeliveryText).font(.caption)
-                    .accessibilityAddTraits(.updatesFrequently)
-            }
-            if let error = model.input.pasteError { Text(error).font(.caption) }
-            if let notice = model.input.typedNotice {
-                HStack {
-                    Text(notice).font(.caption)
-                    Button("Dismiss") { model.input.dismissTypedNotice() }.font(.caption)
-                }
-            }
-            if let error = model.error {
-                Text(error).font(.callout).foregroundStyle(Cat.subtext0)
-            }
-            Button("Connect / Reconnect") {
-                model.stop()
+                terminal.onFailure = { [weak model] error in model?.rendererFailed(error) }
                 connect()
             }
-                .disabled(!canWatch)
-                .accessibilityHint("Starts a new snapshot from your Mac.")
-        }
-        .padding()
-        .foregroundStyle(Cat.text)
-        .background(Cat.page)
-        .navigationTitle(title.isEmpty ? "Watch" : title)
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            isVisible = true
-            if securityObserver == nil {
-                securityObserver = terminalLock.observeSecurityChanges { [weak model, weak terminalLock] in
-                    guard let terminalLock, !terminalLock.isActive || terminalLock.isLocked else { return }
-                    model?.updateLifecycle(isActive: terminalLock.isActive,
-                                           isUnlocked: !terminalLock.isLocked, isVisible: true)
-                }
+            .onDisappear {
+                WatchDiagnostics.lifecycle.notice("authority_lost origin=lifecycle source=watch_disappear")
+                isVisible = false
+                if let securityObserver { terminalLock.removeSecurityObserver(securityObserver) }
+                securityObserver = nil
+                keyboardShown = false
+                model.stop()
             }
-            terminal.onFailure = { [weak model] error in model?.rendererFailed(error) }
-            connect()
-        }
-        .onDisappear {
-            WatchDiagnostics.lifecycle.notice("authority_lost origin=lifecycle source=watch_disappear")
-            isVisible = false
-            if let securityObserver { terminalLock.removeSecurityObserver(securityObserver) }
-            securityObserver = nil
-            keyboardShown = false
-            model.stop()
-        }
-        .onChange(of: canWatch) { _, _ in updateLifecycle() }
-        .onChange(of: store.panes.terminalAccess.inputAllowed) { _, _ in model.updateInputPermission() }
-        .onChange(of: store.decisionPairing) { _, _ in
-            WatchDiagnostics.lifecycle.notice("authority_lost origin=lifecycle source=pairing_changed")
-            model.stop()
-        }
-        .onChange(of: inputAnnouncement) { _, message in
-            if !message.isEmpty { UIAccessibility.post(notification: .announcement, argument: message) }
-        }
-        .onChange(of: model.input.keyboardRequested) { _, requested in keyboardShown = requested }
-        .onChange(of: model.input.canType) { _, canType in if !canType { keyboardShown = false } }
-        .sheet(item: Binding(get: { model.input.confirmation }, set: { _ in model.input.cancelPaste() })) { confirmation in
-            NavigationStack {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("This paste contains line endings that may run commands, or a bracketed-paste terminator.")
-                    ScrollView { Text(confirmation.preview).font(.caption.monospaced()).textSelection(.enabled) }
-                    HStack {
-                        Button("Cancel", role: .cancel) { model.input.cancelPaste() }
-                        Spacer()
-                        Button("Send") {
-                            Task { @MainActor in
-                                guard let modes = await terminal.inputModes() else {
-                                    if model.input.confirmation?.id == confirmation.id {
-                                        model.input.cancelPaste()
-                                        model.input.refuseModeRead(paste: true)
+            .onChange(of: canWatch) { _, _ in updateLifecycle() }
+            .onChange(of: store.panes.terminalAccess.inputAllowed) { _, _ in model.updateInputPermission() }
+            .onChange(of: store.decisionPairing) { _, _ in
+                WatchDiagnostics.lifecycle.notice("authority_lost origin=lifecycle source=pairing_changed")
+                model.stop()
+            }
+            .onChange(of: inputAnnouncement) { _, message in
+                if !message.isEmpty { UIAccessibility.post(notification: .announcement, argument: message) }
+            }
+            .onChange(of: model.input.keyboardRequested) { _, requested in keyboardShown = requested }
+            .onChange(of: model.input.canType) { _, canType in if !canType { keyboardShown = false } }
+            .sheet(item: Binding(get: { model.input.confirmation }, set: { _ in model.input.cancelPaste() })) { confirmation in
+                NavigationStack {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("This paste contains line endings that may run commands, or a bracketed-paste terminator.")
+                        ScrollView { Text(confirmation.preview).font(.caption.monospaced()).textSelection(.enabled) }
+                        HStack {
+                            Button("Cancel", role: .cancel) { model.input.cancelPaste() }
+                            Spacer()
+                            Button("Send") {
+                                Task { @MainActor in
+                                    guard let modes = await terminal.inputModes() else {
+                                        if model.input.confirmation?.id == confirmation.id {
+                                            model.input.cancelPaste()
+                                            model.input.refuseModeRead(paste: true)
+                                        }
+                                        return
                                     }
-                                    return
+                                    guard model.input.confirmation?.id == confirmation.id else { return }
+                                    model.input.confirmPaste(modes: modes)
                                 }
-                                guard model.input.confirmation?.id == confirmation.id else { return }
-                                model.input.confirmPaste(modes: modes)
                             }
                         }
                     }
+                    .padding()
+                    .navigationTitle("Send paste?")
+                    .navigationBarTitleDisplayMode(.inline)
                 }
-                .padding()
-                .navigationTitle("Send paste?")
-                .navigationBarTitleDisplayMode(.inline)
             }
-        }
     }
 
     private var pasteDeliveryText: String? { model.input.pasteDelivery.map { "Paste: \($0.rawValue)" } }
@@ -188,11 +137,91 @@ struct WatchView: View {
 
     private var statusText: String {
         switch model.status {
-        case .idle: "Disconnected"
-        case .connecting: "Connecting to your Mac…"
-        case .snapshot: "Restoring Mac terminal…"
-        case .live: model.input.isInteractive ? "Connected" : "Watching live"
-        case .failed: "Watch disconnected"
+        case .idle: String(localized: "disconnected")
+        case .connecting: String(localized: "connecting to your Mac…")
+        case .snapshot: String(localized: "restoring Mac terminal…")
+        case .live: liveText
+        case .failed: String(localized: "lost connection")
+        }
+    }
+
+    private var liveText: String {
+        let grid = model.grid.map { " · \($0.cols)×\($0.rows)" } ?? ""
+        if let message = model.input.watchMessage { return message }
+        return model.input.drivingText.lowercased() + grid
+    }
+
+    /// Interactive: paste and keyboard, plus Take over while someone else drives. Dropped: retry.
+    private var bottomBar: some View {
+        HStack(spacing: 10) {
+            Text(verbatim: model.error ?? statusText)
+                .font(.caption.monospaced()).foregroundStyle(Cat.subtext0)
+                .lineLimit(2)
+                .accessibilityAddTraits(.updatesFrequently)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if model.status == .failed || model.status == .idle {
+                Button("Retry") {
+                    model.stop()
+                    connect()
+                }
+                .buttonStyle(BarButtonStyle(filled: true))
+                .disabled(!canWatch)
+                .accessibilityHint("Starts a new snapshot from your Mac.")
+            } else if model.input.isInteractive {
+                if !model.input.hasControl {
+                    Button("Take over") { model.input.takeOver() }
+                        .buttonStyle(BarButtonStyle(filled: true))
+                        .disabled(!model.input.canType)
+                }
+                Button("Paste", action: paste)
+                    .buttonStyle(BarButtonStyle(filled: false))
+                    .disabled(!model.input.canType || model.input.pasteInFlight || model.input.confirmation != nil)
+                Button { keyboardShown = true } label: {
+                    Image(systemName: "keyboard").accessibilityLabel("Show keyboard")
+                }
+                .buttonStyle(BarButtonStyle(filled: false))
+                .disabled(!model.input.canType)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Cat.crust)
+        .overlay(alignment: .top) { Rectangle().fill(Cat.card).frame(height: 1) }
+    }
+
+    /// Short-lived lines over the top of the terminal instead of captions under it.
+    @ViewBuilder private var notices: some View {
+        let lines = [model.status == .snapshot ? String(localized: "┄ earlier history stays on the Mac ┄") : nil,
+                     pasteDeliveryText, model.input.pasteError].compactMap { $0 }
+        if !lines.isEmpty || model.input.typedNotice != nil {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(lines, id: \.self) { Text(verbatim: $0) }
+                if let notice = model.input.typedNotice {
+                    HStack {
+                        Text(verbatim: notice)
+                        Button("Dismiss") { model.input.dismissTypedNotice() }.fontWeight(.semibold)
+                    }
+                }
+            }
+            .font(.caption.monospaced())
+            .foregroundStyle(Cat.subtext0)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Cat.crust.opacity(0.92), in: RoundedRectangle(cornerRadius: 8))
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func paste() {
+        guard let text = UIPasteboard.general.string else { return }
+        let sessionID = model.input.sessionID
+        Task { @MainActor in
+            guard let modes = await terminal.inputModes() else {
+                if model.input.sessionID == sessionID { model.input.refuseModeRead(paste: true) }
+                return
+            }
+            guard model.input.sessionID == sessionID else { return }
+            model.input.paste(text, modes: modes)
         }
     }
 
@@ -205,5 +234,34 @@ struct WatchView: View {
         guard canWatch, isVisible, terminalSize.width > 0, terminalSize.height > 0,
               let record = store.record else { return }
         model.start(record: record, paneID: paneID, targetVersion: targetVersion)
+    }
+}
+
+/// WATCH is outlined; DRIVE is the only filled chip, so it's obvious when keys reach the Mac.
+private struct ModeChip: View {
+    let driving: Bool
+
+    var body: some View {
+        Text(driving ? "DRIVE" : "WATCH")
+            .font(.caption2.monospaced().weight(.bold)).tracking(1)
+            .foregroundStyle(driving ? Cat.crust : Cat.running)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(driving ? Cat.accent : .clear, in: RoundedRectangle(cornerRadius: 4))
+            .overlay { if !driving { RoundedRectangle(cornerRadius: 4).stroke(Cat.running, lineWidth: 1) } }
+            .accessibilityLabel(driving ? "You have control" : "Watching")
+    }
+}
+
+private struct BarButtonStyle: ButtonStyle {
+    let filled: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.caption.monospaced().weight(.bold))
+            .foregroundStyle(filled ? Cat.crust : Cat.text)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(filled ? Cat.accent : Cat.card, in: RoundedRectangle(cornerRadius: 9))
+            .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.4)
     }
 }

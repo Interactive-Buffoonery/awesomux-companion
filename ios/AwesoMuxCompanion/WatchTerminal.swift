@@ -225,7 +225,13 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         if Int(value.columns) == target.cols, Int(value.rows) == target.rows {
             if sizingSurface === probe {
                 // Calibration changes only an empty surface. Retained content
-                // sees exactly one resize, at the authoritative dimensions.
+                // sees one font change and one resize, to the authoritative
+                // dimensions. The font goes first: its interim grid report keeps
+                // the old pixel size, which the sizing guard below ignores.
+                guard surface.setFontSize(sizingSurface.fontSize) else {
+                    _ = invalidate(.fontChangeRejected)
+                    return
+                }
                 do {
                     try surface.resize(to: sizingSurface.size,
                                        displayScale: sizingSurface.view.traitCollection.displayScale)
@@ -301,19 +307,16 @@ final class WatchTerminal: ObservableObject, WatchRendering {
             }
         case .grid(let grid):
             guard grid != target else { pump(); return }
-            // A live surface cannot change font, so a grid that needs a smaller
-            // one reconnects for a fresh snapshot sized for it.
-            guard WatchDrawableBudget.fontSize(for: grid) >= surface.fontSize else {
-                _ = invalidate(.gridOutgrewFont)
-                return
-            }
+            // Every grid gets the font reset would pick for it, so a phone
+            // claim shrinking a wide Mac grid renders at full size.
             target = grid
             beginSizing()
             do {
-                let cell = WatchDrawableBudget.cellSize(fontSize: surface.fontSize)
+                let fontSize = WatchDrawableBudget.fontSize(for: grid)
+                let cell = WatchDrawableBudget.cellSize(fontSize: fontSize)
                 probe = try makeSurface(size: CGSize(width: CGFloat(grid.cols) * cell.width,
                                                      height: CGFloat(grid.rows) * cell.height),
-                                        fontSize: surface.fontSize,
+                                        fontSize: fontSize,
                                         displayScale: surface.view.traitCollection.displayScale)
             } catch let failure as WatchTerminalFailure {
                 _ = invalidate(failure)
@@ -352,7 +355,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
 
 enum WatchTerminalFailure: Error, LocalizedError, Equatable {
     case accessDenied, notAttached, invalidGrid, invalidRetention, overflow, drawableTooLarge
-    case readinessTimeout, drainTimeout, unexpectedGrid, unsafeConfiguration, nativeBusy, gridOutgrewFont
+    case readinessTimeout, drainTimeout, unexpectedGrid, unsafeConfiguration, nativeBusy, fontChangeRejected
 
     var errorDescription: String? {
         switch self {
@@ -367,7 +370,7 @@ enum WatchTerminalFailure: Error, LocalizedError, Equatable {
         case .unexpectedGrid: "The Watch renderer could not preserve the Mac terminal grid."
         case .unsafeConfiguration: "The Watch renderer could not disable terminal host effects."
         case .nativeBusy: "The previous Watch renderer is still stopping."
-        case .gridOutgrewFont: "The Mac terminal grew past the Watch renderer's font size."
+        case .fontChangeRejected: "The Watch renderer could not change font for the new terminal size."
         }
     }
 }
@@ -413,7 +416,7 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
     let controller: TerminalController
     let session: InMemoryTerminalSession
     let view: WatchReadOnlyTerminalView
-    let fontSize: Float
+    private(set) var fontSize: Float
     let modeReports = WatchModeReports()
     @Published private(set) var size: CGSize
     var viewport: InMemoryTerminalViewport?
@@ -457,6 +460,13 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
             displayScale: max(displayScale, view.traitCollection.displayScale))
         self.size = size
         applySize()
+    }
+
+    func setFontSize(_ next: Float) -> Bool {
+        guard next != fontSize else { return true }
+        guard view.surface?.performBindingAction("set_font_size:\(next)") == true else { return false }
+        fontSize = next
+        return true
     }
 
     func applySize() {

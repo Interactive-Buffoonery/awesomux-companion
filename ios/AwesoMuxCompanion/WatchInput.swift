@@ -84,7 +84,6 @@ final class WatchInput {
 
     private(set) var isInteractive = false
     private(set) var isLive = false
-    private(set) var keyboardRequested = false
     private(set) var generation: UInt32?
     private(set) var watchMessage: String?
     private(set) var pasteDelivery: Delivery?
@@ -159,17 +158,9 @@ final class WatchInput {
         lastSentGrid = nil
     }
 
-    func ready(opening: TerminalOpening = .watch) {
+    func ready() {
         isLive = true
-        openIfReady(opening)
         sendPhoneGrid()
-    }
-
-    func openIfReady(_ opening: TerminalOpening) {
-        if opening == .input, preferredGrid != nil, canType, !keyboardRequested {
-            takeOver()
-            keyboardRequested = true
-        }
     }
 
     func updatePhoneGrid(_ grid: Stream.Grid) {
@@ -185,9 +176,9 @@ final class WatchInput {
     }
 
     private func phoneGridFrame() -> Stream.Frame? {
-        guard keyboardRequested || hasControl, let grid = preferredGrid, grid != lastSentGrid else { return nil }
-        // The Mac only caches a bare grid frame; re-claiming applies the keyboard-sized grid now.
-        return claimPending || hasControl ? .claim(.init(grid: grid)) : .grid(grid)
+        // Only the driving phone resizes the Mac; the Mac only caches a bare grid frame, so re-claim.
+        guard claimPending || hasControl, let grid = preferredGrid, grid != lastSentGrid else { return nil }
+        return .claim(.init(grid: grid))
     }
 
     func takeOver() {
@@ -267,7 +258,6 @@ final class WatchInput {
     }
 
     private func endGeneration() {
-        keyboardRequested = false
         if let highestTyped, highestAck.map({ highestTyped > $0 }) ?? true {
             typedUncertain = true
         }

@@ -9,30 +9,28 @@ import os
 final class WatchInputTests: XCTestCase {
     typealias Stream = CompanionTerminalStream
 
-    func testInputOpeningClaimsPhoneGridOnlyAfterSnapshotAndOncePerGeneration() async {
+    func testReadyNeverClaimsAndTakeOverClaimsThePhoneGridPerGeneration() async {
         let (input, wire) = fixture()
         input.preferredGrid = .init(rows: 30, cols: 42)
+        input.ready()
+        await settle()
         XCTAssertTrue(wire.frames.isEmpty)
-        XCTAssertFalse(input.keyboardRequested)
-        input.ready(opening: .input)
+        input.takeOver()
         await drain(wire, count: 1)
         XCTAssertEqual(wire.frames.map(\.frame), [.claim(.init(grid: .init(rows: 30, cols: 42)))])
-        XCTAssertTrue(input.keyboardRequested)
-        input.ready(opening: .input)
-        await settle()
-        XCTAssertEqual(wire.frames.count, 1)
         input.begin(generation: 11, leader: "mac")
-        XCTAssertFalse(input.keyboardRequested)
-        input.ready(opening: .input)
+        input.ready()
+        input.takeOver()
         await drain(wire, count: 2)
         XCTAssertEqual(wire.frames.map(\.generation), [10, 11])
         input.disconnect()
     }
 
-    func testKeyboardLayoutGridFollowsOpeningClaimWithoutAKeypress() async {
+    func testLayoutAfterTakeOverResizesTheMacOnlyWhileDriving() async {
         let (input, wire) = fixture()
         input.preferredGrid = .init(rows: 40, cols: 42)
-        input.ready(opening: .input)
+        input.ready()
+        input.takeOver()
         input.updatePhoneGrid(.init(rows: 30, cols: 42))
         input.updatePhoneGrid(.init(rows: 24, cols: 42))
         await drain(wire, count: 1)
@@ -40,28 +38,30 @@ final class WatchInputTests: XCTestCase {
         XCTAssertEqual(wire.frames.map(\.frame), [.claim(.init(grid: .init(rows: 24, cols: 42)))])
         input.leader = "mac"
         input.updatePhoneGrid(.init(rows: 30, cols: 42))
-        await drain(wire, count: 2)
-        XCTAssertEqual(wire.frames.last?.frame, .grid(.init(rows: 30, cols: 42)))
-        input.updatePhoneGrid(.init(rows: 24, cols: 42))
-        await drain(wire, count: 3)
-        input.updatePhoneGrid(.init(rows: 24, cols: 42))
         await settle()
-        XCTAssertEqual(wire.frames.count, 3)
+        XCTAssertEqual(wire.frames.count, 1)
+        input.leader = "phone"
+        input.updatePhoneGrid(.init(rows: 20, cols: 42))
+        await drain(wire, count: 2)
+        XCTAssertEqual(wire.frames.last?.frame, .claim(.init(grid: .init(rows: 20, cols: 42))))
+        input.updatePhoneGrid(.init(rows: 20, cols: 42))
+        await settle()
+        XCTAssertEqual(wire.frames.count, 2)
         input.disconnect()
         input.updatePhoneGrid(.init(rows: 40, cols: 42))
         await settle()
-        XCTAssertEqual(wire.frames.count, 3)
+        XCTAssertEqual(wire.frames.count, 2)
     }
 
-    func testInputOpeningWaitsForTheMeasuredGrid() async {
+    func testTakeOverAndTypingWaitForTheMeasuredGrid() async {
         let (input, wire) = fixture(grid: nil)
-        input.ready(opening: .input)
+        input.ready()
+        input.takeOver()
         input.type(Data("a".utf8))
         await settle()
         XCTAssertTrue(wire.frames.isEmpty)
-        XCTAssertFalse(input.keyboardRequested)
         input.updatePhoneGrid(.init(rows: 30, cols: 42))
-        input.openIfReady(.input)
+        input.takeOver()
         await drain(wire, count: 1)
         XCTAssertEqual(wire.frames.map(\.frame), [.claim(.init(grid: .init(rows: 30, cols: 42)))])
     }
@@ -82,12 +82,10 @@ final class WatchInputTests: XCTestCase {
     }
 
     func testLayoutThatChangesBackWhileSendingStillReachesTheMac() async {
-        let (input, wire) = fixture(grid: nil)
-        input.ready(opening: .input)
+        let (input, wire) = fixture(leader: "phone", grid: nil)
+        input.ready()
         input.updatePhoneGrid(.init(rows: 24, cols: 42))
-        input.openIfReady(.input)
         await drain(wire, count: 1)
-        input.leader = "mac"
         wire.blockGrid = true
         input.updatePhoneGrid(.init(rows: 30, cols: 42))
         await drain(wire, count: 2)
@@ -96,7 +94,7 @@ final class WatchInputTests: XCTestCase {
         wire.releaseGrid()
         await drain(wire, count: 3)
         XCTAssertEqual(wire.frames.map(\.frame).suffix(2),
-                       [.grid(.init(rows: 30, cols: 42)), .grid(.init(rows: 24, cols: 42))])
+                       [.claim(.init(grid: .init(rows: 30, cols: 42))), .claim(.init(grid: .init(rows: 24, cols: 42)))])
         input.disconnect()
     }
 
@@ -120,25 +118,6 @@ final class WatchInputTests: XCTestCase {
         await Task.yield()
         XCTAssertEqual(wire.frames.count, 1)
         input.disconnect()
-    }
-
-    func testWatchChoiceAndInputOffNeverClaimOrRaiseKeyboard() async {
-        for opening in [TerminalOpening.input, .watch] {
-            for role in [Stream.Role.interactive, .watch] {
-                let wire = InputTestConnection(accepted: .init(role: role,
-                    watchReason: role == .watch ? .inputOff : nil))
-                let input = WatchInput()
-                input.attach(wire, ownLeaderID: "phone", authority: { true })
-                input.begin(generation: 1, leader: "mac")
-                if opening == .watch || role == .watch {
-                    input.ready(opening: opening)
-                    await Task.yield()
-                    XCTAssertTrue(wire.frames.isEmpty)
-                    XCTAssertFalse(input.keyboardRequested)
-                }
-                input.disconnect()
-            }
-        }
     }
 
     func testAttachAndSnapshotNeverSendAndWatchReasonExplainsPermission() async {
@@ -498,7 +477,9 @@ private final class InputTestConnection: WatchConnection, @unchecked Sendable {
                          canSend: @escaping @MainActor @Sendable () -> Bool) async throws {
         guard canSend() else { throw CancellationError() }
         frames.append(.init(frame: frame, generation: generation))
-        if case .grid = frame, blockGrid {
+        // Claims carry the grid too, so both can be held mid-send.
+        switch frame { case .grid, .claim: break; default: return }
+        if blockGrid {
             await withTaskCancellationHandler {
                 await withCheckedContinuation { gridWaiter = $0 }
             } onCancel: { self.cancelledWriteCount.withLock { $0 += 1 } }

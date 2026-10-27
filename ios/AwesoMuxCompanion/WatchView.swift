@@ -30,7 +30,7 @@ struct WatchView: View {
         }
         renderer.canRender = canRender
         _terminal = StateObject(wrappedValue: renderer)
-        _model = State(initialValue: WatchModel(renderer: renderer, opening: target.opening,
+        _model = State(initialValue: WatchModel(renderer: renderer,
             canInput: { [weak store] in store?.panes.terminalAccess.inputAllowed == true }, canWatch: canRender))
     }
 
@@ -42,6 +42,8 @@ struct WatchView: View {
     var body: some View {
         WatchTerminalView(terminal: terminal)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Opening takes over with the keyboard down; tapping the terminal starts typing.
+            .simultaneousGesture(TapGesture().onEnded { if model.input.canType { keyboardShown = true } })
             .accessibilityHint("The Mac snapshot preserves terminal cells, but earlier command history and line wraps are unavailable.")
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 terminalSize = size
@@ -70,10 +72,6 @@ struct WatchView: View {
             .background(Cat.page)
             .terminalTitle(target.path, subtitle: host, accessibilityLabel: target.accessibilityHeader(host: host))
             .toolbarBackground(Cat.page, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { ModeChip(driving: model.input.hasControl) }
-                    .sharedBackgroundVisibility(.hidden)
-            }
             .onAppear {
                 isVisible = true
                 if securityObserver == nil {
@@ -103,7 +101,6 @@ struct WatchView: View {
             .onChange(of: inputAnnouncement) { _, message in
                 if !message.isEmpty { UIAccessibility.post(notification: .announcement, argument: message) }
             }
-            .onChange(of: model.input.keyboardRequested) { _, requested in keyboardShown = requested }
             .onChange(of: model.input.canType) { _, canType in if !canType { keyboardShown = false } }
             .sheet(item: Binding(get: { model.input.confirmation }, set: { _ in model.input.cancelPaste() })) { confirmation in
                 NavigationStack {
@@ -271,23 +268,6 @@ struct WatchView: View {
         guard canWatch, isVisible, terminalSize.width > 0, terminalSize.height > 0,
               let record = store.record else { return }
         model.start(record: record, paneID: target.paneID, targetVersion: target.targetVersion)
-    }
-}
-
-/// WATCH is outlined; DRIVE is the only filled chip, so it's obvious when keys reach the Mac.
-private struct ModeChip: View {
-    let driving: Bool
-
-    var body: some View {
-        Text(driving ? "DRIVE" : "WATCH")
-            .font(.caption2.monospaced().weight(.bold)).tracking(1)
-            .foregroundStyle(driving ? Cat.crust : Cat.running)
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(driving ? Cat.accent : .clear, in: RoundedRectangle(cornerRadius: 4))
-            .overlay { if !driving { RoundedRectangle(cornerRadius: 4).stroke(Cat.running, lineWidth: 1) } }
-            .lineLimit(1)
-            .fixedSize()
-            .accessibilityLabel(driving ? "You have control" : "Watching")
     }
 }
 

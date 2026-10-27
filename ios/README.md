@@ -191,7 +191,8 @@ Never check credentials into this repository.
 
 The separate `AwesoMuxDiagnostics.xcodeproj` / `AwesoMuxDiagnostics` scheme uses
 the source-built public CAMetalLayer renderer for bundled replay and
-an isolated synthetic Mac-to-phone reconnect fixture, without pairing. See the
+an isolated synthetic Mac-to-phone reconnect fixture, without pairing. Unlike the
+app's terminal, it pins a 20×6 grid, the size its fixtures were captured at. See the
 [build and usage guide](../spikes/snapshot-reconnect/ios-diagnostics.md) and
 [verification ledger](../spikes/snapshot-reconnect/verification.md).
 
@@ -249,9 +250,9 @@ Sessions lists the Mac's workspaces and panes in their native order, including
 plain shells, split terminals and document groups. Each row shows availability
 and terminal/agent status. Unknown pane kinds remain metadata-only. Every
 terminal with a target version opens, including panes awaiting hydration on the Mac. When Input is on, opening
-claims control at the phone's grid after the snapshot and raises the keyboard.
-Choose Watch from the row's context menu to open without claiming. Input off or
-missing permission metadata keeps the existing Watch behavior.
+takes over at the phone's grid after the snapshot, with the keyboard down; tap
+the terminal to type. A reconnect never takes control back from the Mac. Input
+off or missing permission metadata opens read-only.
 
 Sessions offers New Workspace under + when the Mac permits workspace creation,
 and New Pane in each workspace when pane creation is permitted. Both require
@@ -390,11 +391,10 @@ is bounded; Watch never invents missing history.
 The terminal fills the phone's view, the way a tmux client does. Ghostty measures
 the grid that fits at the chosen text size, and while the phone drives it resizes
 the Mac pane to that grid. Resizes wait briefly for the layout to settle, so the
-Mac sees about ten per second at most, and an input opening waits for the first
-measured grid. The keyboard, rotation and
-text size all change the measured grid. While watching only, plain output
-rewraps to the phone's width; full-screen apps drawn for the Mac's size settle
-once the phone takes over. Local selection, copy and history scrolling do not
+Mac sees about ten per second at most, and taking over waits for the first
+measured grid. The keyboard, rotation and text size all change the measured
+grid. When the Mac takes control back, its pane returns to the Mac's size and
+full-screen apps look wrapped on the phone until Take over. Local selection, copy and history scrolling do not
 send input. Native query replies, clipboard escape sequences, notifications and
 link opening are suppressed. Watch-only streams never send input, takeover,
 reply or resize frames, including when no Mac client leads. Chat (#18) and iPad
@@ -403,7 +403,7 @@ layout (#11) remain separate work.
 When the Mac accepts an interactive stream and advertises `inputFrameMax`, Take
 over claims with the phone's grid. Attaching remains a follower. The first key, and the next key after a phone-grid change, send the latest
 grid before input, allowing the Mac to apply it atomically with that key's claim. While the phone
-has control or the keyboard is up, each new measured grid is sent right away. The keyboard toggle
+has control, each new measured grid resizes the Mac. The keyboard toggle
 opens a compact Esc, Tab, one-shot/locked Ctrl and Alt, and arrow bar. Double-tap
 a modifier to lock it; tap again to turn it off. Its menu and accessibility
 actions also provide Lock/Unlock without timed taps. A lone Escape owns its frame.

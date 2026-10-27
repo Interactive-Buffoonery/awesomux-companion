@@ -39,7 +39,9 @@ final class DiagnosticTerminal: ObservableObject, Identifiable {
             )
             return
         }
-        let scale = UIScreen.main.scale
+        // The scale Ghostty actually rendered with, not a guess from the main screen.
+        guard size.width > 0, value.widthPixels > 0 else { return }
+        let scale = CGFloat(value.widthPixels) / size.width
         let extraWidth = max(0, Int(value.widthPixels) - Int(value.columns) * Int(value.cellWidthPixels))
         let extraHeight = max(0, Int(value.heightPixels) - Int(value.rows) * Int(value.cellHeightPixels))
         size = CGSize(width: CGFloat(20 * Int(value.cellWidthPixels) + extraWidth) / scale,

@@ -16,7 +16,7 @@ final class WatchModel {
     private(set) var activeRoute: CompanionRoute?
     private(set) var error: String?
 
-    @ObservationIgnored private var opening: TerminalOpening
+    @ObservationIgnored private var takeOverOnOpen = true
     @ObservationIgnored private let canInput: @MainActor () -> Bool
     @ObservationIgnored private let renderer: any WatchRendering
     @ObservationIgnored private let canWatch: @MainActor () -> Bool
@@ -39,14 +39,13 @@ final class WatchModel {
         let targetVersion: UUID
     }
 
-    init(renderer: any WatchRendering, opening: TerminalOpening = .watch,
+    init(renderer: any WatchRendering,
          canInput: @escaping @MainActor () -> Bool = { false }, canWatch: @escaping @MainActor () -> Bool = { true },
          makeClient: @escaping (PairingRecord, CompanionRoute) throws -> any WatchClient = { record, route in
              try MacClient(host: route.host, port: record.port, macFingerprint: record.macFingerprint,
                            identity: PhoneIdentity.load(tag: record.identityTag, storage: record.identityStorage))
          },
          sleep: @escaping @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
-        self.opening = opening
         self.canInput = canInput
         self.renderer = renderer
         self.canWatch = canWatch
@@ -88,13 +87,14 @@ final class WatchModel {
         applyOpening()
     }
 
-    // The opening choice applies once; a reconnect must not take control back from the Mac.
+    // Opening the pane takes over once; a reconnect must not take control back from the Mac.
     private func applyOpening() {
-        input.openIfReady(canInput() ? opening : .watch)
-        if input.keyboardRequested { opening = .watch }
+        guard takeOverOnOpen, input.canType else { return }
+        input.takeOver()
+        takeOverOnOpen = false
     }
 
-    // An input opening waits for the first measured grid so the Mac never resizes to a placeholder.
+    // Taking over waits for the first measured grid so the Mac never resizes to a placeholder.
     func updatePhoneGrid(_ grid: CompanionTerminalStream.Grid) {
         input.updatePhoneGrid(grid)
         if status == .live { applyOpening() }

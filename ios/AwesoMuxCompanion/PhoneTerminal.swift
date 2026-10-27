@@ -2,14 +2,11 @@ import AwesoMuxCompanionProtocol
 import Foundation
 import Observation
 
-enum TerminalOpening: Hashable { case input, watch }
-
 struct TerminalDestination: Hashable {
     let paneID: UUID
     let targetVersion: UUID
     var title = ""
     var workspace = ""
-    var opening = TerminalOpening.input
 
     var path: String {
         let pane = title.isEmpty ? String(localized: "Terminal") : title

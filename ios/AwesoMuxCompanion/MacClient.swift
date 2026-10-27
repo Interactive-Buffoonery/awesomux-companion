@@ -164,6 +164,7 @@ struct MacClient: Sendable {
             WatchDiagnostics.watch.notice("watch_accepted request_id=\(request.requestID, privacy: .public) role=\(accepted.role.rawValue, privacy: .public)")
             return MacWatchConnection(connection: connection, capabilities: capabilities, accepted: accepted, diagnostics: diagnostic)
         } catch {
+            diagnostic?.end(origin: "watch", phase: "api_reply", reason: WatchDiagnostics.reason(error))
             connection.cancel()
             throw error
         }
@@ -256,6 +257,7 @@ private final class FramedConnection: WatchFrameConnection, @unchecked Sendable 
         do {
             try await withTimeout(.seconds(8), phase: "connect") { try await framed.start() }
         } catch {
+            framed.diagnostic?.end(origin: "transport", phase: "connect", reason: WatchDiagnostics.reason(error))
             framed.cancel()
             throw error
         }

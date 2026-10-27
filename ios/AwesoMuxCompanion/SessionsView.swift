@@ -111,8 +111,26 @@ struct SessionsView: View {
     private var visibleFocusedPaneID: String? {
         guard !terminalLock.isLocked, let id = store.focusedPaneID else { return nil }
         let listed = store.panes.state.workspaces.contains { $0.panes.contains { $0.id == id } }
-            || (store.panes.state == .unsupported && store.snapshot?.agents.contains { $0.id == id } == true)
+            || unlistedAgents.contains { $0.id == id }
         return listed ? id : nil
+    }
+
+    /// Agents the pane list doesn't show: all of them on older Macs, or any missing from a loaded list.
+    private var unlistedAgents: [GlanceAgent] {
+        let agents = store.snapshot?.agents ?? []
+        switch store.panes.state {
+        case .unsupported: return agents
+        case .loaded(let workspaces):
+            return agents.filter { agent in !workspaces.contains { $0.panes.contains { $0.id == agent.id } } }
+        default: return []
+        }
+    }
+
+    private func agentRow(_ agent: GlanceAgent) -> some View {
+        TerminalRow(glyph: PaneGlyph(agent: agent), title: agent.workspaceName, tag: agent.provider,
+                    since: agent.since, detail: agent.status)
+            .id(agent.id)
+            .terminalRow(focused: store.focusedPaneID == agent.id)
     }
 
     private func agent(for pane: ListedPane) -> GlanceAgent? {
@@ -126,12 +144,7 @@ struct SessionsView: View {
         case .unsupported:
             // Older Macs have no pane list; agents still come from the glance snapshot.
             SystemLine(text: String(localized: "update awesoMux on your Mac to see every pane")).terminalRow()
-            ForEach(store.snapshot?.agents ?? []) { agent in
-                TerminalRow(glyph: PaneGlyph(agent: agent), title: agent.workspaceName, tag: agent.provider,
-                            since: agent.since, detail: agent.status)
-                    .id(agent.id)
-                    .terminalRow(focused: store.focusedPaneID == agent.id)
-            }
+            ForEach(unlistedAgents, content: agentRow)
         case .failed(let message):
             Button { Task { await store.refreshPanes() } } label: {
                 SystemLine(text: "[\(message) · tap to retry]")
@@ -162,6 +175,14 @@ struct SessionsView: View {
                     }
                 } header: {
                     WorkspaceRule(name: workspace.name)
+                }
+                .listSectionSeparator(.hidden)
+            }
+            if !unlistedAgents.isEmpty {
+                Section {
+                    ForEach(unlistedAgents, content: agentRow)
+                } header: {
+                    WorkspaceRule(name: String(localized: "other agents"))
                 }
                 .listSectionSeparator(.hidden)
             }

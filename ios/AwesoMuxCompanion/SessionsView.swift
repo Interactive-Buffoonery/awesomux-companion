@@ -1,27 +1,9 @@
 import SwiftUI
 
-struct CompanionTabs: View {
-    let store: CompanionStore
-    @State private var selection: CompanionDestination = .sessions
-
-    var body: some View {
-        TabView(selection: $selection) {
-            Tab("Sessions", systemImage: "rectangle.split.2x2", value: CompanionDestination.sessions) {
-                SessionsView(store: store)
-            }
-            Tab("Agents", systemImage: "person.2", value: CompanionDestination.agents) {
-                AgentsView(store: store)
-            }
-        }
-        .task(id: store.focusedPaneDestination) {
-            if let target = store.focusedPaneDestination { selection = target.destination }
-        }
-    }
-}
-
 struct SessionsView: View {
     let store: CompanionStore
     @Environment(TerminalLockModel.self) private var terminalLock
+    @Environment(PendingDecisionsModel.self) private var decisions
     @Environment(\.scenePhase) private var scenePhase
     @State private var creation = TerminalCreationModel()
     @State private var destination: TerminalDestination?
@@ -30,20 +12,26 @@ struct SessionsView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List {
-                    if let record = store.record {
-                        Section {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(record.macName).font(.subheadline.weight(.semibold)).foregroundStyle(Cat.text)
-                                MacStatusLine(store: store)
-                            }
+                    if let message = store.message {
+                        Button { Task { await store.refresh() } } label: {
+                            SystemLine(text: "[\(message) · tap to retry]")
                         }
-                        .listRowBackground(Cat.card)
+                        .terminalRow()
+                    }
+                    if !decisions.pending.isEmpty || !decisions.outcomes.isEmpty {
+                        NavigationLink { DecisionsView(store: store) } label: {
+                            TerminalRow(glyph: .agent, title: String(localized: "permission requests"),
+                                        tag: decisions.pending.isEmpty ? nil : "\(decisions.pending.count)",
+                                        detail: String(localized: "Claude is asking to run a tool"))
+                        }
+                        .terminalRow()
                     }
                     roster
                 }
-                .listStyle(.insetGrouped)
+                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(Cat.page)
+                .environment(\.defaultMinListRowHeight, 0)
                 .task(id: visibleFocusedPaneID) {
                     guard let paneID = visibleFocusedPaneID else { return }
                     await Task.yield()
@@ -54,7 +42,8 @@ struct SessionsView: View {
                     store.focusedPaneID = nil
                 }
             }
-            .navigationTitle("Sessions")
+            .terminalTitle(store.record?.macName ?? String(localized: "Sessions"), subtitle: connectionLine)
+            .toolbarBackground(Cat.page, for: .navigationBar)
             .navigationDestination(item: $destination) { target in
                 WatchView(store: store, paneID: target.paneID, targetVersion: target.targetVersion,
                           title: target.title, terminalLock: terminalLock, opening: target.opening)
@@ -69,11 +58,8 @@ struct SessionsView: View {
             .toolbar {
                 if store.panes.terminalAccess.createWorkspaceAllowed {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button("New Workspace", systemImage: "plus.rectangle") { createTerminal(in: nil) }
-                                .accessibilityLabel("New Workspace")
-                        } label: {
-                            Image(systemName: "plus").accessibilityLabel("New terminal")
+                        Button { createTerminal(in: nil) } label: {
+                            Image(systemName: "plus").accessibilityLabel("New Workspace")
                         }
                         .disabled(creation.isCreating)
                     }
@@ -84,8 +70,24 @@ struct SessionsView: View {
                     }
                 }
             }
-            .refreshable { await store.refreshPanes() }
+            .refreshable {
+                await store.refresh()
+                await store.refreshPanes()
+                await decisions.refresh()
+            }
         }
+    }
+
+    /// "lan · checked 1 min ago" in place of the old Mac card.
+    private var connectionLine: String {
+        guard let updatedAt = store.snapshot?.updatedAt else {
+            return store.message == nil ? String(localized: "connecting…") : String(localized: "offline")
+        }
+        let age = updatedAt.formatted(.relative(presentation: .named))
+        if store.isConnected, let route = store.activeRoute {
+            return "\(route.transport.title.lowercased()) · \(age)"
+        }
+        return String(localized: "offline · \(age)")
     }
 
     private func createTerminal(in workspaceID: UUID?) {
@@ -107,96 +109,260 @@ struct SessionsView: View {
     }
 
     private var visibleFocusedPaneID: String? {
-        guard !terminalLock.isLocked, let id = store.focusedPaneID,
-              store.panes.state.workspaces.contains(where: { $0.panes.contains(where: { $0.id == id }) }) else { return nil }
-        return id
+        guard !terminalLock.isLocked, let id = store.focusedPaneID else { return nil }
+        let listed = store.panes.state.workspaces.contains { $0.panes.contains { $0.id == id } }
+            || (store.panes.state == .unsupported && store.snapshot?.agents.contains { $0.id == id } == true)
+        return listed ? id : nil
+    }
+
+    private func agent(for pane: ListedPane) -> GlanceAgent? {
+        store.snapshot?.agents.first { $0.id == pane.id }
     }
 
     @ViewBuilder private var roster: some View {
         switch store.panes.state {
         case .idle, .loading:
-            ProgressView("Loading sessions…").listRowBackground(Cat.card)
+            SystemLine(text: String(localized: "loading sessions…")).terminalRow()
         case .unsupported:
-            ContentUnavailableView("Update awesoMux on your Mac", systemImage: "desktopcomputer",
-                                   description: Text("This Mac doesn't support the pane list yet. Your agents are still available in Agents."))
-                .listRowBackground(Color.clear)
-        case .failed(let message):
-            Section {
-                Text(message).foregroundStyle(Cat.subtext0)
-                Button("Try Again") { Task { await store.refreshPanes() } }
+            // Older Macs have no pane list; agents still come from the glance snapshot.
+            SystemLine(text: String(localized: "update awesoMux on your Mac to see every pane")).terminalRow()
+            ForEach(store.snapshot?.agents ?? []) { agent in
+                TerminalRow(glyph: PaneGlyph(agent: agent), title: agent.workspaceName, tag: agent.provider,
+                            since: agent.since, detail: agent.status)
+                    .id(agent.id)
+                    .terminalRow(focused: store.focusedPaneID == agent.id)
             }
-            .listRowBackground(Cat.card)
+        case .failed(let message):
+            Button { Task { await store.refreshPanes() } } label: {
+                SystemLine(text: "[\(message) · tap to retry]")
+            }
+            .terminalRow()
         case .loaded(let workspaces):
-            TerminalPreviewSection(store: store)
             if workspaces.isEmpty {
-                ContentUnavailableView("No workspaces", systemImage: "rectangle.split.2x2",
-                                       description: Text("Workspaces you open on your Mac appear here."))
-                    .listRowBackground(Color.clear)
+                SystemLine(text: String(localized: "no workspaces · open one on your Mac")).terminalRow()
             }
             ForEach(workspaces) { workspace in
                 Section {
                     if workspace.panes.isEmpty {
-                        Text("No panes").foregroundStyle(Cat.subtext0)
+                        SystemLine(text: String(localized: "no panes")).terminalRow()
                     }
-                    ForEach(workspace.panes) { pane in
-                        Group {
-                            if let target = pane.terminalTarget {
-                                Button { destination = target } label: { PaneRow(pane: pane) }
-                                    .contextMenu {
-                                        Button("Watch", systemImage: "eye") {
-                                            var watch = target
-                                            watch.opening = .watch
-                                            destination = watch
-                                        }
-                                        .accessibilityLabel("Watch")
-                                    }
-                            } else {
-                                PaneRow(pane: pane)
-                            }
-                        }
+                    ForEach(sorted(workspace.panes)) { pane in
+                        paneRow(pane)
                             .id(pane.id)
-                            .listRowBackground(store.focusedPaneID == pane.id ? Cat.needs.opacity(0.18) : Cat.card)
+                            .terminalRow(focused: store.focusedPaneID == pane.id)
                     }
                     if store.panes.terminalAccess.createPaneAllowed,
                        let workspaceID = UUID(uuidString: workspace.id) {
-                        Button("New Pane", systemImage: "plus") { createTerminal(in: workspaceID) }
-                            .accessibilityLabel("New Pane")
-                            .disabled(creation.isCreating)
+                        Button { createTerminal(in: workspaceID) } label: {
+                            SystemLine(text: String(localized: "+ new pane"))
+                        }
+                        .accessibilityLabel("New Pane")
+                        .disabled(creation.isCreating)
+                        .terminalRow()
                     }
-                } header: { Text(workspace.name).foregroundStyle(Cat.subtext0) }
-                .listRowBackground(Cat.card)
+                } header: {
+                    WorkspaceRule(name: workspace.name)
+                }
+                .listSectionSeparator(.hidden)
             }
+        }
+    }
+
+    /// Rows that need you float to the top; everything else keeps the Mac's order.
+    private func sorted(_ panes: [ListedPane]) -> [ListedPane] {
+        panes.enumerated().sorted { lhs, rhs in
+            let left = PaneGlyph(pane: lhs.element, agent: agent(for: lhs.element)).needsYou
+            let right = PaneGlyph(pane: rhs.element, agent: agent(for: rhs.element)).needsYou
+            return left != right ? left : lhs.offset < rhs.offset
+        }.map(\.element)
+    }
+
+    @ViewBuilder private func paneRow(_ pane: ListedPane) -> some View {
+        let agent = agent(for: pane)
+        let row = TerminalRow(glyph: PaneGlyph(pane: pane, agent: agent),
+                              title: pane.title.isEmpty ? String(localized: "untitled") : pane.title,
+                              tag: agent?.provider, since: agent?.since,
+                              detail: pane.preview?.isEmpty == false ? pane.preview : agent?.status ?? pane.status,
+                              detailIsTerminal: pane.preview?.isEmpty == false)
+        if let target = pane.terminalTarget {
+            Button { destination = target } label: { row }
+                .contextMenu {
+                    Button("Watch", systemImage: "eye") {
+                        var watch = target
+                        watch.opening = .watch
+                        destination = watch
+                    }
+                    .accessibilityLabel("Watch")
+                }
+        } else {
+            row
         }
     }
 }
 
-private struct PaneRow: View {
-    let pane: ListedPane
+/// One shape per state so color is never the only signal; VoiceOver reads the word.
+enum PaneGlyph {
+    case failed, waiting, agent, running, done, idle, unavailable
+
+    init(pane: ListedPane, agent: GlanceAgent?) {
+        if let agent { self.init(agent: agent); return }
+        guard pane.availability == "attached", pane.kind == .terminal else { self = .unavailable; return }
+        switch pane.state {
+        case "error": self = .failed
+        case "waiting", "needsAttention": self = .waiting
+        case "running", "thinking": self = .running
+        case "output", "done": self = .done
+        default: self = .idle
+        }
+    }
+
+    init(agent: GlanceAgent) {
+        switch agent.group {
+        case .needsYou: self = agent.state == "error" ? .failed : .agent
+        case .working: self = .running
+        case .done: self = .done
+        }
+    }
+
+    var needsYou: Bool { [.failed, .waiting, .agent].contains(self) }
+
+    var symbol: String {
+        switch self {
+        case .failed: "✕"
+        case .waiting: "?"
+        case .agent: "◆"
+        case .running: "●"
+        case .done: "✓"
+        case .idle: "○"
+        case .unavailable: "·"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .failed: Cat.red
+        case .waiting: Cat.needs
+        case .agent: Cat.mauve
+        case .running: Cat.running
+        case .done: Cat.done
+        case .idle, .unavailable: Cat.subtext0
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .failed: String(localized: "Failed")
+        case .waiting: String(localized: "Waiting for you")
+        case .agent: String(localized: "Agent needs you")
+        case .running: String(localized: "Running")
+        case .done: String(localized: "Finished")
+        case .idle: String(localized: "Idle")
+        case .unavailable: String(localized: "Unavailable")
+        }
+    }
+}
+
+struct TerminalRow: View {
+    let glyph: PaneGlyph
+    let title: String
+    var tag: String?
+    var since: Date?
+    var detail: String?
+    var detailIsTerminal = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon).foregroundStyle(Cat.accent).frame(width: 24)
-                .padding(.top, 3).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(pane.title.isEmpty ? String(localized: "Untitled pane") : pane.title)
-                    .font(.body.weight(.medium)).foregroundStyle(Cat.text)
-                Text(pane.status).font(.subheadline).foregroundStyle(Cat.subtext0)
-                if let preview = pane.preview, !preview.isEmpty {
-                    Text(verbatim: preview).font(.footnote.monospaced()).foregroundStyle(Cat.subtext0)
-                        .lineLimit(1)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(glyph.symbol).fontWeight(.bold).foregroundStyle(glyph.color).frame(minWidth: 14)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(verbatim: title).foregroundStyle(Cat.text).lineLimit(1)
+                    if let tag { Text(verbatim: tag).font(.caption.monospaced()).foregroundStyle(Cat.subtext0) }
+                    Spacer(minLength: 8)
+                    if let since { AgeText(date: since).font(.caption.monospaced()).foregroundStyle(Cat.subtext0) }
+                }
+                if let detail, !detail.isEmpty {
+                    Text(verbatim: detail).font(.caption.monospaced()).foregroundStyle(Cat.subtext0)
+                        .lineLimit(1).truncationMode(.tail)
                 }
             }
         }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
+        .font(.subheadline.monospaced())
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([title, glyph.label, tag, detailIsTerminal ? nil : detail].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityValue(detailIsTerminal ? detail ?? "" : "")
     }
+}
 
-    private var icon: String {
-        switch pane.kind {
-        case .terminal: "terminal"
-        case .documents: "doc.on.doc"
-        case .unknown: "questionmark.square"
+/// Dim text that reads like a line the terminal printed: loading, offline, empty states.
+struct SystemLine: View {
+    let text: String
+
+    var body: some View {
+        Text(verbatim: text).font(.caption.monospaced()).foregroundStyle(Cat.subtext0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+    }
+}
+
+private struct WorkspaceRule: View {
+    let name: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(verbatim: name.uppercased()).font(.caption2.monospaced()).tracking(1.2).foregroundStyle(Cat.subtext0)
+                .lineLimit(1)
+            Rectangle().fill(Cat.card).frame(height: 1).accessibilityHidden(true)
         }
+        .padding(.top, 10)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+extension View {
+    /// SwiftUI on iOS 26 ignores navigation bar font appearance, so the mono title is drawn here.
+    /// `navigationTitle` stays for the back button and VoiceOver.
+    func terminalTitle(_ title: String, subtitle: String? = nil) -> some View {
+        navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 1) {
+                        Text(title).font(.headline.monospaced()).foregroundStyle(Cat.text)
+                        if let subtitle {
+                            Text(subtitle).font(.caption.monospaced()).foregroundStyle(Cat.subtext0)
+                        }
+                    }
+                    .lineLimit(1)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isHeader)
+                }
+            }
+    }
+}
+
+private extension View {
+    func terminalRow(focused: Bool = false) -> some View {
+        buttonStyle(.plain)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .listRowBackground(focused ? Cat.card : Color.clear)
+    }
+}
+
+/// Claude permission requests, moved out of the old Agents tab.
+struct DecisionsView: View {
+    let store: CompanionStore
+    @Environment(PendingDecisionsModel.self) private var decisions
+
+    var body: some View {
+        List { PendingDecisionsSection(model: decisions, context: store.decisionContext) }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Cat.page)
+            .navigationTitle("Permissions")
+            .navigationBarTitleDisplayMode(.inline)
+            .refreshable { await decisions.refresh() }
     }
 }
 

@@ -27,6 +27,9 @@ final class PaneRosterRenderingTests: XCTestCase {
         let appeared = expectation(description: "SwiftUI Sessions appeared")
         let host = PaneHostingController(rootView: TerminalLockContainer(model: lock, protectsContent: true) {
             SessionsView(store: store)
+                .environment(PendingDecisionsModel(session: { nil }, isUnlocked: { true },
+                                                   read: { _, _ in throw CancellationError() },
+                                                   submit: { _, _, _ in throw CancellationError() }))
         })
         host.appeared = { appeared.fulfill() }
         let window = UIWindow(windowScene: scene)

@@ -125,7 +125,7 @@ final class WatchInput {
         return leader == "mac" ? "Mac has control" : "Another terminal has control"
     }
 
-    private var hasControl: Bool {
+    var hasControl: Bool {
         guard let leader, let ownLeaderID else { return false }
         return leader.caseInsensitiveCompare(ownLeaderID) == .orderedSame
     }

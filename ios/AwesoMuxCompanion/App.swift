@@ -65,7 +65,7 @@ private struct ProtectedCompanionRoot: View {
             if store.record == nil || store.showingPairing || store.pairingStep != .idle {
                 PairingView(store: store)
             } else {
-                CompanionTabs(store: store)
+                SessionsView(store: store)
             }
         }
         .environment(decisions)

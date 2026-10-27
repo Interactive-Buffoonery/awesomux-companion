@@ -274,6 +274,29 @@ final class HostsTests: XCTestCase {
         XCTAssertEqual(try PairingStore(keychain: keychain).loadAll(), [a, next])
     }
 
+    func testAdditionAfterKeychainRecoveryKeepsTheOriginalActiveHost() throws {
+        let older = record(Data(repeating: 0xC3, count: 32).base64URLEncodedString, pairedAt: 50)
+        let a = record(macA, pairedAt: 100), b = record(macB, pairedAt: 200)
+        try PairingStore(keychain: keychain).save(older)
+        try PairingStore(keychain: keychain).save(a)
+        defaults.set(try JSONSerialization.data(withJSONObject: [
+            "connectionID": a.connectionID.uuidString, "macFingerprint": macA, "identityTag": a.identityTag]),
+            forKey: CompanionStore.Keys.previewSuppression)
+        keychain.fault = .failRead
+        let hosts = launch()
+        XCTAssertTrue(hosts.stores.isEmpty)
+        keychain.fault = nil
+        try hosts.adding.savePairing(b)
+        XCTAssertEqual(hosts.stores.compactMap(\.record), [a, b])
+        XCTAssertEqual(launch().stores.compactMap(\.record), [a, b])
+        XCTAssertEqual(hosts.selected?.record, b)
+        XCTAssertEqual(defaults.stringArray(forKey: HostRegistry.hostsKey), [macA, macB])
+        XCTAssertNotNil(defaults.data(forKey: HostRegistry.hostKey(CompanionStore.Keys.previewSuppression, macA)))
+        XCTAssertNil(defaults.data(forKey: HostRegistry.hostKey(CompanionStore.Keys.previewSuppression, macB)))
+        XCTAssertTrue(revoked.isEmpty)
+        XCTAssertNotNil(try PairingStore(keychain: keychain).loadAll().first { $0 == older }, "The superseded record remains inert")
+    }
+
     func testFailedAdditionKeepsMembershipAndEveryOtherPairing() throws {
         let hosts = try twoHosts()
         let before = hosts.stores.compactMap(\.record)

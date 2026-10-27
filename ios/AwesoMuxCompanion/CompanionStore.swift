@@ -80,6 +80,7 @@ final class CompanionStore {
     var showingPairing = false
     /// Set by `Hosts`: whether a fingerprint is already one of the paired Macs, so adding can't replace it.
     @ObservationIgnored var isPairedHost: @MainActor (String) -> Bool = { _ in false }
+    @ObservationIgnored var preparePairingSave: @MainActor () throws -> Void = {}
     /// Set by `Hosts`: called once a store that had no pairing has saved its first one.
     @ObservationIgnored var didPair: @MainActor (CompanionStore) -> Void = { _ in }
     /// Set by `Hosts`: called once this store's pairing has been removed, with the record it had.
@@ -306,6 +307,7 @@ final class CompanionStore {
 
     /// Commits an allowed pairing without changing any other Mac's membership or grant.
     func savePairing(_ next: PairingRecord) throws {
+        try preparePairingSave()
         if let conflict = pairingConflict(fingerprint: next.macFingerprint, name: next.macName) { throw conflict }
         let previous = try pairingStore.replacementContext(for: next.macFingerprint).previous
         try pairingStore.save(next)

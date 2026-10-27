@@ -89,6 +89,7 @@ final class Hosts {
     }
 
     @ObservationIgnored private let registry: HostRegistry
+    @ObservationIgnored private let pairingStore: PairingStore
     @ObservationIgnored private let makeStore: @MainActor (() throws -> PairingRecord?) -> CompanionStore
 
     init(defaults: UserDefaults = .standard, pairingStore: PairingStore = .system,
@@ -98,6 +99,7 @@ final class Hosts {
             CompanionStore(defaults: defaults, loadPairing: load, pairingStore: pairingStore, liveActivity: activity)
         }
         registry = HostRegistry(defaults: defaults)
+        self.pairingStore = pairingStore
         self.makeStore = make
         liveActivityEnabled = defaults.object(forKey: CompanionStore.Keys.liveActivity) as? Bool ?? true
         do {
@@ -206,10 +208,29 @@ final class Hosts {
 
     private func wire(_ store: CompanionStore) {
         store.isPairedHost = { [weak self] fingerprint in self?.store(for: fingerprint) != nil }
+        store.preparePairingSave = { [weak self] in try self?.recoverHosts() }
         store.didPair = { [weak self] store in self?.added(store) }
         store.didUnpair = { [weak self] store, record in self?.removed(store, record: record) }
         store.publishesGlance = { [weak self, weak store] in store != nil && self?.selected === store }
         store.liveActivityEnabled = liveActivityEnabled
+    }
+
+    /// A launch-time Keychain failure must not let a later successful addition hide the existing Mac.
+    /// Resolve the old registry before saving the new record, while its original newest record is still known.
+    private func recoverHosts() throws {
+        guard stores.isEmpty else { return }
+        let records: [PairingRecord]
+        do {
+            records = try pairingStore.loadAll()
+        } catch PairingStoreFailure.invalidItem {
+            // As in B1, unusable records may be replaced, but never become active hosts.
+            records = []
+        }
+        stores = registry.hosts(from: records).map { record in makeStore { record } }
+        for store in stores { wire(store) }
+        if let restored = stores.first(where: { $0.record?.macFingerprint == registry.selected }) ?? stores.last {
+            select(restored)
+        }
     }
 
     private func select(_ store: CompanionStore) {

@@ -338,7 +338,6 @@ final class WatchInput {
                     }
                     guard self.token == identity else { return }
                     if case .claim(let claim) = frame { self.lastSentGrid = claim.grid }
-                    if case .grid(let grid) = frame { self.lastSentGrid = grid }
                     // A layout that changed back while this frame was sending still needs to reach the Mac.
                     if self.jobs.isEmpty { self.sendPhoneGrid() }
                 }

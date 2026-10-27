@@ -102,6 +102,12 @@ struct WatchView: View {
                 if !message.isEmpty { UIAccessibility.post(notification: .announcement, argument: message) }
             }
             .onChange(of: model.input.canType) { _, canType in if !canType { keyboardShown = false } }
+            .onChange(of: model.input.hasControl) { had, has in
+                // A Mac handback drops the keyboard so the status and Take over are visible again.
+                guard had, !has else { return }
+                keyboardShown = false
+                UIAccessibility.post(notification: .announcement, argument: model.input.drivingText)
+            }
             .sheet(item: Binding(get: { model.input.confirmation }, set: { _ in model.input.cancelPaste() })) { confirmation in
                 NavigationStack {
                     VStack(alignment: .leading, spacing: 16) {

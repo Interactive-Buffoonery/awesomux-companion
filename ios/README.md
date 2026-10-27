@@ -401,7 +401,7 @@ reply or resize frames, including when no Mac client leads. Chat (#18) and iPad
 layout (#11) remain separate work.
 
 When the Mac accepts an interactive stream and advertises `inputFrameMax`, Take
-over claims with the phone's grid. Attaching remains a follower. The first key, and the next key after a phone-grid change, send the latest
+over claims with the phone's grid. Opening a pane takes over once. The first key, and the next key after a phone-grid change, send the latest
 grid before input, allowing the Mac to apply it atomically with that key's claim. While the phone
 has control, each new measured grid resizes the Mac. The keyboard toggle
 opens a compact Esc, Tab, one-shot/locked Ctrl and Alt, and arrow bar. Double-tap

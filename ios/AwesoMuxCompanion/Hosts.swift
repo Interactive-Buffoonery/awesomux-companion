@@ -330,35 +330,65 @@ struct HostsView: View {
 struct HostRow: View {
     let store: CompanionStore
     let isSelected: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(store.isConnected ? "●" : "○")
-                .foregroundStyle(store.isConnected ? Cat.output : Cat.subtext0)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(store.record?.macName ?? "Mac")
-                    .font(.body.monospaced().weight(.semibold)).foregroundStyle(Cat.text).lineLimit(2)
-                Text(status).font(.footnote.monospaced()).foregroundStyle(Cat.subtext0)
-            }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 2) {
-                if let needs = store.snapshot?.count(.needsYou), needs > 0 {
-                    Text("\(needs) need you").foregroundStyle(Cat.needs)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        glyph
+                        name.fixedSize(horizontal: false, vertical: true)
+                        if isSelected { selection }
+                    }
+                    Text(status).font(.footnote.monospaced()).foregroundStyle(Cat.subtext0)
+                        .fixedSize(horizontal: false, vertical: true)
+                    counts(alignment: .leading)
                 }
-                if let working = store.snapshot?.count(.working), working > 0 {
-                    Text("\(working) working").foregroundStyle(Cat.subtext0)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    glyph
+                    VStack(alignment: .leading, spacing: 2) {
+                        name.lineLimit(2)
+                        Text(status).font(.footnote.monospaced()).foregroundStyle(Cat.subtext0)
+                    }
+                    Spacer(minLength: 8)
+                    counts(alignment: .trailing)
+                    if isSelected { selection }
                 }
-            }
-            .font(.footnote.monospaced().weight(.semibold))
-            if isSelected {
-                Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(Cat.accent)
-                    .accessibilityLabel("Last opened")
             }
         }
         .frame(minHeight: 44)
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
+    }
+
+    private var name: some View {
+        Text(store.record?.macName ?? "Mac")
+            .font(.body.monospaced().weight(.semibold)).foregroundStyle(Cat.text)
+    }
+
+    private var glyph: some View {
+        Text(store.isConnected ? "●" : "○")
+            .foregroundStyle(store.isConnected ? Cat.output : Cat.subtext0)
+            .accessibilityHidden(true)
+    }
+
+    private var selection: some View {
+        Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(Cat.accent)
+            .accessibilityLabel("Last opened")
+    }
+
+    private func counts(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 2) {
+            if let needs = store.snapshot?.count(.needsYou), needs > 0 {
+                Text("\(needs) need you").foregroundStyle(Cat.needs)
+            }
+            if let working = store.snapshot?.count(.working), working > 0 {
+                Text("\(working) working").foregroundStyle(Cat.subtext0)
+            }
+        }
+        .font(.footnote.monospaced().weight(.semibold))
     }
 
     /// "lan · 4 panes", "offline · seen 5 min ago", or "connecting…". No latency: the app doesn't measure it.

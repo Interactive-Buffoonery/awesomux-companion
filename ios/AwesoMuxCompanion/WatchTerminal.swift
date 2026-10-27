@@ -54,10 +54,10 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     func reset(grid: CompanionTerminalStream.Grid, scrollbackBound: Int) throws {
         clear()
         try requireAuthority()
-        guard Self.nativeLoggingDisabled else { throw WatchTerminalFailure.unsafeConfiguration }
-        guard drainToken == nil else { throw WatchTerminalFailure.nativeBusy }
+        guard Self.nativeLoggingDisabled else { throw diagnosticFailure(.unsafeConfiguration) }
+        guard drainToken == nil else { throw diagnosticFailure(.nativeBusy) }
         try validate(grid)
-        guard scrollbackBound >= 0 else { throw WatchTerminalFailure.invalidRetention }
+        guard scrollbackBound >= 0 else { throw diagnosticFailure(.invalidRetention) }
         self.scrollbackBound = min(scrollbackBound, Self.maximumQueuedBytes)
         target = grid
         let fontSize = WatchDrawableBudget.fontSize(for: grid)
@@ -72,7 +72,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     func feed(_ bytes: Data) throws {
         try requireAuthority()
         if let failure { throw failure }
-        guard surface != nil else { throw WatchTerminalFailure.notAttached }
+        guard surface != nil else { throw diagnosticFailure(.notAttached) }
         guard bytes.count <= CompanionTerminalStream.maximumDataBytes,
               bytes.count <= Self.maximumQueuedBytes - queuedBytes,
               operations.count < Self.maximumOperations else {
@@ -89,7 +89,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         try requireAuthority()
         if let failure { throw failure }
         try validate(grid)
-        guard surface != nil else { throw WatchTerminalFailure.notAttached }
+        guard surface != nil else { throw diagnosticFailure(.notAttached) }
         guard operations.count < Self.maximumOperations else { throw invalidate(.overflow) }
         operations.append(.grid(grid))
         pump()
@@ -167,12 +167,12 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     }
 
     private func requireAuthority() throws {
-        guard checkAuthority() else { throw WatchTerminalFailure.accessDenied }
+        guard checkAuthority() else { throw diagnosticFailure(.accessDenied) }
     }
 
     private func validate(_ grid: CompanionTerminalStream.Grid) throws {
         guard (1...1000).contains(grid.cols), (1...1000).contains(grid.rows),
-              grid.cols * grid.rows <= 250_000 else { throw WatchTerminalFailure.invalidGrid }
+              grid.cols * grid.rows <= 250_000 else { throw diagnosticFailure(.invalidGrid) }
     }
 
     private func makeSurface(size: CGSize, fontSize: Float, displayScale: CGFloat = 3) throws -> WatchNativeSurface {
@@ -328,9 +328,14 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         }
     }
 
+    private func diagnosticFailure(_ error: WatchTerminalFailure) -> WatchTerminalFailure {
+        WatchDiagnostics.renderer.error("renderer_failed reason=\(WatchDiagnostics.reason(error), privacy: .public) rows=\(self.target?.rows ?? 0) cols=\(self.target?.cols ?? 0) queue_bytes=\(self.queuedBytes) queue_ops=\(self.operations.count) deadline_age_ms=\(self.deadlineStarted.map { WatchDiagnostics.milliseconds(.now - $0) } ?? -1)")
+        return error
+    }
+
     @discardableResult
     private func invalidate(_ error: WatchTerminalFailure) -> WatchTerminalFailure {
-        WatchDiagnostics.renderer.error("renderer_failed reason=\(WatchDiagnostics.reason(error), privacy: .public) rows=\(self.target?.rows ?? 0) cols=\(self.target?.cols ?? 0) queue_bytes=\(self.queuedBytes) queue_ops=\(self.operations.count) deadline_age_ms=\(self.deadlineStarted.map { WatchDiagnostics.milliseconds(.now - $0) } ?? -1)")
+        _ = diagnosticFailure(error)
         clear()
         failure = error
         onFailure?(error)

@@ -671,7 +671,7 @@ final class CompanionStore {
             }
             try checkCurrent()
             WatchDiagnostics.routing.notice("route_selected transport=\(route.transport.rawValue, privacy: .public)")
-        activeRoute = route
+            activeRoute = route
             if route.transport == .tailscale { lanFailed = true }
             return response
         } catch {

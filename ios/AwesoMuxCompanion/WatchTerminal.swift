@@ -33,13 +33,17 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     private var drainToken: UUID?
     private let drainQueue = DispatchQueue(label: "app.awesomux.watch-renderer-drain")
     private let discardedWrites = WatchDiscardedWrites()
+    private let updateNativeFont: (UITerminalView, Float, CGSize) -> Bool
     private static let maximumQueuedBytes = CompanionTerminalStream.maximumSnapshotBytes
     private static let maximumOperations = 256
     // Native logging is independent of TerminalDebugLog. The pinned engine
     // reads this setting once in ghostty_init, before any controller exists.
     private static let nativeLoggingDisabled = setenv("GHOSTTY_LOG", "no-stderr,no-macos", 1) == 0
 
-    init() {
+    init(updateNativeFont: @escaping (UITerminalView, Float, CGSize) -> Bool = {
+        $0.setFontSize($1, size: $2)
+    }) {
+        self.updateNativeFont = updateNativeFont
         _ = Self.nativeLoggingDisabled
         TerminalDebugLog.disable()
     }
@@ -188,6 +192,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         let identity = epoch
         return try WatchNativeSurface(size: size, fontSize: fontSize, scrollbackBound: scrollbackBound,
                                       discardedWrites: discardedWrites,
+                                      updateNativeFont: updateNativeFont,
                                       authority: { [weak self] in self?.checkAuthority() ?? false },
                                       resized: { [weak self] id, value in
             guard let self, self.epoch == identity, self.checkAuthority() else { return }
@@ -278,7 +283,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     /// Cells measured at the maximum font, per display scale. Scaling up a
     /// smaller font's cell multiplies its pixel rounding, so that only stands
     /// in, frozen, until the first maximum-font measurement.
-    private static var maximumFontCells: [CGFloat: CGSize] = [:]
+    private(set) static var maximumFontCells: [CGFloat: CGSize] = [:]
     private var scaledCell: CGSize?
 
     private func measureCell(_ viewport: InMemoryTerminalViewport) {
@@ -436,17 +441,20 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
     let session: InMemoryTerminalSession
     let view: WatchReadOnlyTerminalView
     private(set) var fontSize: Float
+    private let updateNativeFont: (UITerminalView, Float, CGSize) -> Bool
     let modeReports = WatchModeReports()
     @Published private(set) var size: CGSize
     var viewport: InMemoryTerminalViewport?
 
     init(size: CGSize, fontSize: Float, scrollbackBound: Int, discardedWrites: WatchDiscardedWrites,
+         updateNativeFont: @escaping (UITerminalView, Float, CGSize) -> Bool,
          authority: @escaping () -> Bool,
          resized: @escaping @MainActor (UUID, InMemoryTerminalViewport) -> Void) throws {
         let identity = UUID()
         id = identity
         self.size = size
         self.fontSize = fontSize
+        self.updateNativeFont = updateNativeFont
         let configuration = TerminalConfiguration()
             .fontSize(fontSize).windowPaddingX(0).windowPaddingY(0)
             .custom("clipboard-read", "deny").custom("clipboard-write", "deny")
@@ -480,7 +488,7 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
         if let fontSize, fontSize != self.fontSize {
             // One native step: setting the font alone would resize the grid at
             // the old pixel size first and drop rows the final grid keeps.
-            guard view.setFontSize(fontSize, size: size) else { throw WatchTerminalFailure.notAttached }
+            guard updateNativeFont(view, fontSize, size) else { throw WatchTerminalFailure.notAttached }
             self.fontSize = fontSize
         }
         self.size = size

@@ -65,6 +65,89 @@ final class WatchTerminalTests: XCTestCase {
         }
     }
 
+    func testNativeFontRejectionPreservesFrameTrackerGridAndContent() async throws {
+        let host = try mount([])
+        defer { host.close() }
+        let mac = cellArea(cols: 200, rows: 55, fontSize: 6)
+        let phone = cellArea(cols: 40, rows: 55, fontSize: 13)
+        let terminal = RawTerminal(fontSize: 6, size: mac, in: host.window)
+        defer { terminal.view.removeFromSuperview() }
+        try await settle([terminal])
+        terminal.session.receive(alternateScreen(rows: Int(try XCTUnwrap(terminal.grids.last).rows)))
+        try await settle([terminal])
+        let frame = terminal.view.frame
+        let reports = terminal.grids.count
+        let text = try XCTUnwrap(terminal.session.readViewportText())
+
+        // Infinity passes the Swift NaN guard and reaches the native C API's
+        // deterministic rejection, without relying on allocator exhaustion.
+        XCTAssertFalse(terminal.view.setFontSize(.infinity, size: phone))
+        XCTAssertEqual(terminal.view.frame, frame)
+        XCTAssertEqual(terminal.view.fontSize, 6)
+        terminal.view.setNeedsLayout()
+        terminal.view.layoutIfNeeded()
+        try await settle([terminal])
+        XCTAssertEqual(terminal.grids.count, reports, "Rejection must not run an ordinary resize fallback")
+        XCTAssertEqual(terminal.session.readViewportText(), text)
+        XCTAssertEqual(terminal.view.fontSize, 6)
+
+        XCTAssertTrue(terminal.view.setFontSize(13, size: phone))
+        try await settle([terminal])
+        XCTAssertEqual(terminal.view.fontSize, 13)
+        XCTAssertEqual(terminal.grids.count, reports + 1)
+    }
+
+    func testNativeFontRejectionDisposesWatchBeforeCalibrationOrMeasurement() async throws {
+        var updates = 0
+        let terminal = WatchTerminal(updateNativeFont: { view, points, size in
+            updates += 1
+            XCTAssertEqual(points, 13)
+            XCTAssertEqual(view.fontSize, 6)
+            let frame = view.frame
+            // Exercise the real C -> TerminalSurface -> coordinator -> view
+            // failure result, then let Watch handle that synchronous result.
+            let accepted = view.setFontSize(.infinity, size: size)
+            XCTAssertFalse(accepted)
+            XCTAssertEqual(view.fontSize, 6)
+            XCTAssertEqual(view.frame, frame)
+            return accepted
+        })
+        let host = try mount([terminal])
+        defer { host.close(); terminal.clear() }
+        var failures: [WatchTerminalFailure] = []
+        terminal.onFailure = { if let failure = $0 as? WatchTerminalFailure { failures.append(failure) } }
+        try terminal.reset(grid: .init(rows: 55, cols: 200), scrollbackBound: 1 << 20)
+        try terminal.feed(alternateScreen(rows: 55))
+        try await idle([terminal])
+        let view = try liveView(host)
+        let measurements = WatchTerminal.maximumFontCells
+        let pane = CGSize(width: 390, height: 700)
+        let claim = terminal.phoneGrid(for: pane)
+        try terminal.resize(.init(rows: 55, cols: 40))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(6))
+        while terminal.failure == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(updates, 1)
+        XCTAssertEqual(failures, [.notAttached])
+        XCTAssertEqual(terminal.failure, .notAttached)
+        XCTAssertFalse(terminal.isReady)
+        XCTAssertNil(terminal.reportedGrid)
+        XCTAssertNil(terminal.grid)
+        XCTAssertNil(view.superview)
+        XCTAssertNil(view.surface)
+        XCTAssertEqual(WatchTerminal.maximumFontCells, measurements)
+        XCTAssertEqual(terminal.phoneGrid(for: pane), claim)
+        XCTAssertThrowsError(try terminal.feed(Data("must not replay".utf8)))
+        // Queued native callbacks and the ordinary layout pass cannot revive
+        // the disposed surface or write a maximum-font measurement later.
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(updates, 1)
+        XCTAssertEqual(failures, [.notAttached])
+        XCTAssertFalse(terminal.isReady)
+        XCTAssertEqual(WatchTerminal.maximumFontCells, measurements)
+    }
+
     // The wrapper's one-step font and size change, measured at the native
     // resize callback, which reports every grid the emulator applies.
     func testAtomicFontAndSizeResizesTheGridOnceAtItsFinalSize() async throws {

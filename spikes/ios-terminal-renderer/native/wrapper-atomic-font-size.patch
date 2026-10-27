@@ -1,8 +1,7 @@
 diff --git a/Sources/GhosttyTerminal/Platform/UIKit/UITerminalView+PublicInput.swift b/Sources/GhosttyTerminal/Platform/UIKit/UITerminalView+PublicInput.swift
-index d5f4516..918273f 100644
 --- a/Sources/GhosttyTerminal/Platform/UIKit/UITerminalView+PublicInput.swift
 +++ b/Sources/GhosttyTerminal/Platform/UIKit/UITerminalView+PublicInput.swift
-@@ -71,6 +71,17 @@
+@@ -71,6 +71,23 @@
              core.fontSize?.points
          }
  
@@ -10,44 +9,51 @@ index d5f4516..918273f 100644
 +        /// the terminal grid is resized once, at the new font and size.
 +        /// Setting the font and then the frame would resize the grid at the
 +        /// new font and the old size in between, which can drop rows the
-+        /// final size keeps. False with no surface yet or an empty size.
++        /// final size keeps. False on native rejection, with no surface yet,
++        /// or an empty size. Rejection preserves the frame and font tracker.
 +        @discardableResult
 +        func setFontSize(_ points: Float, size: CGSize) -> Bool {
++            let previousSize = frame.size
 +            frame.size = size
-+            return core.setFontSizeAtViewSize(points)
++            guard core.setFontSizeAtViewSize(points) else {
++                frame.size = previousSize
++                return false
++            }
++            return true
 +        }
 +
          /// Jump the viewport by a number of shell prompts.
          ///
          /// Negative offsets move toward older prompts and positive offsets move
 diff --git a/Sources/GhosttyTerminal/Surface/TerminalSurface.swift b/Sources/GhosttyTerminal/Surface/TerminalSurface.swift
-index 147c480..0869831 100644
 --- a/Sources/GhosttyTerminal/Surface/TerminalSurface.swift
 +++ b/Sources/GhosttyTerminal/Surface/TerminalSurface.swift
-@@ -223,6 +223,15 @@ public final class TerminalSurface {
+@@ -221,6 +221,15 @@
+         }
+         TerminalDebugLog.log(.metrics, "surface setSize \(width)x\(height)")
          ghostty_surface_set_size(s, width, height)
-     }
- 
-+    func setFontSizeAndSize(points: Float, width: UInt32, height: UInt32) {
-+        guard let s = surface else {
-+            TerminalDebugLog.log(.metrics, "surface setFontSizeAndSize ignored: missing surface")
-+            return
-+        }
-+        TerminalDebugLog.log(.metrics, "surface setFontSizeAndSize points=\(points) \(width)x\(height)")
-+        ghostty_surface_set_font_size_and_size(s, points, width, height)
 +    }
 +
-     func setContentScale(x: Double, y: Double) {
-         guard let s = surface else {
-             TerminalDebugLog.log(.metrics, "surface contentScale ignored: missing surface")
-diff --git a/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift b/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift
-index 72a9df0..d595156 100644
---- a/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift
-+++ b/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift
-@@ -452,6 +452,26 @@ final class TerminalSurfaceCoordinator {
-         return true
++    func setFontSizeAndSize(points: Float, width: UInt32, height: UInt32) -> Bool {
++        guard let s = surface else {
++            TerminalDebugLog.log(.metrics, "surface setFontSizeAndSize ignored: missing surface")
++            return false
++        }
++        TerminalDebugLog.log(.metrics, "surface setFontSizeAndSize points=\(points) \(width)x\(height)")
++        return ghostty_surface_set_font_size_and_size(s, points, width, height)
      }
  
+     func setContentScale(x: Double, y: Double) {
+diff --git a/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift b/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift
+--- a/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift
++++ b/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift
+@@ -449,6 +449,27 @@
+             )
+         }
+         onMetricsUpdate?()
++        return true
++    }
++
 +    /// Moves the font and the pixel size in one native step, so the grid is
 +    /// only ever resized at its final size. A font change on its own resizes
 +    /// the grid at the old pixel size first, which can drop rows the final
@@ -62,12 +68,10 @@ index 72a9df0..d595156 100644
 +        guard pixelWidth >= 1, pixelHeight >= 1,
 +              pixelWidth <= Double(UInt32.max), pixelHeight <= Double(UInt32.max)
 +        else { return false }
-+        surface.setFontSizeAndSize(points: points, width: UInt32(pixelWidth), height: UInt32(pixelHeight))
++        guard surface.setFontSizeAndSize(points: points, width: UInt32(pixelWidth), height: UInt32(pixelHeight))
++        else { return false }
 +        applyFontSizeAction(.set(points))
 +        performMetricsSync()
-+        return true
-+    }
-+
-     func fitToSize() {
-         if surface == nil {
-             rebuildIfReady()
+         return true
+     }
+ 

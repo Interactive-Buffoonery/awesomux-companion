@@ -33,7 +33,15 @@ asynchronously on main when necessary. Non-iOS presentation is unchanged.
 `0023-ios-atomic-font-size.patch` adds
 `ghostty_surface_set_font_size_and_size`. It sets the new cell size and the
 new screen size before sending one resize to the IO thread, so the terminal
-grid only ever changes to its final size. A font change on its own resizes the
+grid only ever changes to its final size. Its synchronous Boolean result is
+false for invalid arguments or failed font-grid acquisition, before any live
+font or size state changes. True means the final resize was queued, not that
+the IO thread has completed it. After that commit, a window-notification error
+is logged without rejecting the committed resize or releasing its font grid.
+The Swift overlay propagates rejection without changing its font tracker or
+running metrics synchronization, and restores the view's previous frame.
+Watch then disposes the failed surface before calibration or cell measurement.
+A font change on its own resizes the
 grid at the old pixel size first, and the IO thread's 25ms resize coalescer
 can apply that intermediate grid, dropping alternate-screen rows the final
 size keeps. `verify-artifacts.py` requires the export in both archives.

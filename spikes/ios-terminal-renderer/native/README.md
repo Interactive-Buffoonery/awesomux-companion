@@ -1,7 +1,8 @@
 # Native iOS renderer source build
 
 Build only iOS arm64 and iOS Simulator arm64 from the pinned package's
-ordered patch stack, then apply `0022-ios-public-metal-layer.patch`:
+ordered patch stack, then apply `0022-ios-public-metal-layer.patch` and
+`0023-ios-atomic-font-size.patch`:
 
 ```sh
 ./build.sh 1e9e14af5df14211892f5fc15fd21a49c7d94868
@@ -28,6 +29,19 @@ leave `cells_rebuilt` true under the draw mutex and schedule a deferred main
 queue display request. Layer
 attachment, layout and pixel-format changes run on the main thread; first display is requested
 asynchronously on main when necessary. Non-iOS presentation is unchanged.
+
+`0023-ios-atomic-font-size.patch` adds
+`ghostty_surface_set_font_size_and_size`. It sets the new cell size and the
+new screen size before sending one resize to the IO thread, so the terminal
+grid only ever changes to its final size. A font change on its own resizes the
+grid at the old pixel size first, and the IO thread's 25ms resize coalescer
+can apply that intermediate grid, dropping alternate-screen rows the final
+size keeps. `verify-artifacts.py` requires the export in both archives.
+`wrapper-atomic-font-size.patch` is the matching Swift overlay for the pinned
+wrapper (`UITerminalView.setFontSize(_:size:)`). `integrate-native.py` applies
+it to the pinned `git archive` while staging, includes its bytes in the staged
+package digest, records its hash in `native-build.json`, and rejects artifacts
+whose ordered patch stack lacks the current 0022 and 0023 overlays.
 
 The app integration owner must link this local XCFramework, verify actual
 simulator/phone behavior and gather app evidence. This build does not perform

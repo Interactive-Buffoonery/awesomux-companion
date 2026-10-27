@@ -15,10 +15,13 @@ for archive in archives:
         raise SystemExit(f"Private presentation class found: {archive}")
     if b"CAMetalLayer" not in data or b"presentDrawable:" not in data:
         raise SystemExit(f"Public drawable presentation missing: {archive}")
+    if b"ghostty_surface_set_font_size_and_size" not in data:
+        raise SystemExit(f"Atomic font and size export missing: {archive}")
     arch = subprocess.check_output(["lipo", "-archs", str(archive)], text=True).strip()
     if arch != "arm64":
         raise SystemExit(f"Unexpected architectures: {arch}")
     results.append({"path": str(archive), "sha256": hashlib.sha256(data).hexdigest(),
                     "bytes": len(data), "architecture": arch,
-                    "private_class_absent": True, "public_presentation_present": True})
+                    "private_class_absent": True, "public_presentation_present": True,
+                    "atomic_font_size_export_present": True})
 print(json.dumps(results, indent=2))

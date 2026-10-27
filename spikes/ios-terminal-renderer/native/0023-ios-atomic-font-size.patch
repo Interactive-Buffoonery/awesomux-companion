@@ -1,0 +1,111 @@
+diff --git a/include/ghostty.h b/include/ghostty.h
+index d7114993d..5a4d2f71f 100644
+--- a/include/ghostty.h
++++ b/include/ghostty.h
+@@ -1222,6 +1222,10 @@ GHOSTTY_API void ghostty_surface_set_content_scale(ghostty_surface_t, double, do
+ GHOSTTY_API void ghostty_surface_set_focus(ghostty_surface_t, bool);
+ GHOSTTY_API void ghostty_surface_set_occlusion(ghostty_surface_t, bool);
+ GHOSTTY_API void ghostty_surface_set_size(ghostty_surface_t, uint32_t, uint32_t);
++GHOSTTY_API void ghostty_surface_set_font_size_and_size(ghostty_surface_t,
++                                                        float,
++                                                        uint32_t,
++                                                        uint32_t);
+ GHOSTTY_API ghostty_surface_size_s ghostty_surface_size(ghostty_surface_t);
+ GHOSTTY_API uint64_t ghostty_surface_foreground_pid(ghostty_surface_t);
+ GHOSTTY_API ghostty_string_s ghostty_surface_tty_name(ghostty_surface_t);
+diff --git a/src/Surface.zig b/src/Surface.zig
+index bebed51ea..3f8c7d3c0 100644
+--- a/src/Surface.zig
++++ b/src/Surface.zig
+@@ -2478,9 +2478,10 @@ fn setSelectionAndCopy(self: *Surface, sel: terminal.Selection) !void {
+ 
+ /// Change the cell size for the terminal grid. This can happen as
+ /// a result of changing the font size at runtime.
+-fn setCellSize(self: *Surface, size: rendererpkg.CellSize) !void {
++fn setCellSize(self: *Surface, size: rendererpkg.CellSize, screen: ?rendererpkg.ScreenSize) !void {
+     // Update our cell size within our size struct
+     self.size.cell = size;
++    if (screen) |v| self.size.screen = v;
+     self.balancePaddingIfNeeded();
+ 
+     // Notify the terminal
+@@ -2505,6 +2506,18 @@ fn setCellSize(self: *Surface, size: rendererpkg.CellSize) !void {
+ ///
+ /// This can only be called from the main thread.
+ pub fn setFontSize(self: *Surface, size: font.face.DesiredSize) !void {
++    try self.setFontSizeAndScreen(size, null);
++}
++
++/// Change the font size and screen size together so the IO thread only
++/// ever sees the final grid, never one with the new cells at the old size.
++///
++/// This can only be called from the main thread.
++pub fn setFontSizeAndScreen(
++    self: *Surface,
++    size: font.face.DesiredSize,
++    screen: ?rendererpkg.ScreenSize,
++) !void {
+     log.debug("set font size size={}", .{size.points});
+ 
+     // Update our font size so future changes work
+@@ -2521,7 +2534,7 @@ pub fn setFontSize(self: *Surface, size: font.face.DesiredSize) !void {
+     try self.setCellSize(.{
+         .width = font_grid.metrics.cell_width,
+         .height = font_grid.metrics.cell_height,
+-    });
++    }, screen);
+ 
+     // Notify our render thread of the new font stack. The renderer
+     // MUST accept the new font grid and deref the old.
+@@ -2538,6 +2551,12 @@ pub fn setFontSize(self: *Surface, size: font.face.DesiredSize) !void {
+     self.font_grid_key = font_grid_key;
+     self.font_metrics = font_grid.metrics;
+ 
++    if (screen != null) _ = self.renderer_thread.mailbox.push(
++        global.io(),
++        .{ .resize = self.size },
++        .forever,
++    );
++
+     // Schedule render which also drains our mailbox
+     self.queueRender() catch unreachable;
+ }
+diff --git a/src/apprt/embedded.zig b/src/apprt/embedded.zig
+index ec96e7ed2..8c2e2d7c2 100644
+--- a/src/apprt/embedded.zig
++++ b/src/apprt/embedded.zig
+@@ -1089,6 +1089,21 @@ pub const Surface = struct {
+         };
+     }
+ 
++    pub fn updateFontSizeAndSize(self: *Surface, points: f32, width: u32, height: u32) void {
++        if (std.math.isNan(points)) return;
++        var font_size = self.core_surface.font_size;
++        font_size.points = std.math.clamp(points, 1.0, 255.0);
++        self.core_surface.setFontSizeAndScreen(font_size, .{
++            .width = width,
++            .height = height,
++        }) catch |err| {
++            log.err("error in font size and size callback err={}", .{err});
++            return;
++        };
++        self.core_surface.font_size_adjusted = true;
++        self.size = .{ .width = width, .height = height };
++    }
++
+     pub fn colorSchemeCallback(self: *Surface, scheme: apprt.ColorScheme) void {
+         self.core_surface.colorSchemeCallback(scheme) catch |err| {
+             log.err("error setting color scheme err={}", .{err});
+@@ -2119,6 +2134,12 @@ pub const CAPI = struct {
+         surface.updateSize(w, h);
+     }
+ 
++    /// Change the font size and pixel size in one step, so the terminal
++    /// grid is resized once at its final size.
++    export fn ghostty_surface_set_font_size_and_size(surface: *Surface, points: f32, w: u32, h: u32) void {
++        surface.updateFontSizeAndSize(points, w, h);
++    }
++
+     /// Return the size information a surface has.
+     export fn ghostty_surface_size(surface: *Surface) SurfaceSize {
+         const grid_size = surface.core_surface.size.grid();

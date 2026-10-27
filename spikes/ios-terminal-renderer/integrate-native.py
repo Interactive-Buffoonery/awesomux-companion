@@ -5,12 +5,14 @@ import argparse
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 
 root = Path(__file__).resolve().parent
 sys.path.insert(0, str(root / "native"))
@@ -69,6 +71,10 @@ patches = {str(p.relative_to(package_source)): hashlib.sha256(p.read_bytes()).he
            for p in sorted((package_source / "Patches/ghostty").glob("*")) if p.is_file()}
 if patches != recipe["orderedPatchHashes"] or not patches:
     raise SystemExit("Ordered native patch stack no longer matches receipt")
+overlays = {f"Patches/ghostty/{name}": hashlib.sha256((root / "native" / name).read_bytes()).hexdigest()
+            for name in ["0022-ios-public-metal-layer.patch", "0023-ios-atomic-font-size.patch"]}
+if any(patches.get(path) != expected for path, expected in overlays.items()):
+    raise SystemExit("Native artifact was built without the current native overlays")
 if (recipe["targets"] != ["aarch64-ios", "aarch64-ios-simulator"]
         or recipe["simulatorCPU"] != "apple_a17"
         or provenance["compiler"]["version"] != "0.16.0"):
@@ -80,7 +86,8 @@ for relative, expected in provenance["sourceHashes"].items():
         raise SystemExit(f"Native source no longer matches its build receipt: {relative}")
 subprocess.run([sys.executable, str(root / "native/verify-artifacts.py"), str(artifact)], check=True)
 archive = subprocess.check_output(["git", "-C", str(package_source), "archive", revision])
-digest = hashlib.sha256(archive + receipt_path.read_bytes()).hexdigest()[:16]
+wrapper_patch = (root / "native/wrapper-atomic-font-size.patch").read_bytes()
+digest = hashlib.sha256(archive + wrapper_patch + receipt_path.read_bytes()).hexdigest()[:16]
 destination = output / f"LocalGhostty-{digest}"
 expected_files = {}
 expected_symlinks = {}
@@ -98,12 +105,24 @@ manifest_text, count = re.subn(
 if count != 1:
     raise SystemExit("Expected exactly one downloaded binary target")
 expected_files["Package.swift"] = manifest_text.encode()
+with tempfile.TemporaryDirectory() as scratch:
+    scratch = Path(scratch)
+    for relative, data in expected_files.items():
+        (scratch / relative).parent.mkdir(parents=True, exist_ok=True)
+        (scratch / relative).write_bytes(data)
+    subprocess.run(["git", "apply", "-"], input=wrapper_patch, cwd=scratch, check=True,
+                   env={**os.environ, "GIT_CEILING_DIRECTORIES": str(scratch.parent)})
+    patched = {str(p.relative_to(scratch)): p.read_bytes() for p in scratch.rglob("*") if p.is_file()}
+if set(patched) != set(expected_files) or patched == expected_files:
+    raise SystemExit("Wrapper overlay did not apply to the pinned wrapper")
+expected_files = patched
 framework_files = {str(p.relative_to(artifact)): p for p in artifact.rglob("*") if p.is_file()}
 if not destination.exists() and not args.validate_only:
     destination.mkdir(parents=True)
     with tarfile.open(fileobj=io.BytesIO(archive)) as source:
         source.extractall(destination, filter="data")
-    (destination / "Package.swift").write_bytes(expected_files["Package.swift"])
+    for relative, data in expected_files.items():
+        (destination / relative).write_bytes(data)
     shutil.copytree(artifact, destination / "GhosttyKit.xcframework")
 for relative, expected in expected_files.items():
     staged = destination / relative
@@ -124,6 +143,8 @@ receipt = {
     "packageRevision": revision,
     "renderer": "GhosttyPublicMetalLayer / CAMetalLayer",
     "patchSHA256": provenance["patchSHA256"],
+    "nativeOverlays": overlays,
+    "wrapperPatchSHA256": hashlib.sha256(wrapper_patch).hexdigest(),
     "archives": archive_hashes,
     "provenance": provenance,
 }

@@ -31,13 +31,16 @@ class NativeIntegrationTests(unittest.TestCase):
                          'ios-arm64/Headers/ghostty.h', 'ios-arm64-simulator/Headers/ghostty.h']:
             path = self.artifact / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b'CAMetalLayer presentDrawable:')
+            path.write_bytes(b'CAMetalLayer presentDrawable: ghostty_surface_set_font_size_and_size')
         driver = self.package / 'Script/build-ghostty.sh'
         driver.parent.mkdir(parents=True)
         driver.write_text('prepared driver')
         overlay = self.package / 'Patches/ghostty/0022-ios-public-metal-layer.patch'
         overlay.parent.mkdir(parents=True)
         overlay.write_bytes((SPIKE / 'native/0022-ios-public-metal-layer.patch').read_bytes())
+        self.atomic = self.package / 'Patches/ghostty/0023-ios-atomic-font-size.patch'
+        self.atomic.write_bytes((SPIKE / 'native/0023-ios-atomic-font-size.patch').read_bytes())
+        self.wrapper_applies = True
         self.source = self.root / 'source.zig'
         self.source.write_text('source')
         compiler = self.root / 'zig'
@@ -54,7 +57,8 @@ class NativeIntegrationTests(unittest.TestCase):
                 'receiptScriptSHA256': digest(SPIKE / 'native/build-receipt.py'),
                 'frameworkIdentityScriptSHA256': digest(SPIKE / 'native/framework_identity.py'),
                 'driverSHA256': digest(driver),
-                'orderedPatchHashes': {str(overlay.relative_to(self.package)): digest(overlay)},
+                'orderedPatchHashes': {str(p.relative_to(self.package)): digest(p)
+                                       for p in [overlay, self.atomic]},
                 'targets': ['aarch64-ios', 'aarch64-ios-simulator'], 'simulatorCPU': 'apple_a17',
             },
             'archiveHashes': {str(p.relative_to(self.artifact)): digest(p)
@@ -95,6 +99,12 @@ class NativeIntegrationTests(unittest.TestCase):
                 return 'arm64'
             self.fail(f'Unexpected command: {command}')
         def run(command, **kwargs):
+            if command[0] == 'git':
+                self.assertEqual(command, ['git', 'apply', '-'])
+                self.assertEqual(kwargs['input'], (SPIKE / 'native/wrapper-atomic-font-size.patch').read_bytes())
+                if self.wrapper_applies:
+                    (Path(kwargs['cwd']) / 'Sources/Wrapper.swift').write_bytes(b'wrapper with atomic font size')
+                return
             self.assertEqual(Path(command[1]), SPIKE / 'native/verify-artifacts.py')
             with patch.object(sys, 'argv', command[1:]):
                 runpy.run_path(command[1], run_name='__main__')
@@ -109,6 +119,11 @@ class NativeIntegrationTests(unittest.TestCase):
         self.integrate(validate=True)
         self.assertEqual(before, (package / 'GhosttyKit.xcframework/ios-arm64/libghostty.a').stat().st_mtime_ns)
         self.assertNotIn('https:', (package / 'Package.swift').read_text())
+        self.assertEqual((package / 'Sources/Wrapper.swift').read_bytes(), b'wrapper with atomic font size')
+        receipt = json.loads((self.output / 'native-build.json').read_text())
+        self.assertEqual(receipt['wrapperPatchSHA256'], digest(SPIKE / 'native/wrapper-atomic-font-size.patch'))
+        self.assertEqual(receipt['nativeOverlays']['Patches/ghostty/0023-ios-atomic-font-size.patch'],
+                         digest(SPIKE / 'native/0023-ios-atomic-font-size.patch'))
         self.assertEqual(json.loads((self.output / 'native-build.json').read_text())['provenance'], self.provenance)
 
     def test_reject_staged_tampering(self):
@@ -176,6 +191,28 @@ class NativeIntegrationTests(unittest.TestCase):
         (package / 'GhosttyKit.xcframework/ios-arm64/Headers/injected.h').write_text('injected')
         with self.assertRaisesRegex(SystemExit, 'Local XCFramework file set or hashes'):
             self.integrate(validate=True)
+
+    def test_reject_artifact_built_without_atomic_font_size_overlay(self):
+        self.atomic.rename(self.root / 'saved-atomic.patch')
+        self.provenance['recipe']['orderedPatchHashes'].pop(str(self.atomic.relative_to(self.package)))
+        self.write_receipt()
+        with self.assertRaisesRegex(SystemExit, 'without the current native overlays'):
+            self.integrate()
+        self.assertFalse(self.output.exists())
+
+    def test_reject_wrapper_overlay_that_does_not_apply(self):
+        self.wrapper_applies = False
+        with self.assertRaisesRegex(SystemExit, 'Wrapper overlay did not apply'):
+            self.integrate()
+
+    def test_reject_archive_without_atomic_font_size_export(self):
+        archive = self.artifact / 'ios-arm64/libghostty.a'
+        archive.write_bytes(b'CAMetalLayer presentDrawable:')
+        self.provenance['archiveHashes']['ios-arm64/libghostty.a'] = digest(archive)
+        self.provenance['frameworkHashes']['ios-arm64/libghostty.a'] = digest(archive)
+        self.write_receipt()
+        with self.assertRaisesRegex(SystemExit, 'Atomic font and size export missing'):
+            self.integrate()
 
     def test_reject_legacy_receipt(self):
         self.provenance['schemaVersion'] = 1

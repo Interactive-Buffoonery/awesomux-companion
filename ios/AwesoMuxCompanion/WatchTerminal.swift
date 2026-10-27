@@ -163,11 +163,14 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         }
         // The engine first reports its default pre-layout size. Only a report
         // matching the laid-out view is the grid the phone actually shows.
-        let bounds = surface.view.bounds.size, scale = surface.view.traitCollection.displayScale
+        // Ghostty sizes pixels with the screen's native scale, which differs from displayScale in zoomed modes.
+        let bounds = surface.view.bounds.size
+        let scale = surface.view.window?.screen.nativeScale ?? surface.view.traitCollection.displayScale
         guard value.columns > 0, value.rows > 0, scale > 0,
               abs(CGFloat(value.widthPixels) - bounds.width * scale) <= scale,
               abs(CGFloat(value.heightPixels) - bounds.height * scale) <= scale else { return }
-        let grid = CompanionTerminalStream.Grid(rows: Int(value.rows), cols: Int(value.columns))
+        // The Mac rejects grids outside 1...1000 and ends the stream.
+        let grid = CompanionTerminalStream.Grid(rows: min(Int(value.rows), 1000), cols: min(Int(value.columns), 1000))
         if measuredGrid != grid { measuredGrid = grid }
         guard !isReady else { return }
         deadline?.cancel()

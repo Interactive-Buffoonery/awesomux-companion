@@ -320,9 +320,9 @@ private struct TestHost {
     let window: UIWindow
     weak var previous: UIWindow?
     var pane = PaneHeight()
-    nonmutating var height: CGFloat {
+    var height: CGFloat {
         get { pane.value }
-        set { pane.value = newValue }
+        nonmutating set { pane.value = newValue }
     }
     func close() {
         window.isHidden = true

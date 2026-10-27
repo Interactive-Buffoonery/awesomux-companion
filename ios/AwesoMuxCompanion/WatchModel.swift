@@ -94,6 +94,12 @@ final class WatchModel {
         if input.keyboardRequested { opening = .watch }
     }
 
+    // An input opening waits for the first measured grid so the Mac never resizes to a placeholder.
+    func updatePhoneGrid(_ grid: CompanionTerminalStream.Grid) {
+        input.updatePhoneGrid(grid)
+        if status == .live { applyOpening() }
+    }
+
     func reconnect() {
         cancelAndClear(reason: "manual_reconnect")
         diagnosticWatchID = UUID()
@@ -253,7 +259,7 @@ final class WatchModel {
                 let client = try makeClient(target.record, route)
                 let opened = try await WatchDiagnostics.$current.withValue(diagnostic) {
                     try await client.openWatch(connectionID: target.record.connectionID,
-                        paneID: target.paneID, targetVersion: target.targetVersion, preferredGrid: input.preferredGrid,
+                        paneID: target.paneID, targetVersion: target.targetVersion, preferredGrid: input.preferredGrid ?? .init(rows: 24, cols: 80),
                         canSend: { [weak self] in self?.isCurrent(epoch) ?? false })
                 }
                 return (opened, route)

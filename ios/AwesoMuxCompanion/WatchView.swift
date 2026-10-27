@@ -49,9 +49,12 @@ struct WatchView: View {
             }
             // The Mac pane follows the phone's grid while the phone drives, as tmux does.
             .onChange(of: terminal.measuredGrid) { _, grid in
-                if let grid { model.input.updatePhoneGrid(grid) }
+                if let grid { model.updatePhoneGrid(grid) }
             }
-            .onChange(of: fontSize, initial: true) { _, size in terminal.setFontSize(Float(size)) }
+            .onChange(of: fontSize, initial: true) { _, size in
+                terminal.setFontSize(Float(size))
+                fontSize = Double(terminal.fontSize)
+            }
             .background(WatchKeyboard(input: model.input, terminal: terminal, isShown: $keyboardShown)
                 .frame(width: 1, height: 1))
             .overlay(alignment: .top) { notices }
@@ -206,6 +209,7 @@ struct WatchView: View {
                 Button("Smaller", systemImage: "minus.magnifyingglass") { fontSize -= 1 }
                     .disabled(Float(fontSize) <= WatchTerminal.fontSizes.lowerBound)
             }
+            .menuActionDismissBehavior(.disabled)
             Section("History") {
                 Button("Earlier", systemImage: "chevron.up") { terminal.scrollHistory("scroll_page_up") }
                 Button("Later", systemImage: "chevron.down") { terminal.scrollHistory("scroll_page_down") }

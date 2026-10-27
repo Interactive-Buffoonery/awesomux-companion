@@ -33,23 +33,50 @@ final class WatchInputTests: XCTestCase {
         let (input, wire) = fixture()
         input.preferredGrid = .init(rows: 40, cols: 42)
         input.ready(opening: .input)
+        input.updatePhoneGrid(.init(rows: 30, cols: 42))
         input.updatePhoneGrid(.init(rows: 24, cols: 42))
-        await drain(wire, count: 2)
-        XCTAssertEqual(wire.frames.map(\.frame), [
-            .claim(.init(grid: .init(rows: 40, cols: 42))), .claim(.init(grid: .init(rows: 24, cols: 42)))])
+        await drain(wire, count: 1)
+        await Task.yield()
+        XCTAssertEqual(wire.frames.map(\.frame), [.claim(.init(grid: .init(rows: 24, cols: 42)))])
         input.leader = "mac"
         input.updatePhoneGrid(.init(rows: 30, cols: 42))
-        await drain(wire, count: 3)
+        await drain(wire, count: 2)
         XCTAssertEqual(wire.frames.last?.frame, .grid(.init(rows: 30, cols: 42)))
         input.updatePhoneGrid(.init(rows: 24, cols: 42))
-        await drain(wire, count: 4)
+        await drain(wire, count: 3)
         input.updatePhoneGrid(.init(rows: 24, cols: 42))
         await Task.yield()
-        XCTAssertEqual(wire.frames.count, 4)
+        XCTAssertEqual(wire.frames.count, 3)
         input.disconnect()
         input.updatePhoneGrid(.init(rows: 40, cols: 42))
         await Task.yield()
-        XCTAssertEqual(wire.frames.count, 4)
+        XCTAssertEqual(wire.frames.count, 3)
+    }
+
+    func testInputOpeningWaitsForTheMeasuredGrid() async {
+        let (input, wire) = fixture()
+        input.ready(opening: .input)
+        await Task.yield()
+        XCTAssertTrue(wire.frames.isEmpty)
+        XCTAssertFalse(input.keyboardRequested)
+        input.updatePhoneGrid(.init(rows: 30, cols: 42))
+        input.openIfReady(.input)
+        await drain(wire, count: 1)
+        XCTAssertEqual(wire.frames.map(\.frame), [.claim(.init(grid: .init(rows: 30, cols: 42)))])
+    }
+
+    func testDrivingPhoneResizesTheMacWithTheKeyboardDown() async {
+        let (input, wire) = fixture(leader: "phone")
+        input.ready()
+        await Task.yield()
+        XCTAssertTrue(wire.frames.isEmpty)
+        input.updatePhoneGrid(.init(rows: 30, cols: 42))
+        await drain(wire, count: 1)
+        XCTAssertEqual(wire.frames.map(\.frame), [.claim(.init(grid: .init(rows: 30, cols: 42)))])
+        input.leader = "mac"
+        input.updatePhoneGrid(.init(rows: 20, cols: 42))
+        await Task.yield(); await Task.yield()
+        XCTAssertEqual(wire.frames.count, 1)
     }
 
     func testRevokedInputStopsQueuedAndManualWrites() async {

@@ -115,6 +115,12 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         // until completion so repeated resets cannot accumulate blocked workers.
     }
 
+    /// Ghostty scrollback actions, such as `scroll_page_up`.
+    func scrollHistory(_ action: String) {
+        guard checkAuthority(), isReady else { return }
+        _ = surface?.view.surface?.performBindingAction(action)
+    }
+
     func phoneGrid(for size: CGSize) -> CompanionTerminalStream.Grid {
         var cell = WatchDrawableBudget.cellSize(fontSize: WatchDrawableBudget.maximumFontSize)
         if let surface, let viewport = surface.viewport, viewport.columns > 0, viewport.rows > 0 {
@@ -454,7 +460,7 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
     }
 
     func applySize() {
-        view.frame.size = size
+        view.frame = CGRect(origin: .zero, size: size)
         view.setNeedsLayout()
         view.layoutIfNeeded()
     }
@@ -561,31 +567,19 @@ fileprivate final class WatchReadOnlyTerminalView: UITerminalView {
 
 struct WatchTerminalView: View {
     @ObservedObject var terminal: WatchTerminal
-    @State private var zoom: Double
-
-    init(terminal: WatchTerminal, initialZoom: Double = 1) {
-        self.terminal = terminal
-        _zoom = State(initialValue: min(2, max(1, initialZoom)))
-    }
+    var zoom: Double = 1
 
     var body: some View {
-        VStack(spacing: 4) {
+        ZStack {
             if let surface = terminal.surface, terminal.canRender() {
+                // Bottom-anchored so the prompt stays in view when the keyboard shortens the pane.
                 ScrollView([.horizontal, .vertical]) {
                     WatchNativeCanvas(surface: surface)
                         .scaleEffect(zoom, anchor: .topLeading)
                         .frame(width: surface.size.width * zoom,
                                height: surface.size.height * zoom, alignment: .topLeading)
                 }
-                Stepper("Terminal display: \(Int(zoom * 100))%", value: $zoom, in: 1...2, step: 0.25)
-                    .font(.caption)
-                    .accessibilityHint("Enlarges the display while preserving the Mac terminal grid.")
-                HStack {
-                    historyButton("Earlier", action: "scroll_page_up")
-                    historyButton("Later", action: "scroll_page_down")
-                    historyButton("Latest", action: "scroll_to_bottom")
-                }
-                .font(.caption)
+                .defaultScrollAnchor(.bottomLeading)
             }
         }
         .overlay(alignment: .topLeading) {
@@ -594,15 +588,6 @@ struct WatchTerminalView: View {
                     .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
             }
         }
-    }
-
-    private func historyButton(_ title: String, action: String) -> some View {
-        Button(title) {
-            guard terminal.checkAuthority(), terminal.isReady else { return }
-            _ = terminal.surface?.view.surface?.performBindingAction(action)
-        }
-        .accessibilityLabel("\(title) terminal history")
-        .disabled(!terminal.isReady)
     }
 }
 
@@ -616,16 +601,24 @@ private struct WatchNativeCanvas: View {
     }
 }
 
+/// SwiftUI sizes only the container; the terminal view's frame is ours alone, so a
+/// keyboard relayout can never leave the two disagreeing about its geometry.
 private struct WatchNativeRepresentable: UIViewRepresentable {
     let surface: WatchNativeSurface
-    func makeUIView(context: Context) -> WatchReadOnlyTerminalView { surface.view }
-    func updateUIView(_ uiView: WatchReadOnlyTerminalView, context: Context) {
-        guard uiView.authority() else { return }
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        container.addSubview(surface.view)
+        return container
+    }
+    func updateUIView(_ container: UIView, context: Context) {
+        guard surface.view.superview === container, surface.view.authority() else { return }
         surface.applySize()
     }
-    static func dismantleUIView(_ uiView: WatchReadOnlyTerminalView, coordinator: ()) {
-        uiView.setSurfaceVisible(false)
-        uiView.controller = nil
+    static func dismantleUIView(_ container: UIView, coordinator: ()) {
+        for case let view as WatchReadOnlyTerminalView in container.subviews {
+            view.setSurfaceVisible(false)
+            view.controller = nil
+        }
     }
 }
 

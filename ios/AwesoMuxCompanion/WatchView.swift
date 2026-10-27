@@ -15,6 +15,7 @@ struct WatchView: View {
     @State private var model: WatchModel
     @State private var isVisible = false
     @State private var keyboardShown = false
+    @State private var zoom = 1.0
     @State private var terminalSize = CGSize.zero
     @State private var securityObserver: UUID?
 
@@ -44,7 +45,7 @@ struct WatchView: View {
     }
 
     var body: some View {
-        WatchTerminalView(terminal: terminal)
+        WatchTerminalView(terminal: terminal, zoom: zoom)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityHint("The Mac snapshot preserves terminal cells, but earlier command history and line wraps are unavailable.")
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
@@ -188,11 +189,37 @@ struct WatchView: View {
                 .buttonStyle(BarButtonStyle(filled: false))
                 .disabled(!model.input.canType)
             }
+            if terminal.isReady { optionsMenu }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Cat.crust)
         .overlay(alignment: .top) { Rectangle().fill(Cat.card).frame(height: 1) }
+    }
+
+    /// Display size and Mac scrollback, kept out of the way of the terminal.
+    private var optionsMenu: some View {
+        Menu {
+            Section("Text size \(Int(zoom * 100))%") {
+                Button("Larger", systemImage: "plus.magnifyingglass") { zoom = min(2, zoom + 0.25) }
+                    .disabled(zoom >= 2)
+                Button("Smaller", systemImage: "minus.magnifyingglass") { zoom = max(1, zoom - 0.25) }
+                    .disabled(zoom <= 1)
+            }
+            Section("History") {
+                Button("Earlier", systemImage: "chevron.up") { terminal.scrollHistory("scroll_page_up") }
+                Button("Later", systemImage: "chevron.down") { terminal.scrollHistory("scroll_page_down") }
+                Button("Latest", systemImage: "arrow.down.to.line") { terminal.scrollHistory("scroll_to_bottom") }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Cat.text)
+                .frame(height: 15)
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(Cat.card, in: RoundedRectangle(cornerRadius: 9))
+                .accessibilityLabel("Terminal options")
+        }
     }
 
     /// Short-lived lines over the top of the terminal instead of captions under it.
@@ -254,6 +281,8 @@ private struct ModeChip: View {
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background(driving ? Cat.accent : .clear, in: RoundedRectangle(cornerRadius: 4))
             .overlay { if !driving { RoundedRectangle(cornerRadius: 4).stroke(Cat.running, lineWidth: 1) } }
+            .lineLimit(1)
+            .fixedSize()
             .accessibilityLabel(driving ? "You have control" : "Watching")
     }
 }

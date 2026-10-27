@@ -138,7 +138,8 @@ final class HostsTests: XCTestCase {
         XCTAssertNil(a.message)
         XCTAssertEqual(shared, [macA], "B going offline never marks the widget offline")
 
-        XCTAssertFalse(await hosts.refreshAll(), "Background refresh reports B's failure")
+        let refreshed = await hosts.refreshAll()
+        XCTAssertFalse(refreshed, "Background refresh reports B's failure")
         XCTAssertTrue(a.reachable, "and still reads A")
     }
 

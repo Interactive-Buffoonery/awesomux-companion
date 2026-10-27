@@ -162,13 +162,11 @@ final class Hosts {
     /// The selected Mac every 5 s with its panes; the others alerts and agents only, every 30 s. The caller runs this
     /// while the scene is active and restarts it when the selection or the list changes.
     func poll() async {
-        let selected = selected
-        await withTaskGroup(of: Void.self) { group in
-            for store in stores {
-                group.addTask { @MainActor in
-                    if store === selected { await store.poll() } else { await store.pollAttention() }
-                }
-            }
+        let focused = stores.filter { $0 === selected }
+        let others = stores.filter { $0 !== selected }
+        await withDiscardingTaskGroup { group in
+            for store in focused { group.addTask { await store.poll() } }
+            for store in others { group.addTask { await store.pollAttention() } }
         }
     }
 
@@ -179,14 +177,12 @@ final class Hosts {
 
     /// Background refresh reads every Mac, each with its own connection; one Mac failing doesn't stop the others.
     func refreshAll() async -> Bool {
-        await withTaskGroup(of: Bool.self) { group in
-            for store in stores {
-                group.addTask { @MainActor in
-                    await store.refresh()
-                    return store.reachable
-                }
-            }
-            return await group.reduce(!stores.isEmpty) { $0 && $1 }
+        let stores = stores
+        return await withTaskGroup(of: Bool.self) { group in
+            for store in stores { group.addTask { await store.refresh(); return await store.reachable } }
+            var reachable = !stores.isEmpty
+            for await ok in group { reachable = reachable && ok }
+            return reachable
         }
     }
 
@@ -336,9 +332,9 @@ struct HostRow: View {
             }
             return String(localized: "offline · seen \(updatedAt.formatted(.relative(presentation: .named)))")
         }
-        let route = route.transport.title.lowercased()
-        guard case .loaded(let workspaces) = store.panes.state else { return route }
+        let transport = route.transport.title.lowercased()
+        guard case .loaded(let workspaces) = store.panes.state else { return transport }
         let panes = workspaces.reduce(0) { $0 + $1.panes.count }
-        return String(localized: "\(route) · \(panes) panes")
+        return String(localized: "\(transport) · \(panes) panes")
     }
 }

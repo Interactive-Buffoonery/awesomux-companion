@@ -82,7 +82,7 @@ struct SystemPairingKeychain: PairingKeychain {
 
 /// One Keychain item per Mac, keyed by its pinned fingerprint. Earlier builds kept a single item under `mac`;
 /// loading copies it to its Mac's item and deletes it only once the copy reads back unchanged.
-/// The single-host app opens the newest pairing; any older one is superseded and removed before it on unpair.
+/// Which stored pairings are active hosts is `HostRegistry`'s decision, not this store's.
 struct PairingStore: Sendable {
     static let system = PairingStore(keychain: SystemPairingKeychain())
     static let legacyAccount = "mac"
@@ -96,7 +96,7 @@ struct PairingStore: Sendable {
         return "mac:" + macFingerprint
     }
 
-    /// The newest pairing, for the single-host app.
+    /// The newest pairing: the one single-host builds opened.
     func load() throws -> PairingRecord? {
         try loadAll().last
     }
@@ -144,22 +144,12 @@ struct PairingStore: Sendable {
         try keychain.write(JSONEncoder().encode(record), account: account)
     }
 
-    func replacementContext(current: PairingRecord?, now: Date = .now) throws
+    /// The stored pairing with this Mac, which a new pairing overwrites, and a pairedAt that stays newer than it
+    /// (and than any legacy copy of it) even if the clock moved back. Unreadable items with other Macs don't block.
+    func replacementContext(for macFingerprint: String, now: Date = .now) throws
         -> (previous: PairingRecord?, pairedAt: Date) {
-        let previous = try current ?? loadAll(allowUnusable: true).last
+        let previous = try loadAll(allowUnusable: true).last { $0.macFingerprint == macFingerprint }
         return (previous, max(now, previous?.pairedAt.addingTimeInterval(1) ?? .distantPast))
-    }
-
-    /// Saves `next`, which as the newest pairing is the one that opens from then on, and throws having changed
-    /// nothing if it can't. Returns true once `previous` is gone, so its identity can be deleted; otherwise it
-    /// stays whole but superseded until unpairing removes it.
-    func replace(_ previous: PairingRecord?, with next: PairingRecord) throws -> Bool {
-        try save(next)
-        guard let previous else { return true }
-        // The save overwrote it; a leftover legacy copy is older, so it never opens and clearing removes it first.
-        if previous.macFingerprint == next.macFingerprint { return true }
-        // ponytail: pairing another Mac still replaces the previous one; multi-host adds it alongside instead.
-        return (try? clear(macFingerprint: previous.macFingerprint)) != nil
     }
 
     /// Removes only this Mac's pairing, including a legacy item for it that hasn't been copied yet.
@@ -173,19 +163,6 @@ struct PairingStore: Sendable {
             accounts.insert(Self.legacyAccount, at: legacyOpens ? accounts.count : 0)
         }
         for account in accounts { try keychain.delete(account: account) }
-    }
-
-    /// Unpairing in the single-host app: removes every pairing, `current` last, so a failure leaves `current` the
-    /// one that opens. Each identity is deleted only after its pairing is gone.
-    func clearAll(current: PairingRecord, deletingIdentity deleteIdentity: (String) throws -> Void) throws {
-        let others: [PairingRecord]
-        do { others = try loadAll() } catch PairingStoreFailure.invalidItem { others = [] }
-        for other in others where other.macFingerprint != current.macFingerprint {
-            try clear(macFingerprint: other.macFingerprint)
-            try? deleteIdentity(other.identityTag)
-        }
-        try clear(macFingerprint: current.macFingerprint)
-        try deleteIdentity(current.identityTag)
     }
 
     private func migrate(_ legacy: PairingRecord, to account: String) throws {

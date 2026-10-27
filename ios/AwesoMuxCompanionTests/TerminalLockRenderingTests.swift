@@ -14,10 +14,11 @@ final class TerminalLockRenderingTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let model = TerminalLockModel(defaults: defaults, authenticator: RenderingAuthenticator())
         model.becomeActive()
-        let store = CompanionStore(defaults: defaults, loadPairing: { nil }, liveActivity: nil,
-                                   writeShared: { _ in }, clearShared: {})
+        let hosts = Hosts(defaults: defaults, pairingStore: PairingStore(keychain: KeychainFixture())) { load in
+            CompanionStore(defaults: defaults, loadPairing: load, liveActivity: nil, writeShared: { _ in }, clearShared: {})
+        }
         let host = UIHostingController(rootView: NavigationStack {
-            SettingsView(store: store)
+            AppSettingsView(hosts: hosts)
         }.environment(model))
         let window = UIWindow(windowScene: scene)
         window.frame = scene.effectiveGeometry.coordinateSpace.bounds

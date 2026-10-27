@@ -139,7 +139,7 @@ struct WatchView: View {
     }
 
     /// The pairing `connect()` uses, so the header names the Mac that receives typing.
-    private var host: String { TerminalDestination.hostName(store.record?.macName) }
+    private var host: String { TerminalDestination.hostName(target.host.isEmpty ? store.record?.macName : target.host) }
 
     private var pasteDeliveryText: String? { model.input.pasteDelivery.map { "Paste: \($0.rawValue)" } }
 
@@ -272,7 +272,7 @@ struct WatchView: View {
     private func connect() {
         updateLifecycle()
         guard canWatch, isVisible, terminalSize.width > 0, terminalSize.height > 0,
-              let record = store.record else { return }
+              let record = store.record, record.macFingerprint == target.macFingerprint else { return }
         model.start(record: record, paneID: target.paneID, targetVersion: target.targetVersion)
     }
 }

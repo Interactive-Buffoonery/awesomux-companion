@@ -2,9 +2,13 @@ import SwiftUI
 import UIKit
 import VisionKit
 
-/// Welcome and Pair Again: scan the Mac's code or paste its link, then confirm the words.
+/// Welcome, adding a Mac, and Pair Again: scan the Mac's code or paste its link, then confirm the words.
+/// A store with a pairing only pairs that same Mac again; a store without one only adds a Mac not yet paired.
 struct PairingView: View {
     let store: CompanionStore
+    /// Adding a Mac while others are paired.
+    var canCancel = false
+    var reminders: [String] = []
     @State private var scanning = false
 
     var body: some View {
@@ -23,10 +27,10 @@ struct PairingView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(Cat.page)
-            .navigationTitle("Pair iPhone")
+            .navigationTitle(store.record == nil ? String(localized: "Pair iPhone") : String(localized: "Pair Again"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if store.record != nil || store.pairingStep != .idle {
+                if canCancel || store.record != nil || store.pairingStep != .idle {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") { store.cancelPairing(); store.showingPairing = false }
                     }
@@ -50,11 +54,11 @@ struct PairingView: View {
                 .background(Cat.card, in: RoundedRectangle(cornerRadius: 24))
                 .accessibilityHidden(true)
                 .padding(.top, 24)
-            Text("Connect to your Mac")
-                .font(.title2.weight(.semibold)).foregroundStyle(Cat.text)
+            Text(store.record.map { String(localized: "Pair “\($0.macName)” again") } ?? String(localized: "Connect to your Mac"))
+                .font(.title2.weight(.semibold)).foregroundStyle(Cat.text).multilineTextAlignment(.center)
             Text("Open awesoMux on your Mac, go to Settings → awesoMux Companion, and choose Pair iPhone.")
                 .font(.body).foregroundStyle(Cat.subtext0).multilineTextAlignment(.center)
-            if let message = store.unpairMessage {
+            ForEach(reminders, id: \.self) { message in
                 Label(message, systemImage: "info.circle")
                     .font(.subheadline).foregroundStyle(Cat.text)
                     .accessibilityIdentifier("unpair-message")

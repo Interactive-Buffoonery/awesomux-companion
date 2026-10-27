@@ -25,25 +25,27 @@ final class SessionSnapshotCacheTests: XCTestCase {
         }
     }
 
-    func testChangedConnectionOrFingerprintCannotRestoreSameNamedMac() async {
-        await withDefaults { defaults in
-            let record = pairing()
-            let cache = SessionSnapshotCache(defaults: defaults)
-            for replacement in [pairing(connectionID: UUID()), pairing(fingerprint: "another-pin")] {
-                cache.save(snapshot(), for: record)
-                XCTAssertNil(cache.restore(for: replacement))
-                XCTAssertNil(cache.restore(for: record), "A mismatch must discard the old entry")
-            }
-        }
-    }
-
-    func testMissingPairingDiscardsCache() async {
+    func testChangedConnectionCannotRestoreSameNamedMac() async {
         await withDefaults { defaults in
             let record = pairing()
             let cache = SessionSnapshotCache(defaults: defaults)
             cache.save(snapshot(), for: record)
+            XCTAssertNil(cache.restore(for: pairing(connectionID: UUID())))
+            XCTAssertNil(cache.restore(for: record), "A mismatch must discard the old entry")
+        }
+    }
+
+    func testEachMacKeepsItsOwnCache() async {
+        await withDefaults { defaults in
+            let a = pairing()
+            let b = pairing(connectionID: UUID(), fingerprint: "another-pin")
+            let cache = SessionSnapshotCache(defaults: defaults)
+            cache.save(snapshot(), for: a)
+            XCTAssertNil(cache.restore(for: b))
             XCTAssertNil(cache.restore(for: nil))
-            XCTAssertNil(cache.restore(for: record))
+            cache.save(snapshot(), for: b)
+            cache.clear(for: b)
+            XCTAssertEqual(cache.restore(for: a), snapshot(), "Another Mac, or no Mac, never discards this one")
         }
     }
 

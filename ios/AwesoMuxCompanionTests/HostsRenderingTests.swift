@@ -9,7 +9,8 @@ final class HostsRenderingTests: XCTestCase {
     func testHostsScreen() async throws {
         for (name, longNames, size) in [("b2-hosts", false, DynamicTypeSize.large),
                                         ("b2-hosts-long-names", true, .large),
-                                        ("b2-hosts-dynamic-type", false, .accessibility3)] {
+                                        ("b2-hosts-dynamic-type", false, .accessibility3),
+                                        ("b2-hosts-long-dynamic-type", true, .accessibility3)] {
             try await render(name, longNames: longNames, size: size)
         }
     }

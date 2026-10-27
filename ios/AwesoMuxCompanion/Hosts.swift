@@ -10,7 +10,8 @@ struct HostRegistry {
     static let remindersKey = "unpairReminders.v1"
     static let legacyUnpairMessageKey = "unpairMessage"
     static let scopedKeys = [SessionSnapshotCache.key, AttentionTracker.key,
-                             CompanionStore.Keys.previewSuppression, CompanionStore.Keys.revokedConnectionID]
+                             CompanionStore.Keys.previewSuppression, CompanionStore.Keys.revokedConnectionID,
+                             CompanionStore.Keys.removalPending]
 
     static func hostKey(_ key: String, _ macFingerprint: String) -> String { "\(key).\(macFingerprint)" }
     static func hostKeys(_ macFingerprint: String) -> [String] { scopedKeys.map { hostKey($0, macFingerprint) } }
@@ -52,9 +53,16 @@ struct HostRegistry {
     private func migrate(newest: PairingRecord?) {
         if let newest {
             for key in Self.scopedKeys {
-                if let value = defaults.object(forKey: key) {
-                    defaults.set(value, forKey: Self.hostKey(key, newest.macFingerprint))
+                guard let value = defaults.object(forKey: key) else { continue }
+                let matches = switch key {
+                case SessionSnapshotCache.key: SessionSnapshotCache.legacyValue(value, matches: newest)
+                case CompanionStore.Keys.previewSuppression: CompanionStore.legacyPreviewValue(value, matches: newest)
+                case CompanionStore.Keys.revokedConnectionID: value as? String == newest.connectionID.uuidString
+                case AttentionTracker.key: true // Single-host attention history belongs to the host that build opened.
+                default: false
                 }
+                let target = Self.hostKey(key, newest.macFingerprint)
+                if matches, defaults.object(forKey: target) == nil { defaults.set(value, forKey: target) }
             }
             selected = newest.macFingerprint
         }
@@ -85,7 +93,10 @@ final class Hosts {
 
     init(defaults: UserDefaults = .standard, pairingStore: PairingStore = .system,
          makeStore: (@MainActor (() throws -> PairingRecord?) -> CompanionStore)? = nil) {
-        let make = makeStore ?? { load in CompanionStore(defaults: defaults, loadPairing: load, pairingStore: pairingStore) }
+        let activity = LiveActivityController()
+        let make = makeStore ?? { load in
+            CompanionStore(defaults: defaults, loadPairing: load, pairingStore: pairingStore, liveActivity: activity)
+        }
         registry = HostRegistry(defaults: defaults)
         self.makeStore = make
         liveActivityEnabled = defaults.object(forKey: CompanionStore.Keys.liveActivity) as? Bool ?? true
@@ -99,9 +110,11 @@ final class Hosts {
         }
         reminders = registry.reminders
         for store in stores + [adding] { wire(store) }
-        // Already what the widget shows; it's republished only when the selection changes.
+        // Restore the durable selection and replace any stale shared snapshot from another host.
         selected = stores.first { $0.record?.macFingerprint == registry.selected } ?? stores.last
+        if let selected { registry.selected = selected.record?.macFingerprint }
         path = selected?.record.map { [$0.macFingerprint] } ?? []
+        selected?.publishGlance()
     }
 
     /// The store showing the pairing screen: a Mac being paired again, a Mac being added, or the welcome screen.
@@ -122,6 +135,7 @@ final class Hosts {
     }
 
     func startAdding() {
+        selected?.resignSelection()
         adding.cancelPairing()
         adding.showingPairing = true
     }
@@ -138,6 +152,7 @@ final class Hosts {
     /// adding it. A pairing already underway keeps the link, and rejects it there if it's for another Mac.
     func openPairingLink(_ text: String) {
         let target = pairing ?? (try? PairingLink(text)).flatMap { store(for: $0.macFingerprint) } ?? adding
+        selected?.resignSelection()
         target.showingPairing = true
         target.openPairingLink(text, review: true)
     }
@@ -148,6 +163,7 @@ final class Hosts {
         guard let paneID else { return }
         let target = if let macFingerprint { store(for: macFingerprint) } else { stores.count == 1 ? stores.first : nil }
         guard let target else { return }
+        target.resignSelection()
         open(target)
         target.focusedPaneID = paneID
     }
@@ -162,8 +178,8 @@ final class Hosts {
     /// The selected Mac every 5 s with its panes; the others alerts and agents only, every 30 s. The caller runs this
     /// while the scene is active and restarts it when the selection or the list changes.
     func poll() async {
-        let focused = stores.filter { $0 === selected }
-        let others = stores.filter { $0 !== selected }
+        let focused = stores.filter { $0 === selected && pairing == nil }
+        let others = stores.filter { store in !focused.contains { $0 === store } }
         await withDiscardingTaskGroup { group in
             for store in focused { group.addTask { await store.poll() } }
             for store in others { group.addTask { await store.pollAttention() } }
@@ -189,11 +205,11 @@ final class Hosts {
     // MARK: Membership
 
     private func wire(_ store: CompanionStore) {
-        store.liveActivityEnabled = liveActivityEnabled
         store.isPairedHost = { [weak self] fingerprint in self?.store(for: fingerprint) != nil }
         store.didPair = { [weak self] store in self?.added(store) }
         store.didUnpair = { [weak self] store, record in self?.removed(store, record: record) }
         store.publishesGlance = { [weak self, weak store] in store != nil && self?.selected === store }
+        store.liveActivityEnabled = liveActivityEnabled
     }
 
     private func select(_ store: CompanionStore) {
@@ -209,7 +225,6 @@ final class Hosts {
         stores.append(store)
         registry.add(fingerprint)
         reminders[fingerprint] = nil
-        reminders[""] = nil
         registry.reminders = reminders
         adding = makeStore { nil }
         wire(adding)
@@ -247,9 +262,6 @@ struct HostsView: View {
                     Button { hosts.open(store) } label: {
                         HostRow(store: store, isSelected: hosts.selected === store)
                     }
-                    .swipeActions {
-                        Button("Settings", systemImage: "gearshape") { settings = store }.tint(Cat.running)
-                    }
                     .contextMenu {
                         Button("Settings", systemImage: "gearshape") { settings = store }
                     }
@@ -258,7 +270,7 @@ struct HostsView: View {
                     Label("pair a mac", systemImage: "plus").font(.body.monospaced()).foregroundStyle(Cat.accent)
                 }
             }
-            .listRowBackground(Cat.card)
+            .listRowBackground(Color.clear)
             if !hosts.reminders.isEmpty {
                 Section {
                     ForEach(hosts.reminderMessages, id: \.self) { message in
@@ -266,10 +278,10 @@ struct HostsView: View {
                     }
                     Button("Dismiss") { hosts.dismissReminders() }
                 }
-                .listRowBackground(Cat.card)
+                .listRowBackground(Color.clear)
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Cat.page)
         .navigationTitle("Hosts")
@@ -284,6 +296,8 @@ struct HostsView: View {
         .sheet(item: $settings) { store in
             NavigationStack {
                 SettingsView(store: store, showsDecisions: hosts.selected === store)
+                    .task { store.resumePanes(); await store.refreshPanes() }
+                    .onDisappear { if hosts.selected !== store { store.suspendPanes() } }
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) { Button("Done") { settings = nil } }
                     }
@@ -297,12 +311,13 @@ struct HostRow: View {
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle().fill(store.isConnected ? Cat.output : Cat.needs).frame(width: 8, height: 8)
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(store.isConnected ? "●" : "○")
+                .foregroundStyle(store.isConnected ? Cat.output : Cat.subtext0)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(store.record?.macName ?? "Mac")
-                    .font(.body.weight(.semibold)).foregroundStyle(Cat.text).lineLimit(2)
+                    .font(.body.monospaced().weight(.semibold)).foregroundStyle(Cat.text).lineLimit(2)
                 Text(status).font(.footnote.monospaced()).foregroundStyle(Cat.subtext0)
             }
             Spacer(minLength: 8)
@@ -314,12 +329,13 @@ struct HostRow: View {
                     Text("\(working) working").foregroundStyle(Cat.subtext0)
                 }
             }
-            .font(.footnote.weight(.semibold))
+            .font(.footnote.monospaced().weight(.semibold))
             if isSelected {
                 Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(Cat.accent)
                     .accessibilityLabel("Last opened")
             }
         }
+        .frame(minHeight: 44)
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
     }

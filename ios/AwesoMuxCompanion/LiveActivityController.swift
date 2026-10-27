@@ -1,12 +1,18 @@
 @preconcurrency import ActivityKit
 import Foundation
 
+@MainActor
+protocol LiveActivityPublishing {
+    func sync(_ snapshot: GlanceSnapshot, connected: Bool, isCurrent: @MainActor () -> Bool) async
+    func endAll(isCurrent: @MainActor () -> Bool) async
+}
+
 /// Drives the single Glance Live Activity from snapshots the app fetches (phase 1 has no push-to-update).
 ///
 /// Starts when any agent needs you or is working, updates on each snapshot, and ends when
 /// everything is done or the host has been out of touch for `offlineLimit`.
 @MainActor
-final class LiveActivityController {
+final class LiveActivityController: LiveActivityPublishing {
     private typealias GlanceActivity = Activity<GlanceActivityAttributes>
 
     /// Long enough to ride out a Mac sleeping or a short network drop, short enough
@@ -20,7 +26,9 @@ final class LiveActivityController {
     /// Bumped by `endAll`; a sync that suspended across it must not start a new activity.
     private var generation = 0
 
-    func sync(_ snapshot: GlanceSnapshot, connected: Bool) async {
+    func sync(_ snapshot: GlanceSnapshot, connected: Bool,
+              isCurrent: @MainActor () -> Bool = { true }) async {
+        guard isCurrent() else { return }
         let state = GlanceActivityAttributes.ContentState(snapshot, connected: connected)
         let hasWork = state.needsYou + state.working > 0
         let offlineTooLong = !connected && state.updatedAt.map { Date.now.timeIntervalSince($0) > offlineLimit } ?? true
@@ -28,7 +36,11 @@ final class LiveActivityController {
         // Stale activities are still on screen and must be reconciled, not replaced.
         let running = GlanceActivity.activities.filter { $0.activityState == .active || $0.activityState == .stale }
 
-        for activity in running.dropFirst() { await activity.end(nil, dismissalPolicy: .immediate) }
+        for activity in running.dropFirst() {
+            guard isCurrent(), generation == startGeneration else { return }
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+        guard isCurrent(), generation == startGeneration else { return }
         if let activity = running.first {
             if activity.attributes.hostName != snapshot.hostName || offlineTooLong {
                 await activity.end(nil, dismissalPolicy: .immediate)
@@ -39,14 +51,17 @@ final class LiveActivityController {
                 let due = lastUpdate.map { !$0.state.sameContent(as: state) || Date.now.timeIntervalSince($0.at) > heartbeat } ?? true
                 if due {
                     await activity.update(content(state))
+                    guard isCurrent(), generation == startGeneration else { return }
                     lastUpdate = (state, .now)
                 }
                 return
             }
+            guard isCurrent(), generation == startGeneration else { return }
             lastUpdate = nil
         }
 
-        guard generation == startGeneration, hasWork, connected, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        guard isCurrent(), generation == startGeneration, hasWork, connected,
+              ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         do {
             _ = try GlanceActivity.request(attributes: .init(hostName: snapshot.hostName), content: content(state))
             lastUpdate = (state, .now)
@@ -55,9 +70,15 @@ final class LiveActivityController {
         }
     }
 
-    func endAll() async {
+    func endAll(isCurrent: @MainActor () -> Bool = { true }) async {
+        guard isCurrent() else { return }
         generation += 1
-        for activity in GlanceActivity.activities { await activity.end(nil, dismissalPolicy: .immediate) }
+        let started = generation
+        for activity in GlanceActivity.activities {
+            guard isCurrent(), generation == started else { return }
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+        guard isCurrent(), generation == started else { return }
         lastUpdate = nil
     }
 

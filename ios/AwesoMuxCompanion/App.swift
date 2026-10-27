@@ -35,6 +35,8 @@ private struct ProtectedCompanionRoot: View {
     private struct PollScope: Equatable {
         let active: Bool
         let selected: ObjectIdentifier?
+        let authority: UUID?
+        let pairing: ObjectIdentifier?
         let stores: [ObjectIdentifier]
     }
 
@@ -67,6 +69,7 @@ private struct ProtectedCompanionRoot: View {
 
     private var pollScope: PollScope {
         PollScope(active: scenePhase == .active, selected: hosts.selected.map(ObjectIdentifier.init),
+                  authority: hosts.selected?.decisionPairing, pairing: hosts.pairing.map(ObjectIdentifier.init),
                   stores: hosts.stores.map(ObjectIdentifier.init))
     }
 
@@ -80,7 +83,7 @@ private struct ProtectedCompanionRoot: View {
                     HostsView(hosts: hosts)
                         .navigationDestination(for: String.self) { fingerprint in
                             if let store = hosts.store(for: fingerprint) {
-                                SessionsView(store: store).id(fingerprint)
+                                SessionsView(store: store).id(store.decisionPairing)
                             }
                         }
                 }

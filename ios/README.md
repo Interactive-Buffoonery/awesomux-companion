@@ -66,20 +66,22 @@ one only after the copy reads back unchanged, retrying on later launches.
 The phone pairs with any number of Macs. `+ pair a mac` on Hosts adds one: it
 saves only that Mac's item and never reads, replaces or revokes another Mac's.
 A code for a Mac that's already paired is refused there; use Pair Again in that
-Mac's settings (swipe or long-press its row). Pair Again only accepts that same
+Mac's settings (long-press its row). Pair Again only accepts that same
 Mac's code, creates a fresh key, and once the new pairing succeeds asks the Mac
 to revoke the old one and deletes the old key. Revocation is best effort: if the
 Mac is unreachable, remove the old pairing in its settings. Quitting during
 cleanup can leave the old key in Keychain.
 
 Unpair This iPhone, in a Mac's settings, first asks that Mac to revoke this
-phone's pairing, waiting up to three seconds. It then deletes that Mac's item,
-key and per-Mac values on the phone even if the Mac is unreachable or runs an
+phone's pairing, waiting up to three seconds. It then deletes that Mac's key,
+item and per-Mac values on the phone even if the Mac is unreachable or runs an
 older version; other Macs keep theirs. If the Mac does not acknowledge the
 request, Hosts (or the welcome screen, if no Mac is left) keeps a reminder to
 also choose Unpair in awesoMux Settings on that Mac, including after relaunch.
 Pairing that Mac again clears its reminder. If local deletion fails, the Mac's
-settings keep the pairing available to retry and show a short error.
+settings keep the pairing available to retry and show a short error. A per-host
+removal marker blocks reads and authority until that retry succeeds, including
+after relaunch; the record stays until key deletion succeeds.
 
 ### Data ownership
 
@@ -89,13 +91,15 @@ settings keep the pairing available to retry and show a short error.
   the list is inert and never opens.
 - **Per-Mac values** live under `<key>.<fingerprint>`: the session snapshot
   cache, attention cursor, terminal preview suppression and unpair
-  acknowledgement. Unpair reminders are kept by fingerprint in
+  acknowledgement, and incomplete local removal marker. Unpair reminders are kept by fingerprint in
   `unpairReminders.v1`.
 - **App-wide**: the Face ID terminal lock and the Live Activity switch.
 
 Single-host builds kept no list. The first launch of this build activates only
 the newest record (the one those builds opened), selects it, and moves the
-unscoped values to its keys; an older leftover from a replaced Mac stays inert.
+matching unscoped cache, preview and revocation values to its keys; an older
+leftover from a replaced Mac stays inert. Unscoped attention history follows the
+host that the single-host build opened. Existing scoped values are preserved.
 A Keychain that can't be read at launch never changes the list.
 
 To pair the Simulator, open a link with
@@ -123,7 +127,8 @@ only when the app refreshes.
 The widget and Live Activity show only the Mac opened last; other Macs never
 write them. Combining every Mac there is planned separately (B3), which will
 replace this selected-Mac rule; until then, opening another Mac republishes
-its snapshot or clears them.
+its snapshot or clears them. Delayed Live Activity operations recheck the
+selection and its generation before publishing.
 
 The Live Activity starts while the app is in the foreground, connected, and at
 least one agent needs you or is working, unless it is turned off in Settings. It

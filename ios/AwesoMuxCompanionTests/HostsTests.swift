@@ -13,6 +13,7 @@ final class HostsTests: XCTestCase {
     private let keychain = KeychainFixture()
     private var clients: [String: PaneClientFixture] = [:]
     private var removed: [String] = []
+    private var revoked: [PairingRecord] = []
     private var shared: [String] = []
 
     // MARK: Migration
@@ -24,16 +25,34 @@ final class HostsTests: XCTestCase {
         let newest = record(macB, pairedAt: 200)
         try keychain.put(older, account: PairingStore.account(for: macA)!)
         try keychain.put(newest, account: PairingStore.legacyAccount)
-        for key in HostRegistry.scopedKeys { defaults.set("legacy \(key)", forKey: key) }
+        let values: [String: Any] = [
+            AttentionTracker.key: try JSONEncoder().encode(AttentionTracker()),
+            CompanionStore.Keys.previewSuppression: try JSONSerialization.data(withJSONObject: [
+                "connectionID": newest.connectionID.uuidString, "macFingerprint": macB, "identityTag": newest.identityTag]),
+            CompanionStore.Keys.revokedConnectionID: newest.connectionID.uuidString
+        ]
+        for (key, value) in values { defaults.set(value, forKey: key) }
+        let cache = SessionSnapshotCache(defaults: defaults)
+        cache.save(.sample, for: newest)
+        let scopedCache = HostRegistry.hostKey(SessionSnapshotCache.key, macB)
+        let legacyCache = try XCTUnwrap(defaults.data(forKey: scopedCache))
+        defaults.set(legacyCache, forKey: SessionSnapshotCache.key)
+        defaults.removeObject(forKey: scopedCache)
         defaults.set("To finish…", forKey: HostRegistry.legacyUnpairMessageKey)
 
         let registry = HostRegistry(defaults: defaults)
         XCTAssertEqual(registry.hosts(from: try PairingStore(keychain: keychain).loadAll()), [newest])
         for key in HostRegistry.scopedKeys {
             XCTAssertNil(defaults.object(forKey: key), key)
-            XCTAssertEqual(defaults.string(forKey: HostRegistry.hostKey(key, macB)), "legacy \(key)", key)
+            if let value = values[key] as? Data {
+                XCTAssertEqual(defaults.data(forKey: HostRegistry.hostKey(key, macB)), value, key)
+            } else if let value = values[key] as? String {
+                XCTAssertEqual(defaults.string(forKey: HostRegistry.hostKey(key, macB)), value, key)
+            }
+
             XCTAssertNil(defaults.object(forKey: HostRegistry.hostKey(key, macA)), key)
         }
+        XCTAssertEqual(cache.restore(for: newest), .sample)
         XCTAssertNil(defaults.object(forKey: HostRegistry.legacyUnpairMessageKey))
 
         let hosts = launch()
@@ -208,6 +227,149 @@ final class HostsTests: XCTestCase {
         XCTAssertTrue(clients.values.allSatisfy { !$0.calls.isEmpty })
     }
 
+    func testLegacyStateFromAnotherPairingNeverMigrates() throws {
+        let a = record(macA), b = record(macB, pairedAt: 200)
+        let cache = SessionSnapshotCache(defaults: defaults)
+        cache.save(.sample, for: a)
+        defaults.set(defaults.data(forKey: HostRegistry.hostKey(SessionSnapshotCache.key, macA)), forKey: SessionSnapshotCache.key)
+        defaults.set(try JSONSerialization.data(withJSONObject: [
+            "connectionID": a.connectionID.uuidString, "macFingerprint": macA, "identityTag": a.identityTag]),
+            forKey: CompanionStore.Keys.previewSuppression)
+        defaults.set(a.connectionID.uuidString, forKey: CompanionStore.Keys.revokedConnectionID)
+        defaults.set(false, forKey: CompanionStore.Keys.liveActivity)
+        XCTAssertEqual(HostRegistry(defaults: defaults).hosts(from: [a, b]), [b])
+        for key in [SessionSnapshotCache.key, CompanionStore.Keys.previewSuppression, CompanionStore.Keys.revokedConnectionID] {
+            XCTAssertNil(defaults.object(forKey: HostRegistry.hostKey(key, macB)), key)
+            XCTAssertNil(defaults.object(forKey: key), key)
+        }
+        XCTAssertFalse(defaults.bool(forKey: CompanionStore.Keys.liveActivity))
+        XCTAssertEqual(cache.restore(for: a), .sample, "Existing scoped values are preserved")
+    }
+
+    func testProductionPairingSaveAddsBWithoutRevokingA() throws {
+        let a = record(macA)
+        try PairingStore(keychain: keychain).save(a)
+        defaults.set([macA], forKey: HostRegistry.hostsKey)
+        let hosts = launch()
+        let original = try XCTUnwrap(hosts.store(for: macA))
+        let authority = original.decisionPairing
+        hosts.startAdding()
+        XCTAssertNotEqual(original.decisionPairing, authority)
+        let b = record(macB, pairedAt: 200)
+        try hosts.adding.savePairing(b)
+        XCTAssertTrue(revoked.isEmpty)
+        XCTAssertEqual(original.record, a)
+        XCTAssertEqual(hosts.stores.compactMap(\.record), [a, b])
+        XCTAssertEqual(launch().stores.compactMap(\.record), [a, b])
+        XCTAssertEqual(hosts.selected?.record, b)
+        XCTAssertEqual(defaults.stringArray(forKey: HostRegistry.hostsKey), [macA, macB])
+
+        let next = PairingRecord(macName: b.macName, host: b.host, port: b.port, macFingerprint: macB,
+            transport: b.transport, routes: b.routes, connectionID: UUID(), identityTag: "new-b", identityStorage: .keychain,
+            pairedAt: b.pairedAt.addingTimeInterval(1))
+        try hosts.store(for: macB)?.savePairing(next)
+        XCTAssertEqual(revoked, [b], "Pair Again revokes only the same fingerprint")
+        XCTAssertEqual(try PairingStore(keychain: keychain).loadAll(), [a, next])
+    }
+
+    func testFailedAdditionKeepsMembershipAndEveryOtherPairing() throws {
+        let hosts = try twoHosts()
+        let before = hosts.stores.compactMap(\.record)
+        let third = Data(repeating: 0xC3, count: 32).base64URLEncodedString
+        keychain.failWrites = [PairingStore.account(for: third)!]
+        XCTAssertThrowsError(try hosts.adding.savePairing(record(third)))
+        XCTAssertEqual(hosts.stores.compactMap(\.record), before)
+        XCTAssertEqual(try PairingStore(keychain: keychain).loadAll(), before)
+        XCTAssertTrue(revoked.isEmpty)
+        XCTAssertNil(hosts.adding.record)
+    }
+
+    func testLateRosterCannotReturnAfterHostRemoval() async throws {
+        let hosts = try twoHosts()
+        let a = try XCTUnwrap(hosts.store(for: macA)), b = try XCTUnwrap(hosts.store(for: macB))
+        await a.refresh()
+        await b.refresh()
+        let kept = a.snapshot
+        let gate = RequestGate("old B roster pending")
+        clients[macB]?.holdNext["list_agents"] = gate
+        let pending = Task { await b.refresh() }
+        await fulfillment(of: [gate.started], timeout: 2)
+        await b.unpair()
+        gate.release()
+        await pending.value
+        XCTAssertNil(b.record)
+        XCTAssertNil(b.snapshot)
+        XCTAssertNil(SessionSnapshotCache(defaults: defaults).restore(for: record(macB)))
+        XCTAssertEqual(a.snapshot, kept)
+        XCTAssertNil(hosts.store(for: macB))
+        hosts.openNotification(paneID: "old-pane", macFingerprint: macB)
+        XCTAssertTrue(hosts.selected === a)
+        XCTAssertNil(a.focusedPaneID)
+    }
+
+    func testLocalUnpairFailureRemainsInertAndRetryableAfterRelaunch() async throws {
+        for failure in ["identity", "record"] {
+            let defaults = freshDefaults(), keychain = KeychainFixture()
+            let pairingStore = PairingStore(keychain: keychain)
+            let a = record(macA), b = record(macB, pairedAt: 200)
+            try pairingStore.save(a); try pairingStore.save(b)
+            defaults.set([macA, macB], forKey: HostRegistry.hostsKey)
+            let client = PaneClientFixture()
+            var failIdentity = failure == "identity"
+            var deleted: [String] = []
+            func launchPending() -> Hosts {
+                Hosts(defaults: defaults, pairingStore: pairingStore) { load in
+                    CompanionStore(defaults: defaults, loadPairing: load, pairingStore: pairingStore,
+                        makeClient: { _, _ in client }, deleteIdentity: { tag in
+                            if failIdentity { throw PairingStoreFailure.invalidItem }
+                            deleted.append(tag)
+                        }, liveActivity: nil, writeShared: { _ in }, clearShared: {})
+                }
+            }
+            keychain.failDeletes = failure == "record" ? [PairingStore.account(for: macB)!] : []
+            let hosts = launchPending()
+            await hosts.store(for: macB)?.unpair()
+            let relaunched = launchPending()
+            let pending = try XCTUnwrap(relaunched.store(for: macB))
+            XCTAssertTrue(pending.removalPending, failure)
+            XCTAssertNil(pending.decisionPairing)
+            XCTAssertNil(pending.decisionSession)
+            let reads = client.calls.count
+            await pending.refresh()
+            XCTAssertEqual(client.calls.count, reads, "A partially removed pairing never reads or gains authority")
+            failIdentity = false; keychain.failDeletes = []
+            await pending.unpair()
+            XCTAssertNil(relaunched.store(for: macB))
+            XCTAssertEqual(try pairingStore.loadAll(), [a])
+            XCTAssertFalse(deleted.contains(a.identityTag))
+            XCTAssertEqual(client.calls.filter { $0.operation == "unpair" }.count, 1, "The durable acknowledgement avoids a second revoke")
+        }
+    }
+
+    func testDelayedLiveActivityCannotPublishAfterSelectionChanges() async throws {
+        let pairingStore = PairingStore(keychain: keychain)
+        try pairingStore.save(record(macA)); try pairingStore.save(record(macB, pairedAt: 200))
+        defaults.set([macA, macB], forKey: HostRegistry.hostsKey)
+        let activity = HostActivityFixture()
+        let hosts = Hosts(defaults: defaults, pairingStore: pairingStore) { load in
+            CompanionStore(defaults: defaults, loadPairing: load, pairingStore: pairingStore,
+                makeClient: { [unowned self] record, _ in client(record.macFingerprint) }, liveActivity: activity,
+                writeShared: { _ in }, clearShared: {})
+        }
+        let a = hosts.stores[0], b = hosts.stores[1]
+        hosts.open(a)
+        let gate = RequestGate("A activity suspended")
+        activity.gate = gate
+        let reading = Task { await a.refresh() }
+        await fulfillment(of: [gate.started], timeout: 2)
+        hosts.open(b)
+        await b.refresh()
+        gate.release()
+        await reading.value
+        XCTAssertEqual(activity.published, [b.record!.macName])
+        XCTAssertEqual(activity.rejected, [a.record!.macName])
+    }
+
     // MARK: Fixtures
 
     private func twoHosts() throws -> Hosts {
@@ -243,6 +405,7 @@ final class HostsTests: XCTestCase {
                                try pairingStore.clear(macFingerprint: record.macFingerprint)
                                removed.append(record.identityTag)
                            },
+                           revokePrevious: { [unowned self] in revoked.append($0) },
                            liveActivity: nil,
                            writeShared: { [unowned self] in shared.append($0.hostName == "Mac \(macA.prefix(4))" ? macA : macB) },
                            clearShared: {})
@@ -266,4 +429,18 @@ final class HostsTests: XCTestCase {
     private func link(_ fingerprint: String, name: String) -> String {
         "awesomuxcompanion://pair?v=2&lan=192.168.1.20&p=43123&fp=\(fingerprint)&s=\(String(repeating: "A", count: 43))&n=\(name)"
     }
+}
+
+@MainActor
+private final class HostActivityFixture: LiveActivityPublishing {
+    var gate: RequestGate?
+    var published: [String] = []
+    var rejected: [String] = []
+
+    func sync(_ snapshot: GlanceSnapshot, connected: Bool, isCurrent: @MainActor () -> Bool) async {
+        if let gate { self.gate = nil; await gate.pause() }
+        if isCurrent() { published.append(snapshot.hostName) } else { rejected.append(snapshot.hostName) }
+    }
+
+    func endAll(isCurrent: @MainActor () -> Bool) async {}
 }

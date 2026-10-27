@@ -36,6 +36,12 @@ struct SessionSnapshotCache {
         defaults.set(data, forKey: key(record))
     }
 
+    static func legacyValue(_ value: Any, matches record: PairingRecord) -> Bool {
+        guard let data = value as? Data, let entry = try? JSONDecoder().decode(Entry.self, from: data) else { return false }
+        return entry.connectionID == record.connectionID && entry.macFingerprint == record.macFingerprint
+            && entry.snapshot.schemaVersion == 1
+    }
+
     /// Only this Mac's roster; other Macs' cached rosters stay.
     func clear(for record: PairingRecord?) {
         guard let record else { return }

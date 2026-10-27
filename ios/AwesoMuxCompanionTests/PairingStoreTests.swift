@@ -291,6 +291,35 @@ final class PairingStoreTests: XCTestCase {
         try assertCoherent(store, identities, "failed save")
     }
 
+    @MainActor
+    func testReplacementRecoversSavedPairingAfterInitialReadFailure() throws {
+        let keychain = KeychainFixture()
+        let store = PairingStore(keychain: keychain)
+        let identities = IdentityFixture()
+        let a = record(macA, pairedAt: 200, tag: "a")
+        try store.save(a)
+        keychain.fault = .failRead
+        let launched = launch(store, identities)
+        XCTAssertNil(launched.record)
+
+        let before = keychain.stored
+        XCTAssertThrowsError(try store.replacementContext(current: launched.record,
+                                                         now: Date(timeIntervalSince1970: 100)))
+        XCTAssertEqual(keychain.stored, before)
+
+        keychain.fault = nil
+        let context = try store.replacementContext(current: launched.record,
+                                                    now: Date(timeIntervalSince1970: 100))
+        XCTAssertEqual(context.previous, a)
+        XCTAssertGreaterThan(context.pairedAt, a.pairedAt)
+        let b = record(macB, pairedAt: context.pairedAt.timeIntervalSince1970, tag: "b")
+        keychain.failDeletes = [account(macA)]
+        XCTAssertFalse(try pairAgain(try XCTUnwrap(context.previous), with: b, store: store,
+                                     identities: identities))
+        XCTAssertEqual(launch(store, identities).record, b)
+        try assertCoherent(store, identities, "read recovery with clock behind")
+    }
+
     func testPairingAgainWithASupersededMacReplacesIt() throws {
         let keychain = KeychainFixture()
         let store = PairingStore(keychain: keychain)

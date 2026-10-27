@@ -140,6 +140,12 @@ struct PairingStore: Sendable {
         try keychain.write(JSONEncoder().encode(record), account: account)
     }
 
+    func replacementContext(current: PairingRecord?, now: Date = .now) throws
+        -> (previous: PairingRecord?, pairedAt: Date) {
+        let previous = try current ?? load()
+        return (previous, max(now, previous?.pairedAt.addingTimeInterval(1) ?? .distantPast))
+    }
+
     /// Saves `next`, which as the newest pairing is the one that opens from then on, and throws having changed
     /// nothing if it can't. Returns true once `previous` is gone, so its identity can be deleted; otherwise it
     /// stays whole but superseded until unpairing removes it.

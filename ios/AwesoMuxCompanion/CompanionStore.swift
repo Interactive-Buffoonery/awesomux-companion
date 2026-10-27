@@ -233,9 +233,7 @@ final class CompanionStore {
             try Task.checkCancellation()
             guard let connectionID = reply.connectionID else { throw MacClientFailure.denied }
             let v1 = link.version == 1 ? link.routes.first : nil
-            let previous = record
-            // Strictly newest even if the clock moved back, since the newest pairing is the one that opens.
-            let pairedAt = max(Date.now, previous?.pairedAt.addingTimeInterval(1) ?? .distantPast)
+            let (previous, pairedAt) = try PairingStore.system.replacementContext(current: record)
             let next = PairingRecord(
                 macName: reply.macName ?? link.macName, host: v1?.host, port: link.port,
                 macFingerprint: link.macFingerprint, transport: v1?.transport, routes: v1 == nil ? link.routes : nil,

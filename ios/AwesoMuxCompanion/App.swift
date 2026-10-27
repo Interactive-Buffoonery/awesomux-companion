@@ -1,3 +1,4 @@
+import os
 import BackgroundTasks
 import SwiftUI
 import UserNotifications
@@ -73,6 +74,7 @@ private struct ProtectedCompanionRoot: View {
             store.openPairingLink(url.absoluteString, review: true)
         }
         .onChange(of: scenePhase) {
+            WatchDiagnostics.lifecycle.notice("scene_changed origin=lifecycle source=app active=\(scenePhase == .active) background=\(scenePhase == .background)")
             if scenePhase != .active { store.suspendPanes() }
             decisions.sceneChanged(active: scenePhase == .active,
                 backgrounded: scenePhase == .background || store.showingPairing || store.pairingStep != .idle)

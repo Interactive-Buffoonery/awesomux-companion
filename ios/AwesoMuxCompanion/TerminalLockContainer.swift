@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 import UIKit
 
@@ -151,7 +152,10 @@ final class ScenePrivacyAnchor: UIView {
         updateCover()
     }
 
-    @objc private func willDeactivate() { model.becomeInactive(); updateCover() }
+    @objc private func willDeactivate() {
+        WatchDiagnostics.lifecycle.notice("scene_changed origin=lifecycle source=scene_bridge phase=inactive")
+        model.becomeInactive(); updateCover()
+    }
     @objc private func didEnterBackground() { model.enterBackground(); updateCover() }
     @objc private func willEnterForeground() { model.enterForeground(); updateCover() }
     @objc private func didActivate() { model.becomeActive(); updateCover() }

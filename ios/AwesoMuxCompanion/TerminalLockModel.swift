@@ -1,3 +1,4 @@
+import os
 import Darwin
 import Foundation
 import LocalAuthentication
@@ -80,6 +81,7 @@ final class TerminalLockModel {
     }
 
     private func notifySecurityChange() {
+        WatchDiagnostics.lifecycle.notice("security_changed origin=lifecycle active=\(self.isActive) locked=\(self.isLocked) lock_enabled=\(self.isEnabled) authenticating=\(self.isAuthenticating)")
         securityDidChange?()
         for observer in Array(securityObservers.values) { observer() }
     }

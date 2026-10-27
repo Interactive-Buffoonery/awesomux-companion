@@ -139,12 +139,14 @@ struct MacClient: Sendable {
     static func openWatch(connection: any WatchFrameConnection, request: CompanionAPIRequest,
                           capabilities: CompanionTerminalStream.Capabilities,
                           canSend: @escaping @MainActor @Sendable () -> Bool = { true }) async throws -> any WatchConnection {
+        let diagnostic = WatchDiagnostics.current
+        WatchDiagnostics.watch.notice("watch_request attempt_id=\(diagnostic?.id.uuidString ?? "none", privacy: .public) request_id=\(request.requestID, privacy: .public)")
         do {
             try WatchStream.validate(capabilities)
             try Task.checkCancellation()
             try await connection.send(CompanionProtocol.encoder().encode(request),
                                       maximum: CompanionProtocol.maximumRequestBytes, canSend: canSend)
-            let data = try await withTimeout(requestTimeout) {
+            let data = try await withTimeout(requestTimeout, phase: "api_reply") {
                 try await connection.receiveFrame(maximum: maximumResponseBytes)
             }
             try Task.checkCancellation()
@@ -159,8 +161,10 @@ struct MacClient: Sendable {
                   accepted.role != .interactive || capabilities.inputFrameMax != nil else {
                 throw MacClientFailure.invalidResponse
             }
-            return MacWatchConnection(connection: connection, capabilities: capabilities, accepted: accepted)
+            WatchDiagnostics.watch.notice("watch_accepted request_id=\(request.requestID, privacy: .public) role=\(accepted.role.rawValue, privacy: .public)")
+            return MacWatchConnection(connection: connection, capabilities: capabilities, accepted: accepted, diagnostics: diagnostic)
         } catch {
+            diagnostic?.end(origin: "watch", phase: "api_reply", reason: WatchDiagnostics.reason(error))
             connection.cancel()
             throw error
         }
@@ -214,6 +218,8 @@ typealias APIResponse = CompanionAPIResponse
 
 private final class FramedConnection: WatchFrameConnection, @unchecked Sendable {
     private let connection: NWConnection
+    private let diagnostic = WatchDiagnostics.current
+    private let diagnosticID = UUID()
     private let queue = DispatchQueue(label: "com.interactivebuffoonery.awesomux.companion.connection")
     private let pin: OSAllocatedUnfairLock<Data?>
     /// The Mac certificate's SPKI, captured once the pinned handshake succeeds.
@@ -243,13 +249,15 @@ private final class FramedConnection: WatchFrameConnection, @unchecked Sendable 
         connection = NWConnection(
             host: NWEndpoint.Host(client.host), port: NWEndpoint.Port(rawValue: client.port)!,
             using: NWParameters(tls: tls, tcp: NWProtocolTCP.Options()))
+        WatchDiagnostics.transport.debug("transport_open attempt_id=\(self.diagnostic?.id.uuidString ?? "none", privacy: .public) transport_id=\(self.diagnosticID, privacy: .public)")
     }
 
     static func open(client: MacClient) async throws -> FramedConnection {
         let framed = FramedConnection(client: client)
         do {
-            try await withTimeout(.seconds(8)) { try await framed.start() }
+            try await withTimeout(.seconds(8), phase: "connect") { try await framed.start() }
         } catch {
+            framed.diagnostic?.end(origin: "transport", phase: "connect", reason: WatchDiagnostics.reason(error))
             framed.cancel()
             throw error
         }
@@ -258,6 +266,7 @@ private final class FramedConnection: WatchFrameConnection, @unchecked Sendable 
 
     private func start() async throws {
         let connection = connection
+        let diagnosticID = diagnosticID
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 guard !Task.isCancelled else {
@@ -272,8 +281,12 @@ private final class FramedConnection: WatchFrameConnection, @unchecked Sendable 
                 connection.stateUpdateHandler = { state in
                     switch state {
                     case .ready: finish(.success(()))
-                    case .failed(let error): finish(.failure(Self.failure(error)))
-                    case .waiting(let error): finish(.failure(Self.failure(error)))
+                    case .failed(let error):
+                        WatchDiagnostics.networkError(error, id: diagnosticID, phase: "connect_failed")
+                        finish(.failure(Self.failure(error)))
+                    case .waiting(let error):
+                        WatchDiagnostics.networkError(error, id: diagnosticID, phase: "connect_waiting")
+                        finish(.failure(Self.failure(error)))
                     case .cancelled: finish(.failure(CancellationError()))
                     default: break
                     }
@@ -297,6 +310,7 @@ private final class FramedConnection: WatchFrameConnection, @unchecked Sendable 
               canSend: (@MainActor @Sendable () -> Bool)? = nil) async throws {
         let frame = try MacClient.frameRequest(payload, maximum: maximum)
         let connection = connection
+        let diagnosticID = diagnosticID
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 guard !Task.isCancelled, canSend?() ?? true else {
@@ -304,6 +318,7 @@ private final class FramedConnection: WatchFrameConnection, @unchecked Sendable 
                     return
                 }
                 connection.send(content: frame, completion: .contentProcessed { error in
+                    if let error { WatchDiagnostics.networkError(error, id: diagnosticID, phase: "send") }
                     continuation.resume(with: error.map { .failure(Self.failure($0)) } ?? .success(()))
                 })
             }
@@ -333,13 +348,19 @@ private final class FramedConnection: WatchFrameConnection, @unchecked Sendable 
 
     private func receiveLoop(_ connection: NWConnection, exactly count: Int) async throws -> Data {
         var buffer = Data()
+        let diagnosticID = diagnosticID
         while buffer.count < count {
             try Task.checkCancellation()
             let needed = count - buffer.count
+            let received = buffer.count
             let chunk: Data = try await withCheckedThrowingContinuation { continuation in
                 connection.receive(minimumIncompleteLength: 1, maximumLength: needed) { data, _, isComplete, error in
-                    if let error { return continuation.resume(throwing: Self.failure(error)) }
+                    if let error {
+                        WatchDiagnostics.networkError(error, id: diagnosticID, phase: "receive")
+                        return continuation.resume(throwing: Self.failure(error))
+                    }
                     if let data, !data.isEmpty { return continuation.resume(returning: data) }
+                    WatchDiagnostics.transport.notice("receive_end transport_id=\(diagnosticID, privacy: .public) eof=\(isComplete) partial=\(received > 0) expected=\(count) actual=\(received)")
                     continuation.resume(throwing: isComplete ? MacClientFailure.closed : MacClientFailure.invalidResponse)
                 }
             }
@@ -349,11 +370,13 @@ private final class FramedConnection: WatchFrameConnection, @unchecked Sendable 
     }
 }
 
-func withTimeout<T: Sendable>(_ limit: Duration, _ work: @escaping @Sendable () async throws -> T) async throws -> T {
+func withTimeout<T: Sendable>(_ limit: Duration, phase: String = "api_reply", _ work: @escaping @Sendable () async throws -> T) async throws -> T {
     try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask { try await work() }
         group.addTask {
             try await Task.sleep(for: limit)
+            WatchDiagnostics.transport.notice("timeout phase=\(phase, privacy: .public) limit_ms=\(WatchDiagnostics.milliseconds(limit)) attempt_id=\(WatchDiagnostics.current?.id.uuidString ?? "none", privacy: .public)")
+            WatchDiagnostics.current?.end(origin: "transport", phase: phase, reason: "timeout")
             throw MacClientFailure.unreachable
         }
         defer { group.cancelAll() }

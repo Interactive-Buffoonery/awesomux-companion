@@ -445,3 +445,22 @@ require acceptance. The synthetic HTTPS fixture remains test tooling only.
 Remote TestFlight jobs build the pinned native renderer from source before
 generation, retaining its original inputs and schema 2 receipt for validation.
 This adds a full native build to each fresh runner job.
+
+## Watch disconnect diagnostics
+
+Connect the iPhone to the Mac, open Console.app, select the iPhone, and enable
+Info and Debug messages. Filter by subsystem
+`com.interactivebuffoonery.awesomux.companion`, then reproduce the disconnect.
+Capture the Mac side at the same time:
+
+```sh
+log stream --level debug --style compact --predicate 'subsystem == "com.interactivebuffoonery.awesomux" AND category BEGINSWITH "companion."'
+```
+
+Correlate `watch_request` and `watch_attach` using `attempt_id`, then use the
+public `request_id` to find the Mac's connection mapping. `watch_end` preserves
+the first initiating close cause; later cancellation callbacks cannot replace it.
+Lifecycle events expose inactive scenes and lock state independently. An age of
+`-1` means no frame or heartbeat has arrived. Byte counts contain no payload.
+Terminal output, input, names, pairing material and credentials are never logged.
+Native renderer and package terminal logging remain disabled.

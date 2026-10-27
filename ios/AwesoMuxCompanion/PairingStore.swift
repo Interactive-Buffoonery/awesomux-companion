@@ -82,11 +82,10 @@ struct SystemPairingKeychain: PairingKeychain {
 
 /// One Keychain item per Mac, keyed by its pinned fingerprint. Earlier builds kept a single item under `mac`;
 /// loading copies it to its Mac's item and deletes it only once the copy reads back unchanged.
-/// `retired` lists the connections of replaced pairings whose items couldn't be deleted yet; loading hides them.
+/// The single-host app opens the newest pairing; any older one is superseded and removed before it on unpair.
 struct PairingStore: Sendable {
     static let system = PairingStore(keychain: SystemPairingKeychain())
     static let legacyAccount = "mac"
-    static let retiredAccount = "retired"
 
     let keychain: any PairingKeychain
 
@@ -105,22 +104,21 @@ struct PairingStore: Sendable {
     /// Oldest pairing first. Throws when the Keychain can't be read, or when nothing stored is usable.
     func loadAll() throws -> [PairingRecord] {
         let items = try keychain.items()
-        let retired = Self.retired(in: items)
         var records: [String: PairingRecord] = [:]
         var unusable = false
-        for (account, data) in items where account != Self.legacyAccount && account != Self.retiredAccount {
+        for (account, data) in items where account != Self.legacyAccount {
             guard let record = Self.decode(data), Self.account(for: record.macFingerprint) == account else {
                 unusable = true
                 continue
             }
-            if !retired.contains(record.connectionID) { records[account] = record }
+            records[account] = record
         }
         if let data = items[Self.legacyAccount] {
             if let legacy = Self.decode(data), let account = Self.account(for: legacy.macFingerprint) {
                 if let current = records[account], current.pairedAt >= legacy.pairedAt {
                     // Already copied, or a newer pairing with the same Mac replaced it.
                     try? keychain.delete(account: Self.legacyAccount)
-                } else if !retired.contains(legacy.connectionID) {
+                } else {
                     // Used as is when the copy fails; the next load tries again.
                     records[account] = legacy
                     try? migrate(legacy, to: account)
@@ -132,7 +130,6 @@ struct PairingStore: Sendable {
                 try? keychain.delete(account: Self.legacyAccount)
             }
         }
-        if !retired.isEmpty { finishRetiring(retired) }
         if records.isEmpty, unusable { throw PairingStoreFailure.invalidItem }
         return records.values.sorted { ($0.pairedAt, $0.macFingerprint) < ($1.pairedAt, $1.macFingerprint) }
     }
@@ -143,55 +140,42 @@ struct PairingStore: Sendable {
         try keychain.write(JSONEncoder().encode(record), account: account)
     }
 
-    /// Saves `next` in place of `previous`, and throws having changed nothing when that can't be done safely.
-    /// Returns false only when `previous`, with another Mac, couldn't be retired and `next` couldn't be taken back:
-    /// both stay whole and `next`, the newest, opens.
+    /// Saves `next`, which as the newest pairing is the one that opens from then on, and throws having changed
+    /// nothing if it can't. Returns true once `previous` is gone, so its identity can be deleted; otherwise it
+    /// stays whole but superseded until unpairing removes it.
     func replace(_ previous: PairingRecord?, with next: PairingRecord) throws -> Bool {
         try save(next)
+        guard let previous else { return true }
+        // The save overwrote it; a leftover legacy copy is older, so it never opens and clearing removes it first.
+        if previous.macFingerprint == next.macFingerprint { return true }
         // ponytail: pairing another Mac still replaces the previous one; multi-host adds it alongside instead.
-        guard let previous, previous.macFingerprint != next.macFingerprint else { return true }
-        do {
-            try retire(previous)
-            return true
-        } catch {
-            guard let account = Self.account(for: next.macFingerprint), (try? keychain.delete(account: account)) != nil
-            else { return false }
-            throw error
-        }
+        return (try? clear(macFingerprint: previous.macFingerprint)) != nil
     }
 
     /// Removes only this Mac's pairing, including a legacy item for it that hasn't been copied yet.
     func clear(macFingerprint: String) throws {
-        let legacy = try keychain.items()[Self.legacyAccount].flatMap(Self.decode)
-        if let account = Self.account(for: macFingerprint) { try keychain.delete(account: account) }
-        if legacy?.macFingerprint == macFingerprint { try keychain.delete(account: Self.legacyAccount) }
-    }
-
-    /// Deletes a replaced pairing. If that fails, records it as retired so it never opens again.
-    private func retire(_ record: PairingRecord) throws {
-        guard (try? clear(macFingerprint: record.macFingerprint)) == nil else { return }
-        let retired = try Self.retired(in: keychain.items()).union([record.connectionID])
-        try keychain.write(JSONEncoder().encode(retired), account: Self.retiredAccount)
-    }
-
-    /// Deletes what's left of retired pairings, and forgets each one once nothing of it remains.
-    private func finishRetiring(_ retired: Set<UUID>) {
-        guard let items = try? keychain.items() else { return }
-        var left: Set<UUID> = []
-        for (account, data) in items where account != Self.retiredAccount {
-            guard let record = Self.decode(data), retired.contains(record.connectionID) else { continue }
-            if (try? keychain.delete(account: account)) == nil { left.insert(record.connectionID) }
+        let items = try keychain.items()
+        var accounts = Self.account(for: macFingerprint).map { [$0] } ?? []
+        if let legacy = items[Self.legacyAccount].flatMap(Self.decode), legacy.macFingerprint == macFingerprint {
+            // The item loading would open goes last, so a failed delete never leaves an older pairing in its place.
+            let legacyOpens = accounts.first.flatMap { items[$0] }.flatMap(Self.decode)
+                .map { $0.pairedAt < legacy.pairedAt } ?? true
+            accounts.insert(Self.legacyAccount, at: legacyOpens ? accounts.count : 0)
         }
-        guard left != retired else { return }
-        if left.isEmpty {
-            try? keychain.delete(account: Self.retiredAccount)
-        } else {
-            try? keychain.write(JSONEncoder().encode(left), account: Self.retiredAccount)
-        }
+        for account in accounts { try keychain.delete(account: account) }
     }
 
-    private static func retired(in items: [String: Data]) -> Set<UUID> {
-        items[retiredAccount].flatMap { try? JSONDecoder().decode(Set<UUID>.self, from: $0) } ?? []
+    /// Unpairing in the single-host app: removes every pairing, `current` last, so a failure leaves `current` the
+    /// one that opens. Each identity is deleted only after its pairing is gone.
+    func clearAll(current: PairingRecord, deletingIdentity deleteIdentity: (String) throws -> Void) throws {
+        let others: [PairingRecord]
+        do { others = try loadAll() } catch PairingStoreFailure.invalidItem { others = [] }
+        for other in others where other.macFingerprint != current.macFingerprint {
+            try clear(macFingerprint: other.macFingerprint)
+            try? deleteIdentity(other.identityTag)
+        }
+        try clear(macFingerprint: current.macFingerprint)
+        try deleteIdentity(current.identityTag)
     }
 
     private func migrate(_ legacy: PairingRecord, to account: String) throws {

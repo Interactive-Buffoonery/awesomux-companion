@@ -64,9 +64,10 @@ Keychain, one item per Mac keyed by that fingerprint. Earlier builds kept a
 single item; the first launch copies it to its Mac's item and removes the old
 one only after the copy reads back unchanged, retrying on later launches.
 Pair Again creates a fresh key; once the new pairing succeeds, the phone asks
-the previous Mac to revoke the old one and then deletes the old key. If the
-previous Mac's item can't be deleted, it is marked retired so it never opens
-again, and later launches finish deleting it.
+the previous Mac to revoke the old one and then deletes the old key. The
+phone always opens its newest pairing, so if the previous Mac's item can't be
+deleted it never opens again; its key stays until Unpair This iPhone removes
+it along with every older pairing.
 Revocation is best effort: if the previous Mac is unreachable, remove the old
 pairing in its settings. Quitting during cleanup can leave the old key in Keychain.
 Unpair This iPhone first asks the Mac to revoke

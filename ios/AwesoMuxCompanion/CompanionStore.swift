@@ -147,10 +147,8 @@ final class CompanionStore {
             try MacClient(host: route.host, port: record.port, macFingerprint: record.macFingerprint,
                           identity: PhoneIdentity.load(tag: record.identityTag, storage: record.identityStorage))
         },
-        removePairing: @escaping (PairingRecord) throws -> Void = { record in
-            // Record first: if it can't be cleared, the identity it names is still there for another try.
-            try PairingStore.system.clear(macFingerprint: record.macFingerprint)
-            try PhoneIdentity.delete(tag: record.identityTag)
+        removePairing: @escaping (PairingRecord) throws -> Void = {
+            try PairingStore.system.clearAll(current: $0, deletingIdentity: PhoneIdentity.delete(tag:))
         },
         liveActivity: LiveActivityController? = LiveActivityController(),
         writeShared: @escaping (GlanceSnapshot) -> Void = {
@@ -235,14 +233,16 @@ final class CompanionStore {
             try Task.checkCancellation()
             guard let connectionID = reply.connectionID else { throw MacClientFailure.denied }
             let v1 = link.version == 1 ? link.routes.first : nil
+            let previous = record
+            // Strictly newest even if the clock moved back, since the newest pairing is the one that opens.
+            let pairedAt = max(Date.now, previous?.pairedAt.addingTimeInterval(1) ?? .distantPast)
             let next = PairingRecord(
                 macName: reply.macName ?? link.macName, host: v1?.host, port: link.port,
                 macFingerprint: link.macFingerprint, transport: v1?.transport, routes: v1 == nil ? link.routes : nil,
-                connectionID: connectionID, identityTag: created.tag, identityStorage: created.storage, pairedAt: .now)
-            let previous = record
+                connectionID: connectionID, identityTag: created.tag, identityStorage: created.storage, pairedAt: pairedAt)
             let previousGone = try PairingStore.system.replace(previous, with: next)
             replacePairing(with: next)
-            if let previous, previousGone, previous.identityTag != next.identityTag { revoke(previous) }
+            if let previous, previous.identityTag != next.identityTag { revoke(previous, deletingIdentity: previousGone) }
             unpairMessage = nil
             defaults.removeObject(forKey: Keys.revokedConnectionID)
             message = nil
@@ -290,9 +290,10 @@ final class CompanionStore {
     }
 
     /// Best effort, after a new pairing replaces `previous`: if the old Mac can't be reached, its grant stays
-    /// until the person unpairs there, the same as an unacknowledged unpair.
+    /// until the person unpairs there, the same as an unacknowledged unpair. The old key is deleted only when
+    /// `previous` is gone; otherwise unpairing deletes it along with the superseded pairing.
     // This attempt is not persisted; quitting before it finishes can leave the old key in Keychain.
-    private func revoke(_ previous: PairingRecord) {
+    private func revoke(_ previous: PairingRecord, deletingIdentity: Bool) {
         Task {
             if let identity = try? PhoneIdentity.load(tag: previous.identityTag, storage: previous.identityStorage) {
                 _ = try? await firstAnswering(previous.allRoutes) { route in
@@ -300,7 +301,7 @@ final class CompanionStore {
                                         identity: identity).unpair(connectionID: previous.connectionID)
                 }
             }
-            try? PhoneIdentity.delete(tag: previous.identityTag)
+            if deletingIdentity { try? PhoneIdentity.delete(tag: previous.identityTag) }
         }
     }
 

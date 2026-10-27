@@ -187,72 +187,139 @@ final class PairingStoreTests: XCTestCase {
         XCTAssertEqual(keychain.writes, writes, "The copy was already complete, so only the legacy item is deleted")
     }
 
-    /// Pair A, then pair B while A's item can't be deleted, unpair B and relaunch: A must not come back.
+    /// Pair A, then pair B while A can't be removed (its delete fails, or the app quit first). B opens, unpairing
+    /// can't finish while A is stuck, and once it does a relaunch finds nothing: A never comes back.
     @MainActor
-    func testReplacedMacNeverReturnsWhenItsCleanupFails() async throws {
-        for storedAs in [account(macA), PairingStore.legacyAccount] {
+    func testReplacedMacNeverReturnsAfterUnpair() async throws {
+        for (storedAs, quitBeforeCleanup) in [(account(macA), false), (PairingStore.legacyAccount, false),
+                                              (account(macA), true)] {
+            let label = "\(storedAs) quit=\(quitBeforeCleanup)"
             let keychain = KeychainFixture()
             let store = PairingStore(keychain: keychain)
+            let identities = IdentityFixture()
             let a = record(macA, pairedAt: 100, tag: "a")
             let b = record(macB, pairedAt: 200, tag: "b")
             try keychain.put(a, account: storedAs)
             keychain.failDeletes = [storedAs]
-            let client = PaneClientFixture()
-            let defaults = defaults
-            let launch = {
-                CompanionStore(defaults: defaults, loadPairing: { try store.load() }, makeClient: { _, _ in client },
-                               removePairing: { try store.clear(macFingerprint: $0.macFingerprint) },
-                               liveActivity: nil, writeShared: { _ in }, clearShared: {})
-            }
 
-            XCTAssertTrue(try store.replace(a, with: b), storedAs)
-            let paired = launch()
-            XCTAssertEqual(paired.record, b, storedAs)
+            if quitBeforeCleanup {
+                try store.save(b)
+            } else {
+                XCTAssertFalse(try pairAgain(a, with: b, store: store, identities: identities), label)
+            }
+            XCTAssertFalse(identities.deleted.contains("identity-a"), "\(label): A's key stays while A does")
+            try assertCoherent(store, identities, label)
+            XCTAssertEqual(launch(store, identities).record, b, "\(label): relaunch opens the replacement")
+
+            let paired = launch(store, identities)
             await paired.unpair()
-            XCTAssertNil(paired.record, storedAs)
-            XCTAssertNil(paired.message, storedAs)
-            XCTAssertNil(launch().record, "\(storedAs): a replaced Mac never comes back")
-            XCTAssertEqual(try store.loadAll(), [], storedAs)
+            XCTAssertEqual(paired.record, b, "\(label): unpairing can't finish while A is stuck")
+            XCTAssertNotNil(paired.message, label)
+            XCTAssertEqual(launch(store, identities).record, b, label)
+            try assertCoherent(store, identities, label)
 
             keychain.failDeletes = []
-            XCTAssertEqual(try store.loadAll(), [], storedAs)
-            XCTAssertEqual(keychain.stored, [:], "\(storedAs): a later load finishes deleting A")
+            await paired.unpair()
+            XCTAssertNil(paired.record, label)
+            XCTAssertNil(paired.message, label)
+            XCTAssertNil(launch(store, identities).record, "\(label): a replaced Mac never comes back")
+            XCTAssertEqual(keychain.stored, [:], label)
+            XCTAssertEqual(identities.deleted, ["identity-a", "identity-b"], label)
         }
     }
 
-    func testReplacementThatCantRetireThePreviousMacKeepsItWhole() throws {
-        let keychain = KeychainFixture()
-        let store = PairingStore(keychain: keychain)
-        let a = record(macA, pairedAt: 100, tag: "a")
-        let b = record(macB, pairedAt: 200, tag: "b")
-        try store.save(a)
-        keychain.failDeletes = [account(macA)]
-        keychain.failWrites = [PairingStore.retiredAccount]
+    /// An interrupted migration leaves legacy A beside its copy. Pair Again with the same Mac deletes A's key, and
+    /// unpairing A2 then fails partway: A2 stays the pairing that opens, and A never comes back.
+    @MainActor
+    func testPairingAgainWithSameMacNeverRestoresLegacyCopy() async throws {
+        for stuck in [PairingStore.legacyAccount, account(macA)] {
+            let keychain = KeychainFixture()
+            let store = PairingStore(keychain: keychain)
+            let identities = IdentityFixture()
+            let a = record(macA, pairedAt: 100, tag: "a")
+            try keychain.put(a, account: PairingStore.legacyAccount)
+            keychain.failDeletes = [PairingStore.legacyAccount]
+            XCTAssertEqual(try store.load(), a)
+            XCTAssertEqual(Set(keychain.stored.keys), [PairingStore.legacyAccount, account(macA)], stuck)
 
-        XCTAssertThrowsError(try store.replace(a, with: b))
-        XCTAssertEqual(try store.loadAll(), [a], "B is taken back and A stays in use")
-        XCTAssertEqual(try keychain.record(account(macA)), a)
+            let a2 = record(macA, pairedAt: 200, tag: "a2")
+            XCTAssertTrue(try pairAgain(a, with: a2, store: store, identities: identities), stuck)
+            XCTAssertEqual(identities.deleted, ["identity-a"], stuck)
+            try assertCoherent(store, identities, stuck)
 
-        keychain.failDeletes.insert(account(macB))
-        XCTAssertFalse(try store.replace(a, with: b), "B can't be taken back, so it stays and A isn't retired")
-        XCTAssertEqual(try store.loadAll(), [a, b])
-        XCTAssertEqual(try store.load(), b)
+            keychain.failDeletes = [stuck]
+            let paired = launch(store, identities)
+            XCTAssertEqual(paired.record, a2, stuck)
+            await paired.unpair()
+            XCTAssertEqual(paired.record, a2, "\(stuck): unpairing fails and keeps A2")
+            XCTAssertNotNil(paired.message, stuck)
+            XCTAssertEqual(launch(store, identities).record, a2, "\(stuck): never the old legacy copy")
+            try assertCoherent(store, identities, stuck)
+
+            keychain.failDeletes = []
+            await paired.unpair()
+            XCTAssertNil(launch(store, identities).record, stuck)
+            XCTAssertEqual(keychain.stored, [:], stuck)
+        }
     }
 
-    func testPairingAgainWithAReplacedMacIsNeverHidden() throws {
+    func testClearKeepsNewerLegacyCopyUntilItsOlderItemIsGone() throws {
+        let keychain = KeychainFixture()
+        let older = record(macA, pairedAt: 100, tag: "old")
+        let newer = record(macA, pairedAt: 200, tag: "new")
+        try keychain.put(older, account: account(macA))
+        try keychain.put(newer, account: PairingStore.legacyAccount)
+        keychain.failDeletes = [account(macA)]
+        let store = PairingStore(keychain: keychain)
+
+        XCTAssertThrowsError(try store.clear(macFingerprint: macA))
+        XCTAssertEqual(try store.load(), newer, "The older item goes first, so a failure never leaves only it")
+    }
+
+    func testFailedSaveKeepsThePreviousPairing() throws {
+        let keychain = KeychainFixture()
+        let store = PairingStore(keychain: keychain)
+        let identities = IdentityFixture()
+        let a = record(macA, pairedAt: 100, tag: "a")
+        try store.save(a)
+        keychain.failWrites = [account(macB)]
+
+        XCTAssertThrowsError(try pairAgain(a, with: record(macB, pairedAt: 200, tag: "b"), store: store,
+                                           identities: identities))
+        XCTAssertEqual(identities.deleted, ["identity-b"], "Only the unsaved pairing's key is deleted")
+        XCTAssertEqual(try store.loadAll(), [a])
+        try assertCoherent(store, identities, "failed save")
+    }
+
+    func testPairingAgainWithASupersededMacReplacesIt() throws {
         let keychain = KeychainFixture()
         let store = PairingStore(keychain: keychain)
         let a = record(macA, pairedAt: 100, tag: "a")
         let b = record(macB, pairedAt: 200, tag: "b")
         try store.save(a)
         keychain.failDeletes = [account(macA)]
-        XCTAssertTrue(try store.replace(a, with: b))
-        XCTAssertEqual(try store.loadAll(), [b])
+        XCTAssertFalse(try store.replace(a, with: b))
+        XCTAssertEqual(try store.load(), b)
 
+        keychain.failDeletes = []
         let again = record(macA, pairedAt: 300, tag: "again")
         XCTAssertTrue(try store.replace(b, with: again))
         XCTAssertEqual(try store.loadAll(), [again])
-        XCTAssertEqual(Set(keychain.stored.keys), [account(macA)], "Nothing retired is left")
+        XCTAssertEqual(Set(keychain.stored.keys), [account(macA)])
+    }
+
+    func testUnpairRetryFinishesAfterOnlyTheKeyWasLeft() throws {
+        let keychain = KeychainFixture()
+        let store = PairingStore(keychain: keychain)
+        let a = record(macA, tag: "a")
+        try store.save(a)
+
+        XCTAssertThrowsError(try store.clearAll(current: a) { _ in throw PairingStoreFailure.keychain(errSecIO) })
+        XCTAssertEqual(keychain.stored, [:])
+        keychain.stored["mac:unreadable"] = Data("{".utf8)
+        var deleted: [String] = []
+        try store.clearAll(current: a) { deleted.append($0) }
+        XCTAssertEqual(deleted, ["identity-a"], "Unreadable leftovers don't block finishing")
     }
 
     /// The real Keychain, in a service of its own.
@@ -284,6 +351,39 @@ final class PairingStoreTests: XCTestCase {
 
     private func account(_ fingerprint: String) -> String { PairingStore.account(for: fingerprint)! }
 
+    /// What `CompanionStore.pair` does once the Mac allows it: `pair()` itself needs a live Mac and the system
+    /// Keychain, so this mirrors its commit step. A failed save deletes the new key; `previous`'s key is deleted
+    /// only once it's gone.
+    private func pairAgain(_ previous: PairingRecord, with next: PairingRecord, store: PairingStore,
+                           identities: IdentityFixture) throws -> Bool {
+        let previousGone: Bool
+        do {
+            previousGone = try store.replace(previous, with: next)
+        } catch {
+            identities.deleted.insert(next.identityTag)
+            throw error
+        }
+        if previousGone { identities.deleted.insert(previous.identityTag) }
+        return previousGone
+    }
+
+    /// The app as launched, with the production unpair removal and a fixture in place of the identity Keychain.
+    @MainActor
+    private func launch(_ store: PairingStore, _ identities: IdentityFixture) -> CompanionStore {
+        let client = PaneClientFixture()
+        return CompanionStore(defaults: defaults, loadPairing: { try store.load() }, makeClient: { _, _ in client },
+                              removePairing: { try store.clearAll(current: $0) { identities.deleted.insert($0) } },
+                              liveActivity: nil, writeShared: { _ in }, clearShared: {})
+    }
+
+    /// Nothing that can open names a deleted key.
+    private func assertCoherent(_ store: PairingStore, _ identities: IdentityFixture, _ label: String,
+                                line: UInt = #line) throws {
+        for record in try store.loadAll() {
+            XCTAssertFalse(identities.deleted.contains(record.identityTag), "\(label): \(record.identityTag)", line: line)
+        }
+    }
+
     private func record(_ fingerprint: String, pairedAt: TimeInterval = 1_700_000_000, tag: String = "tag") -> PairingRecord {
         PairingRecord(macName: "Mac \(fingerprint.prefix(4))", host: nil, port: 1234, macFingerprint: fingerprint,
                       transport: nil, routes: [.init(transport: .lan, host: "192.168.1.2"),
@@ -291,6 +391,10 @@ final class PairingStoreTests: XCTestCase {
                       connectionID: UUID(), identityTag: "identity-\(tag)", identityStorage: .secureEnclave,
                       pairedAt: Date(timeIntervalSince1970: pairedAt))
     }
+}
+
+private final class IdentityFixture: @unchecked Sendable {
+    var deleted: Set<String> = []
 }
 
 /// In-memory items with the same account semantics as the Keychain: one item per account, and each fault

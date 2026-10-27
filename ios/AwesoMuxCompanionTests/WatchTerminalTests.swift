@@ -65,7 +65,7 @@ final class WatchTerminalTests: XCTestCase {
         }
     }
 
-    func testWideMacGridRendersAndGrowsInPlace() async throws {
+    func testWideMacGridRendersAndGrowingPastItsFontRequestsSnapshot() async throws {
         let terminal = WatchTerminal()
         let host = try mount([terminal])
         defer { host.close(); terminal.clear() }
@@ -81,17 +81,15 @@ final class WatchTerminalTests: XCTestCase {
         try await idle([terminal])
         XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("WIDE"))
 
-        let wider = CompanionTerminalStream.Grid(rows: 140, cols: 480)
-        try terminal.resize(wider)
-        try await idle([terminal])
-        XCTAssertEqual(terminal.reportedGrid, wider)
-        XCTAssertEqual(try liveView(host).fontSize, WatchDrawableBudget.fontSize(for: wider))
-        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("WIDE"))
+        var failure: Error?
+        terminal.onFailure = { failure = $0 }
+        try terminal.resize(.init(rows: 140, cols: 480))
+        XCTAssertEqual(failure as? WatchTerminalFailure, .gridChangesFont)
     }
 
     // TestFlight 202610272000: a phone claim shrank a 200-column Mac grid to
     // the phone's 40 columns but kept the Mac grid's 6pt font.
-    func testPhoneClaimOnWideMacGridRendersAtFullFontAndRestores() async throws {
+    func testPhoneClaimOnWideMacGridRecoversAtFullFontWithoutLiveFontChange() async throws {
         let terminal = WatchTerminal()
         let host = try mount([terminal])
         defer { host.close(); terminal.clear() }
@@ -100,15 +98,27 @@ final class WatchTerminalTests: XCTestCase {
         let mac = CompanionTerminalStream.Grid(rows: 55, cols: 200)
         try terminal.reset(grid: mac, scrollbackBound: 1 << 20)
         try await idle([terminal])
-        XCTAssertEqual(try liveView(host).fontSize, 6)
-        try terminal.feed(Data("SIZED-MARKER\r\n$ ".utf8))
+        let macView = try liveView(host)
+        XCTAssertEqual(macView.fontSize, 6)
+        // A full-screen app's alternate screen has no scrollback to absorb a
+        // transient shrink, so its bottom row is the first casualty.
+        try terminal.feed(Data("\u{1b}[?1049h\u{1b}[55;1HALT-BOTTOM".utf8))
         try await idle([terminal])
+        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("ALT-BOTTOM"))
 
         let phone = CompanionTerminalStream.Grid(rows: 19, cols: 40)
         try terminal.resize(phone)
+        // Detected and released in the same turn, before any native font or
+        // grid change can reach the live surface's cells.
+        XCTAssertEqual(failure as? WatchTerminalFailure, .gridChangesFont)
+        XCTAssertNil(macView.fontSize)
+        XCTAssertNil(terminal.reportedGrid)
+
+        // The daemon keeps the claimed grid across the reconnect (ADR-0041),
+        // so the fresh snapshot arrives at the phone grid.
+        failure = nil
+        try terminal.reset(grid: phone, scrollbackBound: 1 << 20)
         try await idle([terminal])
-        XCTAssertNil(failure)
-        XCTAssertEqual(terminal.reportedGrid, phone)
         let view = try liveView(host)
         XCTAssertEqual(view.fontSize, WatchDrawableBudget.maximumFontSize)
         let cell = WatchDrawableBudget.cellSize(fontSize: WatchDrawableBudget.maximumFontSize)
@@ -117,16 +127,24 @@ final class WatchTerminalTests: XCTestCase {
         // The phone keeps requesting the grid it already has, so no claim loop.
         XCTAssertEqual(terminal.phoneGrid(for: CGSize(width: view.bounds.width + 1,
                                                       height: view.bounds.height + 1)), phone)
-        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("SIZED-MARKER"))
+        try terminal.feed(Data("\u{1b}[?1049h\u{1b}[19;1HALT-BOTTOM".utf8))
+        try await idle([terminal])
+        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("ALT-BOTTOM"))
         await displayCycles()
-        attach(host.window, name: "Phone grid on a wide Mac terminal")
+        attach(host.window, name: "Phone grid after a wide Mac terminal")
 
-        try terminal.resize(mac)
+        // Keyboard down keeps the font, so the live surface resizes in place.
+        let tall = CompanionTerminalStream.Grid(rows: 35, cols: 40)
+        try terminal.resize(tall)
         try await idle([terminal])
         XCTAssertNil(failure)
-        XCTAssertEqual(terminal.reportedGrid, mac)
-        XCTAssertEqual(try liveView(host).fontSize, 6)
-        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("SIZED-MARKER"))
+        XCTAssertEqual(terminal.reportedGrid, tall)
+        XCTAssertTrue(try liveView(host) === view)
+        XCTAssertEqual(view.fontSize, WatchDrawableBudget.maximumFontSize)
+        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("ALT-BOTTOM"))
+
+        try terminal.resize(mac)
+        XCTAssertEqual(failure as? WatchTerminalFailure, .gridChangesFont)
     }
 
     func testProductionRendererReplaysCapturedReattachAndContinuation() async throws {

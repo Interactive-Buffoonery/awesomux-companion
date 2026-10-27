@@ -310,7 +310,7 @@ final class WatchModelTests: XCTestCase {
     }
 
     func testTransientRendererThrowsAndCallbacksClearThenAttachFreshSnapshot() async {
-        for failure in [WatchTerminalFailure.overflow, .readinessTimeout, .drainTimeout] {
+        for failure in [WatchTerminalFailure.overflow, .readinessTimeout, .drainTimeout, .gridChangesFont] {
             for mode in 0..<3 {
                 let delayed = mode == 2
                 let f = WatchModelFixture()

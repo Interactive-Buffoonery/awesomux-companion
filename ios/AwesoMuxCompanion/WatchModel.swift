@@ -299,7 +299,7 @@ final class WatchModel {
 
     private static func isTransientRendererFailure(_ error: Error) -> Bool {
         guard let failure = error as? WatchTerminalFailure else { return false }
-        return [.nativeBusy, .overflow, .readinessTimeout, .drainTimeout, .fontChangeRejected].contains(failure)
+        return [.nativeBusy, .overflow, .readinessTimeout, .drainTimeout, .gridChangesFont].contains(failure)
     }
 
     private static func canRetry(_ error: Error) -> Bool {

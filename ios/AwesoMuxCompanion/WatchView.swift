@@ -9,6 +9,7 @@ struct WatchView: View {
     let targetVersion: UUID
     let title: String
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(PendingDecisionsModel.self) private var decisions
     let terminalLock: TerminalLockModel
     @StateObject private var terminal: WatchTerminal
     @State private var model: WatchModel
@@ -58,7 +59,12 @@ struct WatchView: View {
                 .frame(width: 1, height: 1))
             .overlay(alignment: .top) { notices }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !keyboardShown { bottomBar }
+                VStack(spacing: 0) {
+                    if let request = decisions.pending.first(where: { $0.identity.paneID == paneID }) {
+                        QuestionDock(request: request, decisions: decisions)
+                    }
+                    if !keyboardShown { bottomBar }
+                }
             }
             .foregroundStyle(Cat.text)
             .background(Cat.page)
@@ -249,6 +255,56 @@ private struct ModeChip: View {
             .background(driving ? Cat.accent : .clear, in: RoundedRectangle(cornerRadius: 4))
             .overlay { if !driving { RoundedRectangle(cornerRadius: 4).stroke(Cat.running, lineWidth: 1) } }
             .accessibilityLabel(driving ? "You have control" : "Watching")
+    }
+}
+
+/// A permission request docked in the pane it came from. Answering never takes over the terminal.
+private struct QuestionDock: View {
+    let request: CompanionPendingDecision
+    let decisions: PendingDecisionsModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(verbatim: "◆ \(request.tool)").foregroundStyle(Cat.mauve)
+                Text("asks permission").foregroundStyle(Cat.subtext0)
+            }
+            Text(verbatim: request.summary)
+                .lineLimit(6)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(Cat.crust, in: RoundedRectangle(cornerRadius: 6))
+                .accessibilityLabel("Request summary from Claude, untrusted: \(request.summary)")
+            if let message = decisions.message {
+                Text(verbatim: message).foregroundStyle(Cat.subtext0)
+            }
+            HStack(spacing: 6) {
+                if decisions.isAnswering {
+                    Text("checking your Mac…").foregroundStyle(Cat.subtext0)
+                } else if decisions.hasAttempt(request.identity) {
+                    Button("Retry same answer") { Task { await decisions.retry(request.identity) } }
+                        .buttonStyle(BarButtonStyle(filled: true))
+                        .disabled(!decisions.canRetry(request.identity))
+                        .accessibilityHint("An answer may have reached your Mac. This retries only the original choice.")
+                } else {
+                    ForEach(request.choices, id: \.rawValue) { choice in
+                        Button(choice == .allow ? "Allow once" : "Deny once") {
+                            Task { await decisions.answer(request.identity, choice: choice) }
+                        }
+                        .buttonStyle(BarButtonStyle(filled: choice == .allow))
+                        .disabled(!decisions.canAnswer(request.identity, choice: choice))
+                        .accessibilityHint("Authenticates before answering this Claude permission request.")
+                    }
+                }
+            }
+        }
+        .font(.caption.monospaced())
+        .foregroundStyle(Cat.text)
+        .padding(10)
+        .background(Cat.mauve.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Cat.mauve, lineWidth: 1))
+        .padding(.horizontal, 8).padding(.bottom, 8)
     }
 }
 

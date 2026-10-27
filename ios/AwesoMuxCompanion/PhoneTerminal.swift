@@ -8,7 +8,25 @@ struct TerminalDestination: Hashable {
     let paneID: UUID
     let targetVersion: UUID
     var title = ""
+    var workspace = ""
     var opening = TerminalOpening.input
+
+    var path: String {
+        let pane = title.isEmpty ? String(localized: "Terminal") : title
+        return workspace.isEmpty ? pane : "\(workspace)/\(pane)"
+    }
+
+    /// The host is always named, so a long pane or workspace can never hide which Mac receives typing.
+    static func hostName(_ macName: String?) -> String {
+        guard let macName, !macName.isEmpty else { return String(localized: "Mac") }
+        return macName
+    }
+
+    func accessibilityHeader(host: String) -> String {
+        let pane = title.isEmpty ? String(localized: "Terminal") : title
+        return workspace.isEmpty ? String(localized: "\(pane) on \(host)")
+            : String(localized: "\(pane) in \(workspace) on \(host)")
+    }
 }
 
 struct TerminalAccess: Equatable {
@@ -53,7 +71,7 @@ final class TerminalCreationModel {
     var error: String?
 
     /// `isCurrent` is the same visible pairing; `canCreate` is the Mac's grant, which may change mid-request.
-    func create(workspaceID: UUID?, isCurrent: @escaping @MainActor () -> Bool,
+    func create(workspaceID: UUID?, workspaceName: String = "", isCurrent: @escaping @MainActor () -> Bool,
                 canCreate: @escaping @MainActor () -> Bool,
                 send: (UUID?) async throws -> CreatedTerminal, refresh: () async -> Void) async {
         guard !isCreating, isCurrent(), canCreate() else { return }
@@ -65,7 +83,7 @@ final class TerminalCreationModel {
             guard !Task.isCancelled, isCurrent() else { return }
             if canCreate() {
                 destination = TerminalDestination(paneID: created.paneID, targetVersion: created.targetVersion,
-                                                  title: String(localized: "Terminal"))
+                                                  title: String(localized: "Terminal"), workspace: workspaceName)
             } else {
                 self.error = String(localized: "Access changed on the Mac. Check Sessions for the new terminal.")
             }

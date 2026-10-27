@@ -25,13 +25,13 @@ final class PaneRosterTests: XCTestCase {
         for availability in ["attached", "awaitingHydration", "unavailable", "stale"] {
             let pane = ListedPane(id: id, title: "Shell", kind: .terminal,
                 availability: availability, state: nil, targetVersion: version)
-            XCTAssertEqual(pane.terminalTarget?.paneID.uuidString, id)
-            XCTAssertEqual(pane.terminalTarget?.targetVersion.uuidString, version)
+            XCTAssertEqual(pane.terminalTarget()?.paneID.uuidString, id)
+            XCTAssertEqual(pane.terminalTarget()?.targetVersion.uuidString, version)
         }
         XCTAssertNil(ListedPane(id: id, title: "Shell", kind: .terminal,
-            availability: "attached", state: nil).terminalTarget)
+            availability: "attached", state: nil).terminalTarget())
         XCTAssertNil(ListedPane(id: id, title: "Notes", kind: .documents,
-            availability: "attached", state: nil, targetVersion: version).terminalTarget)
+            availability: "attached", state: nil, targetVersion: version).terminalTarget())
     }
 
     func testTerminalGrantsDefaultOffAndClearOnSuspensionAndReadFailure() async {

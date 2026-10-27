@@ -387,8 +387,11 @@ Earlier history is always labeled incomplete: snapshots retain terminal cells,
 but do not recover logical wraps, command boundaries or exit codes. Retention
 is bounded; Watch never invents missing history.
 
-The model keeps the Mac grid through phone rotation. Local panning, selection,
-copy and history scrolling do not send input. Native query replies, clipboard
+The terminal fills the phone's view, the way a tmux client does. Ghostty measures
+the grid that fits at the chosen text size, and while the phone drives it resizes
+the Mac pane to that grid. The keyboard, rotation and text size all change the
+measured grid. While watching only, output rewraps to the phone's width. Local
+panning, selection, copy and history scrolling do not send input. Native query replies, clipboard
 escape sequences, notifications and link opening are suppressed. Watch-only
 streams never send input, takeover, reply or resize frames, including when no
 Mac client leads. Phone-width rewrap, Chat (#18) and iPad layout (#11) remain
@@ -396,8 +399,8 @@ separate work.
 
 When the Mac accepts an interactive stream and advertises `inputFrameMax`, Take
 over claims with the phone's grid. Attaching remains a follower. The first key, and the next key after a phone-grid change, send the latest
-grid before input, allowing the Mac to apply it atomically with that key's claim. The grid uses the available terminal view size and the
-renderer cell dimensions; rotation alone sends no resize. The keyboard toggle
+grid before input, allowing the Mac to apply it atomically with that key's claim. While the phone
+has control or the keyboard is up, each new measured grid is sent right away. The keyboard toggle
 opens a compact Esc, Tab, one-shot/locked Ctrl and Alt, and arrow bar. Double-tap
 a modifier to lock it; tap again to turn it off. Its menu and accessibility
 actions also provide Lock/Unlock without timed taps. A lone Escape owns its frame.

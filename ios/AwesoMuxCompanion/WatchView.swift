@@ -13,7 +13,7 @@ struct WatchView: View {
     @State private var model: WatchModel
     @State private var isVisible = false
     @State private var keyboardShown = false
-    @State private var zoom = 1.0
+    @AppStorage("terminalFontSize") private var fontSize = 13.0
     @State private var terminalSize = CGSize.zero
     @State private var securityObserver: UUID?
 
@@ -40,17 +40,18 @@ struct WatchView: View {
     }
 
     var body: some View {
-        WatchTerminalView(terminal: terminal, zoom: zoom)
+        WatchTerminalView(terminal: terminal)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityHint("The Mac snapshot preserves terminal cells, but earlier command history and line wraps are unavailable.")
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 terminalSize = size
-                model.input.updatePhoneGrid(terminal.phoneGrid(for: size))
                 if model.status == .idle { connect() }
             }
-            .onChange(of: terminal.isReady) { _, ready in
-                if ready { model.input.updatePhoneGrid(terminal.phoneGrid(for: terminalSize)) }
+            // The Mac pane follows the phone's grid while the phone drives, as tmux does.
+            .onChange(of: terminal.measuredGrid) { _, grid in
+                if let grid { model.input.updatePhoneGrid(grid) }
             }
+            .onChange(of: fontSize, initial: true) { _, size in terminal.setFontSize(Float(size)) }
             .background(WatchKeyboard(input: model.input, terminal: terminal, isShown: $keyboardShown)
                 .frame(width: 1, height: 1))
             .overlay(alignment: .top) { notices }
@@ -68,6 +69,7 @@ struct WatchView: View {
             .toolbarBackground(Cat.page, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { ModeChip(driving: model.input.hasControl) }
+                    .sharedBackgroundVisibility(.hidden)
             }
             .onAppear {
                 isVisible = true
@@ -198,11 +200,11 @@ struct WatchView: View {
     /// Display size and Mac scrollback, kept out of the way of the terminal.
     private var optionsMenu: some View {
         Menu {
-            Section("Text size \(Int(zoom * 100))%") {
-                Button("Larger", systemImage: "plus.magnifyingglass") { zoom = min(2, zoom + 0.25) }
-                    .disabled(zoom >= 2)
-                Button("Smaller", systemImage: "minus.magnifyingglass") { zoom = max(1, zoom - 0.25) }
-                    .disabled(zoom <= 1)
+            Section("Text size \(Int(fontSize)) pt") {
+                Button("Larger", systemImage: "plus.magnifyingglass") { fontSize += 1 }
+                    .disabled(Float(fontSize) >= WatchTerminal.fontSizes.upperBound)
+                Button("Smaller", systemImage: "minus.magnifyingglass") { fontSize -= 1 }
+                    .disabled(Float(fontSize) <= WatchTerminal.fontSizes.lowerBound)
             }
             Section("History") {
                 Button("Earlier", systemImage: "chevron.up") { terminal.scrollHistory("scroll_page_up") }

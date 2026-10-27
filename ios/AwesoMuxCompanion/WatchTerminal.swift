@@ -6,28 +6,24 @@ import SwiftUI
 import UIKit
 import os
 
+/// Fills its view, like a tmux client: Ghostty measures the grid that fits and
+/// `measuredGrid` publishes it, so whoever drives resizes the Mac pane to match.
 @MainActor
 final class WatchTerminal: ObservableObject, WatchRendering {
     var onFailure: ((Error) -> Void)?
     var canRender: @MainActor () -> Bool = { true }
     @Published private(set) var isReady = false
     @Published private(set) var failure: WatchTerminalFailure?
+    @Published private(set) var measuredGrid: CompanionTerminalStream.Grid?
     @Published fileprivate var surface: WatchNativeSurface?
-    @Published fileprivate var probe: WatchNativeSurface?
-
-    private enum Operation {
-        case bytes(Data)
-        case grid(CompanionTerminalStream.Grid)
-    }
+    private(set) var fontSize: Float = 13
 
     private var boundary = WatchTerminalBoundary()
     private var modeProbe: UUID?
-    private var operations: [Operation] = []
+    private var operations: [Data] = []
     private var queuedBytes = 0
     private var epoch = UUID()
-    private var target: CompanionTerminalStream.Grid?
     private var scrollbackBound = 0
-    private var sizingAttempts = 0
     private var deadlineStarted: ContinuousClock.Instant?
     private var deadline: Task<Void, Never>?
     private var drainToken: UUID?
@@ -35,6 +31,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     private let discardedWrites = WatchDiscardedWrites()
     private static let maximumQueuedBytes = CompanionTerminalStream.maximumSnapshotBytes
     private static let maximumOperations = 256
+    static let fontSizes: ClosedRange<Float> = 8...24
     // Native logging is independent of TerminalDebugLog. The pinned engine
     // reads this setting once in ghostty_init, before any controller exists.
     private static let nativeLoggingDisabled = setenv("GHOSTTY_LOG", "no-stderr,no-macos", 1) == 0
@@ -44,29 +41,26 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         TerminalDebugLog.disable()
     }
 
-    var isIdle: Bool { isReady && operations.isEmpty && drainToken == nil && probe == nil }
+    var isIdle: Bool { isReady && operations.isEmpty && drainToken == nil }
     var discardedWriteByteCount: Int { discardedWrites.count }
-    var grid: CompanionTerminalStream.Grid? { target }
-    var reportedGrid: CompanionTerminalStream.Grid? {
-        surface?.viewport.map { .init(rows: Int($0.rows), cols: Int($0.columns)) }
-    }
 
-    func reset(grid: CompanionTerminalStream.Grid, scrollbackBound: Int) throws {
+    func reset(scrollbackBound: Int) throws {
         clear()
         try requireAuthority()
         guard Self.nativeLoggingDisabled else { throw diagnosticFailure(.unsafeConfiguration) }
         guard drainToken == nil else { throw diagnosticFailure(.nativeBusy) }
-        try validate(grid)
         guard scrollbackBound >= 0 else { throw diagnosticFailure(.invalidRetention) }
         self.scrollbackBound = min(scrollbackBound, Self.maximumQueuedBytes)
-        target = grid
-        let fontSize = WatchDrawableBudget.fontSize(for: grid)
-        let cell = WatchDrawableBudget.cellSize(fontSize: fontSize)
-        let surface = try makeSurface(size: CGSize(width: CGFloat(grid.cols) * cell.width,
-                                                  height: CGFloat(grid.rows) * cell.height),
-                                      fontSize: fontSize)
-        self.surface = surface
-        beginSizing()
+        TerminalDebugLog.disable()
+        let identity = epoch
+        surface = try WatchNativeSurface(fontSize: fontSize, scrollbackBound: self.scrollbackBound,
+                                         discardedWrites: discardedWrites,
+                                         authority: { [weak self] in self?.checkAuthority() ?? false },
+                                         resized: { [weak self] id, value in
+            guard let self, self.epoch == identity, self.checkAuthority() else { return }
+            self.resized(id: id, value: value)
+        })
+        armDeadline(.readinessTimeout)
     }
 
     func feed(_ bytes: Data) throws {
@@ -80,18 +74,8 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         }
         guard !bytes.isEmpty else { return }
         boundary.receive(bytes)
-        operations.append(.bytes(bytes))
+        operations.append(bytes)
         queuedBytes += bytes.count
-        pump()
-    }
-
-    func resize(_ grid: CompanionTerminalStream.Grid) throws {
-        try requireAuthority()
-        if let failure { throw failure }
-        try validate(grid)
-        guard surface != nil else { throw diagnosticFailure(.notAttached) }
-        guard operations.count < Self.maximumOperations else { throw invalidate(.overflow) }
-        operations.append(.grid(grid))
         pump()
     }
 
@@ -104,32 +88,27 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         modeProbe = nil
         operations.removeAll(keepingCapacity: false)
         queuedBytes = 0
-        target = nil
         isReady = false
         failure = nil
-        probe?.detach()
-        probe = nil
+        measuredGrid = nil
         surface?.detach()
         surface = nil
         // An uncancellable package drain may still be returning. Keep its token
         // until completion so repeated resets cannot accumulate blocked workers.
     }
 
+    /// Ghostty reflows to the new cell size and reports the grid that now fits.
+    func setFontSize(_ size: Float) {
+        fontSize = min(max(size, Self.fontSizes.lowerBound), Self.fontSizes.upperBound)
+        guard checkAuthority(), let view = surface?.view else { return }
+        view.performBindingAction("set_font_size:\(fontSize)")
+        view.fitToSize()
+    }
+
     /// Ghostty scrollback actions, such as `scroll_page_up`.
     func scrollHistory(_ action: String) {
         guard checkAuthority(), isReady else { return }
         _ = surface?.view.surface?.performBindingAction(action)
-    }
-
-    func phoneGrid(for size: CGSize) -> CompanionTerminalStream.Grid {
-        var cell = WatchDrawableBudget.cellSize(fontSize: WatchDrawableBudget.maximumFontSize)
-        if let surface, let viewport = surface.viewport, viewport.columns > 0, viewport.rows > 0 {
-            let ratio = CGFloat(WatchDrawableBudget.maximumFontSize / surface.fontSize)
-            cell = CGSize(width: surface.size.width / CGFloat(viewport.columns) * ratio,
-                          height: surface.size.height / CGFloat(viewport.rows) * ratio)
-        }
-        return .init(rows: max(1, min(1000, Int(size.height / max(1, cell.height)))),
-                     cols: max(1, min(1000, Int(size.width / max(1, cell.width)))))
     }
 
     // Probe only between complete parser sequences, after native output drains.
@@ -176,149 +155,48 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         guard checkAuthority() else { throw diagnosticFailure(.accessDenied) }
     }
 
-    private func validate(_ grid: CompanionTerminalStream.Grid) throws {
-        guard (1...1000).contains(grid.cols), (1...1000).contains(grid.rows),
-              grid.cols * grid.rows <= 250_000 else { throw diagnosticFailure(.invalidGrid, grid: grid) }
-    }
-
-    private func makeSurface(size: CGSize, fontSize: Float, displayScale: CGFloat = 3) throws -> WatchNativeSurface {
-        let screenScale = UIApplication.shared.connectedScenes.compactMap {
-            ($0 as? UIWindowScene)?.screen.scale
-        }.max() ?? 3
-        try WatchDrawableBudget.validate(size: size, displayScale: max(screenScale, displayScale))
-        TerminalDebugLog.disable()
-        let identity = epoch
-        return try WatchNativeSurface(size: size, fontSize: fontSize, scrollbackBound: scrollbackBound,
-                                      discardedWrites: discardedWrites,
-                                      authority: { [weak self] in self?.checkAuthority() ?? false },
-                                      resized: { [weak self] id, value in
-            guard let self, self.epoch == identity, self.checkAuthority() else { return }
-            self.resized(id: id, value: value)
-        })
-    }
-
-    private func beginSizing() {
-        isReady = false
-        sizingAttempts = 0
-        armDeadline(.readinessTimeout)
-    }
-
     private func resized(id: UUID, value: InMemoryTerminalViewport) {
-        guard let target, let surface else { return }
-        let sizingSurface: WatchNativeSurface
-        if let probe, probe.id == id {
-            sizingSurface = probe
-        } else if surface.id == id {
-            // A scale/appearance change must not silently reflow the live grid.
-            if isReady, (Int(value.columns) != target.cols || Int(value.rows) != target.rows) {
-                _ = invalidate(.unexpectedGrid)
-                return
-            }
-            if probe != nil { return }
-            sizingSurface = surface
-        } else { return }
-        sizingSurface.viewport = value
-        guard sizingSurface.controller.lastConfigurationIssue == nil else {
+        guard let surface, surface.id == id else { return }
+        guard surface.controller.lastConfigurationIssue == nil else {
             _ = invalidate(.unsafeConfiguration)
             return
         }
-        if Int(value.columns) == target.cols, Int(value.rows) == target.rows {
-            if sizingSurface === probe {
-                // Calibration changes only an empty surface. Retained content
-                // sees exactly one resize, at the authoritative dimensions.
-                do {
-                    try surface.resize(to: sizingSurface.size,
-                                       displayScale: sizingSurface.view.traitCollection.displayScale)
-                } catch {
-                    _ = invalidate(.drawableTooLarge)
-                    return
-                }
-                probe?.detach()
-                probe = nil
-                return
-            }
-            deadline?.cancel()
-            isReady = true
-            pump()
-            return
-        }
-        guard value.columns > 0, value.rows > 0, sizingAttempts < 12 else {
-            _ = invalidate(.unexpectedGrid)
-            return
-        }
-        let scale = sizingSurface.view.traitCollection.displayScale
-        // The engine first reports its default pre-layout size; extrapolating
-        // from that overshoots wide grids. Wait for the laid-out report.
-        guard abs(CGFloat(value.widthPixels) - sizingSurface.size.width * scale) <= scale,
-              abs(CGFloat(value.heightPixels) - sizingSurface.size.height * scale) <= scale else { return }
-        sizingAttempts += 1
-        let next: CGSize
-        if value.cellWidthPixels > 0, value.cellHeightPixels > 0, scale > 0 {
-            let paddingX = max(0, Int(value.widthPixels) - Int(value.columns) * Int(value.cellWidthPixels))
-            let paddingY = max(0, Int(value.heightPixels) - Int(value.rows) * Int(value.cellHeightPixels))
-            next = CGSize(width: CGFloat(target.cols * Int(value.cellWidthPixels) + paddingX) / scale,
-                          height: CGFloat(target.rows * Int(value.cellHeightPixels) + paddingY) / scale)
-        } else {
-            // The pinned iOS binary reports zero cell metrics. Use observed
-            // grid rounding intervals, as the public diagnostics adapter does.
-            next = CGSize(width: Int(value.columns) == target.cols ? sizingSurface.size.width
-                          : sizingSurface.size.width * (CGFloat(target.cols) + 0.5) / (CGFloat(value.columns) + 0.5),
-                          height: Int(value.rows) == target.rows ? sizingSurface.size.height
-                          : sizingSurface.size.height * (CGFloat(target.rows) + 0.5) / (CGFloat(value.rows) + 0.5))
-        }
-        do {
-            try sizingSurface.resize(to: next)
-        } catch {
-            _ = invalidate(.drawableTooLarge)
-        }
+        // The engine first reports its default pre-layout size. Only a report
+        // matching the laid-out view is the grid the phone actually shows.
+        let bounds = surface.view.bounds.size, scale = surface.view.traitCollection.displayScale
+        guard value.columns > 0, value.rows > 0, scale > 0,
+              abs(CGFloat(value.widthPixels) - bounds.width * scale) <= scale,
+              abs(CGFloat(value.heightPixels) - bounds.height * scale) <= scale else { return }
+        let grid = CompanionTerminalStream.Grid(rows: Int(value.rows), cols: Int(value.columns))
+        if measuredGrid != grid { measuredGrid = grid }
+        guard !isReady else { return }
+        deadline?.cancel()
+        isReady = true
+        pump()
     }
 
     private func pump() {
         guard checkAuthority(), isReady, drainToken == nil, let surface, !operations.isEmpty else { return }
-        let operation = operations.removeFirst()
-        switch operation {
-        case .bytes(let bytes):
-            // A package queue silently trims bytes while detached. Never send
-            // it output without an attached, correctly sized native surface.
-            guard surface.view.surface != nil else { _ = invalidate(.notAttached); return }
-            let token = UUID()
-            let identity = epoch
-            drainToken = token
-            surface.session.receive(bytes)
-            armDeadline(.drainTimeout)
-            let session = surface.session
-            drainQueue.async { [weak self] in
-                let drained = session.waitForPendingOutput()
-                Task { @MainActor [weak self] in
-                    guard let self, self.drainToken == token else { return }
-                    self.drainToken = nil
-                    guard self.epoch == identity, self.checkAuthority() else { return }
-                    self.deadline?.cancel()
-                    self.queuedBytes -= bytes.count
-                    guard drained else { _ = self.invalidate(.notAttached); return }
-                    self.pump()
-                }
-            }
-        case .grid(let grid):
-            guard grid != target else { pump(); return }
-            // A live surface cannot change font, so a grid that needs a smaller
-            // one reconnects for a fresh snapshot sized for it.
-            guard WatchDrawableBudget.fontSize(for: grid) >= surface.fontSize else {
-                _ = invalidate(.gridOutgrewFont)
-                return
-            }
-            target = grid
-            beginSizing()
-            do {
-                let cell = WatchDrawableBudget.cellSize(fontSize: surface.fontSize)
-                probe = try makeSurface(size: CGSize(width: CGFloat(grid.cols) * cell.width,
-                                                     height: CGFloat(grid.rows) * cell.height),
-                                        fontSize: surface.fontSize,
-                                        displayScale: surface.view.traitCollection.displayScale)
-            } catch let failure as WatchTerminalFailure {
-                _ = invalidate(failure)
-            } catch {
-                _ = invalidate(.unsafeConfiguration)
+        let bytes = operations.removeFirst()
+        // A package queue silently trims bytes while detached. Never send
+        // it output without an attached, laid-out native surface.
+        guard surface.view.surface != nil else { _ = invalidate(.notAttached); return }
+        let token = UUID()
+        let identity = epoch
+        drainToken = token
+        surface.session.receive(bytes)
+        armDeadline(.drainTimeout)
+        let session = surface.session
+        drainQueue.async { [weak self] in
+            let drained = session.waitForPendingOutput()
+            Task { @MainActor [weak self] in
+                guard let self, self.drainToken == token else { return }
+                self.drainToken = nil
+                guard self.epoch == identity, self.checkAuthority() else { return }
+                self.deadline?.cancel()
+                self.queuedBytes -= bytes.count
+                guard drained else { _ = self.invalidate(.notAttached); return }
+                self.pump()
             }
         }
     }
@@ -334,9 +212,8 @@ final class WatchTerminal: ObservableObject, WatchRendering {
         }
     }
 
-    private func diagnosticFailure(_ error: WatchTerminalFailure, grid: CompanionTerminalStream.Grid? = nil) -> WatchTerminalFailure {
-        let diagnosticGrid = grid ?? target
-        WatchDiagnostics.renderer.error("renderer_failed reason=\(WatchDiagnostics.reason(error), privacy: .public) rows=\(diagnosticGrid?.rows ?? 0) cols=\(diagnosticGrid?.cols ?? 0) queue_bytes=\(self.queuedBytes) queue_ops=\(self.operations.count) deadline_age_ms=\(self.deadlineStarted.map { WatchDiagnostics.milliseconds(.now - $0) } ?? -1)")
+    private func diagnosticFailure(_ error: WatchTerminalFailure) -> WatchTerminalFailure {
+        WatchDiagnostics.renderer.error("renderer_failed reason=\(WatchDiagnostics.reason(error), privacy: .public) rows=\(self.measuredGrid?.rows ?? 0) cols=\(self.measuredGrid?.cols ?? 0) queue_bytes=\(self.queuedBytes) queue_ops=\(self.operations.count) deadline_age_ms=\(self.deadlineStarted.map { WatchDiagnostics.milliseconds(.now - $0) } ?? -1)")
         return error
     }
 
@@ -351,80 +228,37 @@ final class WatchTerminal: ObservableObject, WatchRendering {
 }
 
 enum WatchTerminalFailure: Error, LocalizedError, Equatable {
-    case accessDenied, notAttached, invalidGrid, invalidRetention, overflow, drawableTooLarge
-    case readinessTimeout, drainTimeout, unexpectedGrid, unsafeConfiguration, nativeBusy, gridOutgrewFont
+    case accessDenied, notAttached, invalidRetention, overflow
+    case readinessTimeout, drainTimeout, unsafeConfiguration, nativeBusy
 
     var errorDescription: String? {
         switch self {
         case .accessDenied: "Watch is no longer available."
         case .notAttached: "The Watch renderer is not attached."
-        case .invalidGrid: "The terminal grid exceeds the Watch renderer limit."
-        case .drawableTooLarge: "The terminal dimensions exceed the Watch renderer's display limit."
         case .invalidRetention: "The terminal history bound is invalid."
         case .overflow: "Watch output exceeded the renderer buffer. Reconnect to continue."
         case .readinessTimeout: "The Watch renderer did not become ready."
         case .drainTimeout: "The Watch renderer did not finish processing output."
-        case .unexpectedGrid: "The Watch renderer could not preserve the Mac terminal grid."
         case .unsafeConfiguration: "The Watch renderer could not disable terminal host effects."
         case .nativeBusy: "The previous Watch renderer is still stopping."
-        case .gridOutgrewFont: "The Mac terminal grew past the Watch renderer's font size."
         }
     }
 }
 
-enum WatchDrawableBudget {
-    static let maximumFontSize: Float = 13
-
-    /// Measured on iOS 26 at 3x: a 13pt cell is about 10.6x23.1pt and scales
-    /// linearly with the font size.
-    static func cellSize(fontSize: Float) -> CGSize {
-        let ratio = CGFloat(fontSize / maximumFontSize)
-        return CGSize(width: 10.6 * ratio, height: 23.1 * ratio)
-    }
-
-    /// Largest font, up to 13pt, whose estimated drawable fits the budget, so
-    /// wide Mac grids render small instead of failing. 20% headroom per side
-    /// covers padding and measurement error.
-    static func fontSize(for grid: CompanionTerminalStream.Grid) -> Float {
-        let side: CGFloat = 8192 / 3 * 0.8
-        let cell = cellSize(fontSize: maximumFontSize)
-        let width = CGFloat(grid.cols) * cell.width, height = CGFloat(grid.rows) * cell.height
-        let fit = min(1, side / width, side / height, (8_388_608 * 0.64 / 9 / (width * height)).squareRoot())
-        return max(1, (maximumFontSize * Float(fit) * 2).rounded(.down) / 2)
-    }
-
-    static func validate(size: CGSize, displayScale: CGFloat) throws {
-        guard size.width.isFinite, size.height.isFinite,
-              size.width > 0, size.height > 0,
-              displayScale.isFinite, displayScale > 0 else { throw WatchTerminalFailure.drawableTooLarge }
-        let scale = max(displayScale, 3)
-        let width = ceil(size.width * scale)
-        let height = ceil(size.height * scale)
-        // BGRA uses four bytes per pixel: at most 32 MiB per drawable.
-        guard width <= 8192, height <= 8192,
-              width * height <= 8_388_608 else { throw WatchTerminalFailure.drawableTooLarge }
-    }
-}
-
 @MainActor
-fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
+fileprivate final class WatchNativeSurface: Identifiable,
     TerminalSurfaceOpenURLDelegate, TerminalSurfaceClipboardConfirmationDelegate {
     let id: UUID
     let controller: TerminalController
     let session: InMemoryTerminalSession
     let view: WatchReadOnlyTerminalView
-    let fontSize: Float
     let modeReports = WatchModeReports()
-    @Published private(set) var size: CGSize
-    var viewport: InMemoryTerminalViewport?
 
-    init(size: CGSize, fontSize: Float, scrollbackBound: Int, discardedWrites: WatchDiscardedWrites,
+    init(fontSize: Float, scrollbackBound: Int, discardedWrites: WatchDiscardedWrites,
          authority: @escaping () -> Bool,
          resized: @escaping @MainActor (UUID, InMemoryTerminalViewport) -> Void) throws {
         let identity = UUID()
         id = identity
-        self.size = size
-        self.fontSize = fontSize
         let configuration = TerminalConfiguration()
             .fontSize(fontSize).windowPaddingX(0).windowPaddingY(0)
             .custom("clipboard-read", "deny").custom("clipboard-write", "deny")
@@ -443,26 +277,13 @@ fileprivate final class WatchNativeSurface: ObservableObject, Identifiable,
         }, resize: { value in
             Task { @MainActor in resized(identity, value) }
         })
-        view = WatchReadOnlyTerminalView(frame: CGRect(origin: .zero, size: size))
+        view = WatchReadOnlyTerminalView(frame: .zero)
         view.authority = authority
         view.delegate = self
         view.configuration = TerminalSurfaceOptions(backend: .inMemory(session), fontSize: fontSize)
         view.controller = controller
         view.accessibilityLabel = "Read-only Mac terminal"
         view.accessibilityHint = "Select text to copy. Use two fingers or the history controls to scroll."
-    }
-
-    func resize(to size: CGSize, displayScale: CGFloat = 3) throws {
-        try WatchDrawableBudget.validate(size: size,
-            displayScale: max(displayScale, view.traitCollection.displayScale))
-        self.size = size
-        applySize()
-    }
-
-    func applySize() {
-        view.frame = CGRect(origin: .zero, size: size)
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
     }
 
     func detach() {
@@ -567,58 +388,36 @@ fileprivate final class WatchReadOnlyTerminalView: UITerminalView {
 
 struct WatchTerminalView: View {
     @ObservedObject var terminal: WatchTerminal
-    var zoom: Double = 1
 
     var body: some View {
-        ZStack {
-            if let surface = terminal.surface, terminal.canRender() {
-                // Bottom-anchored so the prompt stays in view when the keyboard shortens the pane.
-                ScrollView([.horizontal, .vertical]) {
-                    WatchNativeCanvas(surface: surface)
-                        .scaleEffect(zoom, anchor: .topLeading)
-                        .frame(width: surface.size.width * zoom,
-                               height: surface.size.height * zoom, alignment: .topLeading)
-                }
-                .defaultScrollAnchor(.bottomLeading)
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            if let probe = terminal.probe {
-                WatchNativeCanvas(surface: probe)
-                    .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
-            }
+        if let surface = terminal.surface, terminal.canRender() {
+            WatchNativeRepresentable(surface: surface).id(surface.id)
         }
     }
 }
 
-private struct WatchNativeCanvas: View {
-    @ObservedObject var surface: WatchNativeSurface
-    var body: some View {
-        WatchNativeRepresentable(surface: surface)
-            .id(surface.id)
-            .frame(width: surface.size.width, height: surface.size.height)
-            .fixedSize()
-    }
-}
-
-/// SwiftUI sizes only the container; the terminal view's frame is ours alone, so a
-/// keyboard relayout can never leave the two disagreeing about its geometry.
+/// The terminal view always takes the container's full bounds, so the grid
+/// Ghostty measures is the grid the phone shows.
 private struct WatchNativeRepresentable: UIViewRepresentable {
     let surface: WatchNativeSurface
-    func makeUIView(context: Context) -> UIView {
-        let container = UIView()
+    func makeUIView(context: Context) -> WatchNativeContainer {
+        let container = WatchNativeContainer()
         container.addSubview(surface.view)
         return container
     }
-    func updateUIView(_ container: UIView, context: Context) {
-        guard surface.view.superview === container, surface.view.authority() else { return }
-        surface.applySize()
-    }
-    static func dismantleUIView(_ container: UIView, coordinator: ()) {
+    func updateUIView(_ container: WatchNativeContainer, context: Context) {}
+    static func dismantleUIView(_ container: WatchNativeContainer, coordinator: ()) {
         for case let view as WatchReadOnlyTerminalView in container.subviews {
             view.setSurfaceVisible(false)
             view.controller = nil
         }
+    }
+}
+
+private final class WatchNativeContainer: UIView {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        for case let view as WatchReadOnlyTerminalView in subviews where view.authority() { view.frame = bounds }
     }
 }
 

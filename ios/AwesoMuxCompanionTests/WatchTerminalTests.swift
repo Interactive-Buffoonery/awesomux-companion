@@ -7,92 +7,12 @@ import XCTest
 
 @MainActor
 final class WatchTerminalTests: XCTestCase {
-    private let initialGrid = CompanionTerminalStream.Grid(rows: 6, cols: 20)
-
-    func testDrawableBudgetAcceptsBoundariesAndUsesAtLeastThreeTimesScale() throws {
-        // 8192 x 1024 physical pixels is exactly 32 MiB in BGRA.
-        let boundary = CGSize(width: 2048, height: 256)
-        XCTAssertNoThrow(try WatchDrawableBudget.validate(size: boundary, displayScale: 4))
-        XCTAssertThrowsError(try WatchDrawableBudget.validate(
-            size: CGSize(width: 2048.25, height: 256), displayScale: 4)) {
-            XCTAssertEqual($0 as? WatchTerminalFailure, .drawableTooLarge)
-        }
-        XCTAssertNoThrow(try WatchDrawableBudget.validate(
-            size: CGSize(width: 640, height: 384), displayScale: 3))
-        for scale in [CGFloat(1), 2, 3] {
-            XCTAssertThrowsError(try WatchDrawableBudget.validate(
-                size: CGSize(width: 1000, height: 1000), displayScale: scale)) {
-                XCTAssertEqual($0 as? WatchTerminalFailure, .drawableTooLarge)
-            }
-        }
-    }
-
-    func testDrawableBudgetRejectsOversizedGridEstimatesAndCalibrationSizes() {
-        let sizes: [CGSize] = [
-            CGSize(width: 1000 * 8, height: 250 * 16),
-            CGSize(width: 250 * 8, height: 1000 * 16),
-            CGSize(width: 8193, height: 1),
-            CGSize(width: 1, height: 8193),
-            CGSize(width: 2048, height: 256.25),
-            CGSize(width: CGFloat.infinity, height: 1),
-            CGSize(width: 1, height: CGFloat.nan),
-            CGSize(width: 0, height: 100),
-            CGSize(width: 100, height: -1)
-        ]
-        for size in sizes {
-            XCTAssertThrowsError(try WatchDrawableBudget.validate(size: size, displayScale: 4)) {
-                XCTAssertEqual($0 as? WatchTerminalFailure, .drawableTooLarge)
-            }
-        }
-        for scale in [CGFloat(0), -1, .infinity, .nan] {
-            XCTAssertThrowsError(try WatchDrawableBudget.validate(
-                size: CGSize(width: 100, height: 100), displayScale: scale)) {
-                XCTAssertEqual($0 as? WatchTerminalFailure, .drawableTooLarge)
-            }
-        }
-    }
-
-    func testFontSizeKeepsSmallGridsAtThirteenAndFitsLargeGridsInBudget() throws {
-        XCTAssertEqual(WatchDrawableBudget.fontSize(for: .init(rows: 24, cols: 80)), 13)
-        for (rows, cols) in [(70, 240), (100, 400), (250, 1000), (1000, 250), (1000, 1)] {
-            let fontSize = WatchDrawableBudget.fontSize(for: .init(rows: rows, cols: cols))
-            XCTAssertLessThan(fontSize, 13)
-            let cell = WatchDrawableBudget.cellSize(fontSize: fontSize)
-            // Allow the estimate to run 20% small and still fit.
-            XCTAssertNoThrow(try WatchDrawableBudget.validate(
-                size: CGSize(width: CGFloat(cols) * cell.width * 1.2, height: CGFloat(rows) * cell.height * 1.2),
-                displayScale: 3), "\(cols)x\(rows)")
-        }
-    }
-
-    func testWideMacGridRendersAndGrowingPastItsFontRequestsSnapshot() async throws {
-        let terminal = WatchTerminal()
-        let host = try mount([terminal])
-        defer { host.close(); terminal.clear() }
-        let widest = CompanionTerminalStream.Grid(rows: 100, cols: 400)
-        try terminal.reset(grid: widest, scrollbackBound: 4096)
-        try await idle([terminal])
-        XCTAssertEqual(terminal.reportedGrid, widest)
-        let wide = CompanionTerminalStream.Grid(rows: 70, cols: 240)
-        try terminal.reset(grid: wide, scrollbackBound: 4096)
-        try await idle([terminal])
-        XCTAssertEqual(terminal.reportedGrid, wide)
-        try terminal.feed(Data("WIDE".utf8))
-        try await idle([terminal])
-        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("WIDE"))
-
-        var failure: Error?
-        terminal.onFailure = { failure = $0 }
-        try terminal.resize(.init(rows: 140, cols: 480))
-        XCTAssertEqual(failure as? WatchTerminalFailure, .gridOutgrewFont)
-    }
-
     func testProductionRendererReplaysCapturedReattachAndContinuation() async throws {
         let live = WatchTerminal(), restored = WatchTerminal()
         let host = try mount([live, restored])
         defer { host.close(); live.clear(); restored.clear() }
-        try live.reset(grid: initialGrid, scrollbackBound: 1 << 20)
-        try restored.reset(grid: initialGrid, scrollbackBound: 1 << 20)
+        try live.reset(scrollbackBound: 1 << 20)
+        try restored.reset(scrollbackBound: 1 << 20)
         try await idle([live, restored])
         try live.feed(fixture("input"))
         try live.feed(fixture("away"))
@@ -110,13 +30,11 @@ final class WatchTerminalTests: XCTestCase {
         XCTAssertEqual(after, restored.readViewportText())
         XCTAssertTrue(after.contains("LIVE-CONTINUE"))
         XCTAssertTrue(after.contains("DONE"))
-        XCTAssertEqual(live.reportedGrid, initialGrid)
-        XCTAssertEqual(restored.reportedGrid, initialGrid)
         await displayCycles()
         attach(host.window, name: "Production Watch replay after live continuation")
 
         // Reset must replace parser state, retained cells and queued operations.
-        try restored.reset(grid: initialGrid, scrollbackBound: 1 << 20)
+        try restored.reset(scrollbackBound: 1 << 20)
         try await idle([restored])
         XCTAssertFalse(try XCTUnwrap(restored.readViewportText()).contains("DONE"))
         try restored.feed(fixture("reattach"))
@@ -141,8 +59,8 @@ final class WatchTerminalTests: XCTestCase {
         let whole = WatchTerminal(), split = WatchTerminal()
         let host = try mount([whole, split])
         defer { host.close(); whole.clear(); split.clear() }
-        try whole.reset(grid: initialGrid, scrollbackBound: 4096)
-        try split.reset(grid: initialGrid, scrollbackBound: 4096)
+        try whole.reset(scrollbackBound: 4096)
+        try split.reset(scrollbackBound: 4096)
         try await idle([whole, split])
         let bytes = Data("\u{1b}[2J\u{1b}[Hone 界 e\u{301}\r\n\u{1b}[31mRED\u{1b}[0m\r\nend".utf8)
         try whole.feed(bytes)
@@ -157,71 +75,30 @@ final class WatchTerminalTests: XCTestCase {
         XCTAssertTrue(text.contains("end"))
     }
 
-    func testAuthoritativeGridChangeOrdersOutputAndPhoneLayoutKeepsGrid() async throws {
-        let changing = WatchTerminal(), reference = WatchTerminal()
-        let host = try mount([changing, reference], initialZoom: 2)
-        defer { host.close(); changing.clear(); reference.clear() }
-        let larger = CompanionTerminalStream.Grid(rows: 8, cols: 24)
-        try changing.reset(grid: initialGrid, scrollbackBound: 4096)
-        try reference.reset(grid: larger, scrollbackBound: 4096)
-        try await idle([changing, reference])
-        XCTAssertEqual(changing.reportedGrid, initialGrid)
-        XCTAssertEqual(reference.reportedGrid, larger)
-        let prefix = Data("BEFORE\r\nSECOND".utf8)
-        let suffix = Data("\r\nAFTER 界 e\u{301}".utf8)
-        try changing.feed(prefix)
-        try changing.resize(larger)
-        try changing.feed(suffix)
-        try reference.feed(prefix)
-        try reference.feed(suffix)
-        try await idle([changing, reference])
-        XCTAssertEqual(changing.reportedGrid, larger)
-        let text = try XCTUnwrap(changing.readViewportText())
-        XCTAssertEqual(text, reference.readViewportText())
-        XCTAssertTrue(text.contains("BEFORE"))
-        XCTAssertTrue(text.contains("AFTER"))
-
-        host.window.frame.size = CGSize(width: 740, height: 360)
-        host.window.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(100))
-        try await idle([changing, reference])
-        XCTAssertEqual(changing.reportedGrid, larger)
-        XCTAssertEqual(changing.readViewportText(), text)
-        await displayCycles()
-        attach(host.window, name: "Production Watch authoritative grid after phone layout change")
-    }
-
-    func testShortenedPaneKeepsTextSizeAndShowsBottom() async throws {
+    func testTerminalFillsItsViewAndReportsTheGridThatFits() async throws {
         let terminal = WatchTerminal()
-        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            .first(where: { $0.activationState == .foregroundActive }))
-        let previous = scene.windows.first(where: \.isKeyWindow)
-        let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        window.rootViewController = UIHostingController(rootView: WatchTerminalView(terminal: terminal))
-        window.makeKeyAndVisible()
-        let host = TestHost(window: window, previous: previous)
+        let host = try mount([terminal])
         defer { host.close(); terminal.clear() }
-        let grid = CompanionTerminalStream.Grid(rows: 33, cols: 39)
-        try terminal.reset(grid: grid, scrollbackBound: 4096)
+        try terminal.reset(scrollbackBound: 4096)
         try await idle([terminal])
-        try terminal.feed(Data((1...33).map { "line \($0)" }.joined(separator: "\r\n").utf8))
-        try await idle([terminal])
-        let terminalView = try XCTUnwrap(descendants(window).first { $0 is UITerminalView })
-        let fullSize = terminalView.bounds.size
+        let full = try XCTUnwrap(terminal.measuredGrid)
+        let view = try XCTUnwrap(descendants(host.window).first { $0 is UITerminalView })
+        XCTAssertEqual(view.bounds.size, view.superview?.bounds.size)
 
-        window.frame.size = CGSize(width: 402, height: 420)
-        window.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(200))
+        // A keyboard shortens the pane: fewer rows, same columns.
+        host.height = 140
+        try await grid(of: terminal) { $0.rows < full.rows }
+        XCTAssertEqual(terminal.measuredGrid?.cols, full.cols)
+        XCTAssertEqual(view.bounds.size, view.superview?.bounds.size)
+
+        // Larger text fits fewer columns.
+        terminal.setFontSize(terminal.fontSize + 6)
+        try await grid(of: terminal) { $0.cols < full.cols }
+        try terminal.feed(Data("AFTER".utf8))
         try await idle([terminal])
+        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("AFTER"))
         await displayCycles()
-        XCTAssertEqual(terminal.reportedGrid, grid)
-        XCTAssertEqual(terminalView.bounds.size, fullSize)
-        let scroll = try XCTUnwrap(descendants(window).compactMap { $0 as? UIScrollView }.first)
-        let bottom = scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height
-        XCTAssertGreaterThan(bottom, 0)
-        XCTAssertEqual(scroll.contentOffset.y, bottom, accuracy: 1)
-        attach(window, name: "Production Watch bottom-anchored in a shortened pane")
+        attach(host.window, name: "Production Watch filling a shortened pane at a larger font")
     }
 
     func testHostEffectsAreDeniedAndTerminalRepliesAreDiscarded() async throws {
@@ -230,7 +107,7 @@ final class WatchTerminalTests: XCTestCase {
         let previousItems = UIPasteboard.general.items
         defer { terminal.clear(); host.close(); UIPasteboard.general.items = previousItems }
         UIPasteboard.general.string = "watch-test-private-clipboard"
-        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
+        try terminal.reset(scrollbackBound: 4096)
         try await idle([terminal])
         let count = terminal.discardedWriteByteCount
         try terminal.feed(Data(("SAFE\u{1b}]52;c;cmVwbGFjZWQ=\u{7}"
@@ -263,9 +140,6 @@ final class WatchTerminalTests: XCTestCase {
         try terminal.feed(Data("\u{1b}[?2004l\u{1b}[?1l".utf8))
         let disabled = await terminal.inputModes()
         XCTAssertEqual(disabled, WatchInputModes())
-        let phone = terminal.phoneGrid(for: CGSize(width: 390, height: 500))
-        XCTAssertTrue((20...60).contains(phone.cols))
-        XCTAssertTrue((10...40).contains(phone.rows))
     }
 
     func testModeProbeAccountsForQueriesInAbortedDCSHeaders() async throws {
@@ -305,7 +179,7 @@ final class WatchTerminalTests: XCTestCase {
         terminal.canRender = { allowed }
         let host = try mount([terminal])
         defer { host.close(); terminal.clear() }
-        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
+        try terminal.reset(scrollbackBound: 4096)
         try await idle([terminal])
         let view = try XCTUnwrap(descendants(host.window).compactMap { $0 as? UITerminalView }.first)
         try terminal.feed(Data("PRIVATE".utf8))
@@ -324,7 +198,7 @@ final class WatchTerminalTests: XCTestCase {
         defer { terminal.clear() }
         var failure: Error?
         terminal.onFailure = { failure = $0 }
-        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
+        try terminal.reset(scrollbackBound: 4096)
         let frame = Data(repeating: 65, count: CompanionTerminalStream.maximumDataBytes)
         for _ in 0..<(CompanionTerminalStream.maximumSnapshotBytes / frame.count) { try terminal.feed(frame) }
         XCTAssertThrowsError(try terminal.feed(Data([66])))
@@ -337,7 +211,7 @@ final class WatchTerminalTests: XCTestCase {
         let terminal = WatchTerminal()
         let host = try mount([terminal])
         addTeardownBlock { await MainActor.run { host.close(); terminal.clear() } }
-        try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
+        try terminal.reset(scrollbackBound: 4096)
         try await idle([terminal])
         return terminal
     }
@@ -356,8 +230,17 @@ final class WatchTerminalTests: XCTestCase {
             if terminals.allSatisfy(\.isIdle) { return }
             try await Task.sleep(for: .milliseconds(20))
         }
-        XCTFail("Production Watch renderer did not reach its exact grid and drain before the deadline")
+        XCTFail("Production Watch renderer did not attach and drain before the deadline")
         throw WatchTerminalFailure.readinessTimeout
+    }
+
+    private func grid(of terminal: WatchTerminal, _ matches: (CompanionTerminalStream.Grid) -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while ContinuousClock.now < deadline {
+            if let grid = terminal.measuredGrid, matches(grid) { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("Measured grid \(String(describing: terminal.measuredGrid)) never matched")
     }
 
     private func descendants(_ view: UIView) -> [UIView] {
@@ -402,19 +285,33 @@ final class WatchTerminalTests: XCTestCase {
         }
     }
 
-    private func mount(_ terminals: [WatchTerminal], initialZoom: Double = 1) throws -> TestHost {
+    private func mount(_ terminals: [WatchTerminal]) throws -> TestHost {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .first(where: { $0.activationState == .foregroundActive }))
         let previous = scene.windows.first(where: \.isKeyWindow)
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
-        window.rootViewController = UIHostingController(rootView: VStack {
-            ForEach(Array(terminals.enumerated()), id: \.offset) { _, terminal in
-                WatchTerminalView(terminal: terminal, zoom: initialZoom).frame(height: 280)
-            }
-        })
+        let height = PaneHeight()
+        window.rootViewController = UIHostingController(rootView: MountedPanes(terminals: terminals, height: height))
         window.makeKeyAndVisible()
-        return TestHost(window: window, previous: previous)
+        return TestHost(window: window, previous: previous, pane: height)
+    }
+}
+
+@MainActor
+private final class PaneHeight: ObservableObject {
+    @Published var value: CGFloat = 280
+}
+
+private struct MountedPanes: View {
+    let terminals: [WatchTerminal]
+    @ObservedObject var height: PaneHeight
+    var body: some View {
+        VStack {
+            ForEach(Array(terminals.enumerated()), id: \.offset) { _, terminal in
+                WatchTerminalView(terminal: terminal).frame(height: height.value)
+            }
+        }
     }
 }
 
@@ -422,6 +319,11 @@ final class WatchTerminalTests: XCTestCase {
 private struct TestHost {
     let window: UIWindow
     weak var previous: UIWindow?
+    var pane = PaneHeight()
+    nonmutating var height: CGFloat {
+        get { pane.value }
+        set { pane.value = newValue }
+    }
     func close() {
         window.isHidden = true
         window.rootViewController = nil

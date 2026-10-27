@@ -172,7 +172,7 @@ final class WatchInput {
     func updatePhoneGrid(_ grid: Stream.Grid) {
         guard preferredGrid != grid else { return }
         preferredGrid = grid
-        guard keyboardRequested, canType, jobs.count < 64 else { return }
+        guard keyboardRequested || hasControl, canType, jobs.count < 64 else { return }
         // The Mac only caches a bare grid frame; re-claiming applies the keyboard-sized grid now.
         let frame: Stream.Frame = claimPending || hasControl ? .claim(.init(grid: grid)) : .grid(grid)
         jobs.append(Job(frame: frame, sequence: nil, paste: false))

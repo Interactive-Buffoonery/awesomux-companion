@@ -4,9 +4,8 @@ import os
 
 @MainActor
 protocol WatchRendering: AnyObject {
-    func reset(grid: CompanionTerminalStream.Grid, scrollbackBound: Int) throws
+    func reset(scrollbackBound: Int) throws
     func feed(_ bytes: Data) throws
-    func resize(_ grid: CompanionTerminalStream.Grid) throws
     func clear()
 }
 

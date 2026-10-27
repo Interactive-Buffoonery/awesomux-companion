@@ -128,12 +128,7 @@ final class WatchModel {
             return
         }
         WatchDiagnostics.watch.notice("retry_suppressed origin=renderer reason=\(WatchDiagnostics.reason(error), privacy: .public)")
-        if let failure = error as? WatchTerminalFailure,
-           failure == .invalidGrid || failure == .drawableTooLarge {
-            self.error = String(localized: "This terminal's dimensions can't be displayed.")
-        } else {
-            self.error = String(localized: "This terminal couldn't be displayed. Reconnect to try again.")
-        }
+        self.error = String(localized: "This terminal couldn't be displayed. Reconnect to try again.")
     }
 
     private func launchIfAllowed() {
@@ -284,12 +279,10 @@ final class WatchModel {
             historyIncomplete = true
             status = .snapshot
             error = nil
-            try renderer.reset(grid: begin.grid, scrollbackBound: begin.scrollbackBound)
+            try renderer.reset(scrollbackBound: begin.scrollbackBound)
         case .bytes(let bytes): try renderer.feed(bytes)
         case .ready: status = .live; error = nil; input.ready(); applyOpening()
-        case .grid(let grid):
-            try renderer.resize(grid)
-            self.grid = grid
+        case .grid(let grid): self.grid = grid
         case .leader(let leader): self.leader = leader; input.leader = leader
         case .ack(let sequence):
             if let generation = input.generation { input.acknowledge(sequence, generation: generation) }
@@ -299,7 +292,7 @@ final class WatchModel {
 
     private static func isTransientRendererFailure(_ error: Error) -> Bool {
         guard let failure = error as? WatchTerminalFailure else { return false }
-        return [.nativeBusy, .overflow, .readinessTimeout, .drainTimeout, .gridOutgrewFont].contains(failure)
+        return [.nativeBusy, .overflow, .readinessTimeout, .drainTimeout].contains(failure)
     }
 
     private static func canRetry(_ error: Error) -> Bool {

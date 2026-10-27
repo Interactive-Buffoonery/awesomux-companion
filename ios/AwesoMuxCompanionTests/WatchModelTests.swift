@@ -496,7 +496,7 @@ private final class WatchTestRenderer: WatchRendering {
     var feedFailure: WatchTerminalFailure?
     var onFailure: ((Error) -> Void)?
     var busyResetsRemaining = 0
-    func reset(grid: CompanionTerminalStream.Grid, scrollbackBound: Int) throws {
+    func reset(scrollbackBound: Int) throws {
         bytes = Data()
         resets += 1
         if busyResetsRemaining > 0 {
@@ -512,7 +512,6 @@ private final class WatchTestRenderer: WatchRendering {
         if failOnFeed { throw WatchFailure.invalidDimensions }
         self.bytes.append(bytes)
     }
-    func resize(_ grid: CompanionTerminalStream.Grid) throws {}
     func clear() { bytes = Data() }
 }
 

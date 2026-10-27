@@ -63,36 +63,67 @@ the Mac's SPKI fingerprint from the link. The pairing record lives in the
 Keychain, one item per Mac keyed by that fingerprint. Earlier builds kept a
 single item; the first launch copies it to its Mac's item and removes the old
 one only after the copy reads back unchanged, retrying on later launches.
-Pair Again creates a fresh key; once the new pairing succeeds, the phone asks
-the previous Mac to revoke the old one and then deletes the old key. The
-phone always opens its newest pairing, so if the previous Mac's item can't be
-deleted it never opens again; its key stays until Unpair This iPhone removes
-it along with every older pairing.
-Revocation is best effort: if the previous Mac is unreachable, remove the old
-pairing in its settings. Quitting during cleanup can leave the old key in Keychain.
-Unpair This iPhone first asks the Mac to revoke
-this phone's pairing, waiting up to three seconds. It then deletes the pairing
-and key on the phone even if the Mac is unreachable or runs an older version.
-If the Mac does not acknowledge the request, the welcome screen keeps a reminder
-to also choose Unpair in awesoMux Settings on the Mac, including after relaunch.
-A successful new pairing clears the reminder. If local deletion fails, Settings
-keeps the pairing available to retry and shows a short error.
+The phone pairs with any number of Macs. `+ pair a mac` on Hosts adds one: it
+saves only that Mac's item and never reads, replaces or revokes another Mac's.
+A code for a Mac that's already paired is refused there; use Pair Again in that
+Mac's settings (swipe or long-press its row). Pair Again only accepts that same
+Mac's code, creates a fresh key, and once the new pairing succeeds asks the Mac
+to revoke the old one and deletes the old key. Revocation is best effort: if the
+Mac is unreachable, remove the old pairing in its settings. Quitting during
+cleanup can leave the old key in Keychain.
+
+Unpair This iPhone, in a Mac's settings, first asks that Mac to revoke this
+phone's pairing, waiting up to three seconds. It then deletes that Mac's item,
+key and per-Mac values on the phone even if the Mac is unreachable or runs an
+older version; other Macs keep theirs. If the Mac does not acknowledge the
+request, Hosts (or the welcome screen, if no Mac is left) keeps a reminder to
+also choose Unpair in awesoMux Settings on that Mac, including after relaunch.
+Pairing that Mac again clears its reminder. If local deletion fails, the Mac's
+settings keep the pairing available to retry and show a short error.
+
+### Data ownership
+
+- **Keychain** (`PairingStore`) holds the pairing records, one item per Mac.
+- **`pairedHosts.v1`** (`HostRegistry`) lists which of those records are paired
+  Macs, oldest first; `selectedHost.v1` is the one opened last. A record not in
+  the list is inert and never opens.
+- **Per-Mac values** live under `<key>.<fingerprint>`: the session snapshot
+  cache, attention cursor, terminal preview suppression and unpair
+  acknowledgement. Unpair reminders are kept by fingerprint in
+  `unpairReminders.v1`.
+- **App-wide**: the Face ID terminal lock and the Live Activity switch.
+
+Single-host builds kept no list. The first launch of this build activates only
+the newest record (the one those builds opened), selects it, and moves the
+unscoped values to its keys; an older leftover from a replaced Mac stays inert.
+A Keychain that can't be read at launch never changes the list.
 
 To pair the Simulator, open a link with
 `xcrun simctl openurl <UDID> 'awesomuxcompanion://pair?...'`.
 
-While the app is in the foreground it polls every 5 seconds; pull to refresh
-fetches immediately. In the background it asks iOS for app refresh about every
-15 minutes, which iOS schedules at its discretion.
+With one Mac the app opens straight to its Sessions, Hosts one swipe back; with
+more it opens the Mac used last. While the app is in the foreground it polls the
+open Mac every 5 seconds, with panes, and every other Mac every 30 seconds for
+alerts and agents only; pull to refresh fetches immediately. Opening another Mac
+ends terminals, typing and decisions authorized on the previous one. In the
+background it asks iOS for app refresh about every 15 minutes, which iOS
+schedules at its discretion, and reads every Mac on its own connection.
 
 ## Notifications and Live Activity
 
 The app asks for notification permission right after the first successful
 pairing, or from Settings → Notifications. Each new attention event becomes a
-local notification, shown in the foreground too; events already open when the
-phone first connects do not notify. Tapping a notification opens the app and
-highlights the pane named by `paneID`. There is no push: notifications arrive
+local notification, shown in the foreground too, naming its Mac; events already
+open when the phone first connects do not notify. Tapping a notification opens
+that Mac and highlights the pane named by `paneID`; `macFingerprint` names the
+Mac. A notification from an earlier build, without a fingerprint, opens only
+while exactly one Mac is paired; one from a Mac no longer paired opens nothing. There is no push: notifications arrive
 only when the app refreshes.
+
+The widget and Live Activity show only the Mac opened last; other Macs never
+write them. Combining every Mac there is planned separately (B3), which will
+replace this selected-Mac rule; until then, opening another Mac republishes
+its snapshot or clears them.
 
 The Live Activity starts while the app is in the foreground, connected, and at
 least one agent needs you or is working, unless it is turned off in Settings. It

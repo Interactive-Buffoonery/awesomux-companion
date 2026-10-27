@@ -151,7 +151,7 @@ struct WatchView: View {
         return model.input.drivingText.lowercased() + grid
     }
 
-    /// Watching: one Take over button. Driving: keyboard and paste. Dropped: retry.
+    /// Interactive: paste and keyboard, plus Take over while someone else drives. Dropped: retry.
     private var bottomBar: some View {
         HStack(spacing: 10) {
             Text(verbatim: model.error ?? statusText)
@@ -167,7 +167,12 @@ struct WatchView: View {
                 .buttonStyle(BarButtonStyle(filled: true))
                 .disabled(!canWatch)
                 .accessibilityHint("Starts a new snapshot from your Mac.")
-            } else if model.input.isInteractive && model.input.hasControl {
+            } else if model.input.isInteractive {
+                if !model.input.hasControl {
+                    Button("Take over") { model.input.takeOver() }
+                        .buttonStyle(BarButtonStyle(filled: true))
+                        .disabled(!model.input.canType)
+                }
                 Button("Paste", action: paste)
                     .buttonStyle(BarButtonStyle(filled: false))
                     .disabled(!model.input.canType || model.input.pasteInFlight || model.input.confirmation != nil)
@@ -176,10 +181,6 @@ struct WatchView: View {
                 }
                 .buttonStyle(BarButtonStyle(filled: false))
                 .disabled(!model.input.canType)
-            } else if model.input.isInteractive {
-                Button("Take over") { model.input.takeOver() }
-                    .buttonStyle(BarButtonStyle(filled: true))
-                    .disabled(!model.input.canType)
             }
         }
         .padding(.horizontal, 12)

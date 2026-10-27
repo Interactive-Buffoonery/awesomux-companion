@@ -45,8 +45,7 @@ struct SessionsView: View {
             .terminalTitle(store.record?.macName ?? String(localized: "Sessions"), subtitle: connectionLine)
             .toolbarBackground(Cat.page, for: .navigationBar)
             .navigationDestination(item: $destination) { target in
-                WatchView(store: store, paneID: target.paneID, targetVersion: target.targetVersion,
-                          title: target.title, terminalLock: terminalLock, opening: target.opening)
+                WatchView(store: store, target: target, terminalLock: terminalLock)
             }
             .onChange(of: creation.destination) { _, target in
                 if let target { destination = target; creation.destination = nil }
@@ -90,7 +89,7 @@ struct SessionsView: View {
         return String(localized: "offline · \(age)")
     }
 
-    private func createTerminal(in workspaceID: UUID?) {
+    private func createTerminal(in workspaceID: UUID?, named workspaceName: String = "") {
         let pairing = store.decisionPairing
         let current: @MainActor @Sendable () -> Bool = {
             scenePhase == .active && terminalLock.isActive && !terminalLock.isLocked
@@ -102,7 +101,7 @@ struct SessionsView: View {
             return workspaceID == nil ? store.panes.terminalAccess.createWorkspaceAllowed : store.panes.terminalAccess.createPaneAllowed
         }
         Task {
-            await creation.create(workspaceID: workspaceID, isCurrent: current, canCreate: permitted, send: { workspaceID in
+            await creation.create(workspaceID: workspaceID, workspaceName: workspaceName, isCurrent: current, canCreate: permitted, send: { workspaceID in
                 try await store.createTerminal(workspaceID: workspaceID, canSend: permitted)
             }, refresh: { await store.refreshPanes() })
         }
@@ -160,13 +159,13 @@ struct SessionsView: View {
                         SystemLine(text: String(localized: "no panes")).terminalRow()
                     }
                     ForEach(sorted(workspace.panes)) { pane in
-                        paneRow(pane)
+                        paneRow(pane, in: workspace)
                             .id(pane.id)
                             .terminalRow(focused: store.focusedPaneID == pane.id)
                     }
                     if store.panes.terminalAccess.createPaneAllowed,
                        let workspaceID = UUID(uuidString: workspace.id) {
-                        Button { createTerminal(in: workspaceID) } label: {
+                        Button { createTerminal(in: workspaceID, named: workspace.name) } label: {
                             SystemLine(text: String(localized: "+ new pane"))
                         }
                         .accessibilityLabel("New Pane")
@@ -198,14 +197,14 @@ struct SessionsView: View {
         }.map(\.element)
     }
 
-    @ViewBuilder private func paneRow(_ pane: ListedPane) -> some View {
+    @ViewBuilder private func paneRow(_ pane: ListedPane, in workspace: PaneWorkspace) -> some View {
         let agent = agent(for: pane)
         let row = TerminalRow(glyph: PaneGlyph(pane: pane, agent: agent),
                               title: pane.title.isEmpty ? String(localized: "untitled") : pane.title,
                               tag: agent?.provider, since: agent?.since,
                               detail: pane.preview?.isEmpty == false ? pane.preview : agent?.status ?? pane.status,
                               detailIsTerminal: pane.preview?.isEmpty == false)
-        if let target = pane.terminalTarget {
+        if let target = pane.terminalTarget(in: workspace.name) {
             Button { destination = target } label: { row }
                 .contextMenu {
                     Button("Watch", systemImage: "eye") {
@@ -343,7 +342,8 @@ private struct WorkspaceRule: View {
 extension View {
     /// SwiftUI on iOS 26 ignores navigation bar font appearance, so the mono title is drawn here.
     /// `navigationTitle` stays for the back button and VoiceOver.
-    func terminalTitle(_ title: String, subtitle: String? = nil) -> some View {
+    /// Middle truncation keeps both ends of long names, such as a workspace and its pane.
+    func terminalTitle(_ title: String, subtitle: String? = nil, accessibilityLabel: String? = nil) -> some View {
         navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -355,7 +355,9 @@ extension View {
                         }
                     }
                     .lineLimit(1)
+                    .truncationMode(.middle)
                     .accessibilityElement(children: .combine)
+                    .accessibilityLabel(Text(verbatim: accessibilityLabel ?? [title, subtitle].compactMap { $0 }.joined(separator: ", ")))
                     .accessibilityAddTraits(.isHeader)
                 }
             }

@@ -5,9 +5,7 @@ import UIKit
 
 struct WatchView: View {
     let store: CompanionStore
-    let paneID: UUID
-    let targetVersion: UUID
-    let title: String
+    let target: TerminalDestination
     @Environment(\.scenePhase) private var scenePhase
     @Environment(PendingDecisionsModel.self) private var decisions
     let terminalLock: TerminalLockModel
@@ -19,12 +17,9 @@ struct WatchView: View {
     @State private var terminalSize = CGSize.zero
     @State private var securityObserver: UUID?
 
-    init(store: CompanionStore, paneID: UUID, targetVersion: UUID, title: String, terminalLock: TerminalLockModel,
-         opening: TerminalOpening = .input) {
+    init(store: CompanionStore, target: TerminalDestination, terminalLock: TerminalLockModel) {
         self.store = store
-        self.paneID = paneID
-        self.targetVersion = targetVersion
-        self.title = title
+        self.target = target
         self.terminalLock = terminalLock
         let renderer = WatchTerminal()
         let pairing = store.decisionPairing
@@ -35,7 +30,7 @@ struct WatchView: View {
         }
         renderer.canRender = canRender
         _terminal = StateObject(wrappedValue: renderer)
-        _model = State(initialValue: WatchModel(renderer: renderer, opening: opening,
+        _model = State(initialValue: WatchModel(renderer: renderer, opening: target.opening,
             canInput: { [weak store] in store?.panes.terminalAccess.inputAllowed == true }, canWatch: canRender))
     }
 
@@ -61,7 +56,7 @@ struct WatchView: View {
             .overlay(alignment: .top) { notices }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
-                    if let request = decisions.pending.first(where: { $0.identity.paneID == paneID }) {
+                    if let request = decisions.pending.first(where: { $0.identity.paneID == target.paneID }) {
                         QuestionDock(request: request, decisions: decisions)
                     }
                     if !keyboardShown { bottomBar }
@@ -69,7 +64,7 @@ struct WatchView: View {
             }
             .foregroundStyle(Cat.text)
             .background(Cat.page)
-            .terminalTitle(title.isEmpty ? String(localized: "Terminal") : title)
+            .terminalTitle(target.path, subtitle: host, accessibilityLabel: target.accessibilityHeader(host: host))
             .toolbarBackground(Cat.page, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { ModeChip(driving: model.input.hasControl) }
@@ -134,6 +129,9 @@ struct WatchView: View {
                 }
             }
     }
+
+    /// The pairing `connect()` uses, so the header names the Mac that receives typing.
+    private var host: String { TerminalDestination.hostName(store.record?.macName) }
 
     private var pasteDeliveryText: String? { model.input.pasteDelivery.map { "Paste: \($0.rawValue)" } }
 
@@ -266,7 +264,7 @@ struct WatchView: View {
         updateLifecycle()
         guard canWatch, isVisible, terminalSize.width > 0, terminalSize.height > 0,
               let record = store.record else { return }
-        model.start(record: record, paneID: paneID, targetVersion: targetVersion)
+        model.start(record: record, paneID: target.paneID, targetVersion: target.targetVersion)
     }
 }
 

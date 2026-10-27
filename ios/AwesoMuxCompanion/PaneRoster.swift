@@ -31,10 +31,10 @@ struct ListedPane: Identifiable, Equatable {
     var preview: String?
     var targetVersion: String? = nil
 
-    var terminalTarget: TerminalDestination? {
+    func terminalTarget(in workspace: String = "") -> TerminalDestination? {
         guard kind == .terminal, let paneID = UUID(uuidString: id),
               let version = targetVersion.flatMap(UUID.init(uuidString:)) else { return nil }
-        return TerminalDestination(paneID: paneID, targetVersion: version, title: title)
+        return TerminalDestination(paneID: paneID, targetVersion: version, title: title, workspace: workspace)
     }
 
     var status: String {

@@ -191,6 +191,39 @@ final class WatchTerminalTests: XCTestCase {
         attach(host.window, name: "Production Watch authoritative grid after phone layout change")
     }
 
+    func testShortenedPaneKeepsTextSizeAndShowsBottom() async throws {
+        let terminal = WatchTerminal()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive }))
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = UIHostingController(rootView: WatchTerminalView(terminal: terminal))
+        window.makeKeyAndVisible()
+        let host = TestHost(window: window, previous: previous)
+        defer { host.close(); terminal.clear() }
+        let grid = CompanionTerminalStream.Grid(rows: 33, cols: 39)
+        try terminal.reset(grid: grid, scrollbackBound: 4096)
+        try await idle([terminal])
+        try terminal.feed(Data((1...33).map { "line \($0)" }.joined(separator: "\r\n").utf8))
+        try await idle([terminal])
+        let terminalView = try XCTUnwrap(descendants(window).first { $0 is UITerminalView })
+        let fullSize = terminalView.bounds.size
+
+        window.frame.size = CGSize(width: 402, height: 420)
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(200))
+        try await idle([terminal])
+        await displayCycles()
+        XCTAssertEqual(terminal.reportedGrid, grid)
+        XCTAssertEqual(terminalView.bounds.size, fullSize)
+        let scroll = try XCTUnwrap(descendants(window).compactMap { $0 as? UIScrollView }.first)
+        let bottom = scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height
+        XCTAssertGreaterThan(bottom, 0)
+        XCTAssertEqual(scroll.contentOffset.y, bottom, accuracy: 1)
+        attach(window, name: "Production Watch bottom-anchored in a shortened pane")
+    }
+
     func testHostEffectsAreDeniedAndTerminalRepliesAreDiscarded() async throws {
         let terminal = WatchTerminal()
         let host = try mount([terminal])
@@ -377,7 +410,7 @@ final class WatchTerminalTests: XCTestCase {
         window.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
         window.rootViewController = UIHostingController(rootView: VStack {
             ForEach(Array(terminals.enumerated()), id: \.offset) { _, terminal in
-                WatchTerminalView(terminal: terminal, initialZoom: initialZoom).frame(height: 280)
+                WatchTerminalView(terminal: terminal, zoom: initialZoom).frame(height: 280)
             }
         })
         window.makeKeyAndVisible()

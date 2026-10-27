@@ -132,6 +132,7 @@ final class CompanionStore {
     @ObservationIgnored private let writeShared: (GlanceSnapshot) -> Void
     @ObservationIgnored private let clearShared: () -> Void
 
+    // ponytail: one slot each; stored values name the pairing they belong to. Multi-host keys them by fingerprint.
     private enum Keys {
         static let liveActivity = "liveActivityEnabled"
         static let previewSuppression = "terminalPreviewSuppression"
@@ -141,14 +142,14 @@ final class CompanionStore {
 
     init(
         defaults: UserDefaults = .standard,
-        loadPairing: () throws -> PairingRecord? = { try PairingStore.load() },
+        loadPairing: () throws -> PairingRecord? = { try PairingStore.system.load() },
         makeClient: @escaping (PairingRecord, CompanionRoute) throws -> any CompanionSessionClient = { record, route in
             try MacClient(host: route.host, port: record.port, macFingerprint: record.macFingerprint,
                           identity: PhoneIdentity.load(tag: record.identityTag, storage: record.identityStorage))
         },
         removePairing: @escaping (PairingRecord) throws -> Void = { record in
             try PhoneIdentity.delete(tag: record.identityTag)
-            try PairingStore.clear()
+            try PairingStore.system.clear(macFingerprint: record.macFingerprint)
         },
         liveActivity: LiveActivityController? = LiveActivityController(),
         writeShared: @escaping (GlanceSnapshot) -> Void = {
@@ -237,10 +238,14 @@ final class CompanionStore {
                 macName: reply.macName ?? link.macName, host: v1?.host, port: link.port,
                 macFingerprint: link.macFingerprint, transport: v1?.transport, routes: v1 == nil ? link.routes : nil,
                 connectionID: connectionID, identityTag: created.tag, identityStorage: created.storage, pairedAt: .now)
-            try PairingStore.save(next)
+            try PairingStore.system.save(next)
             let previous = record
             replacePairing(with: next)
             if let previous, previous.identityTag != next.identityTag { revoke(previous) }
+            // ponytail: pairing another Mac still replaces this one; multi-host adds it alongside instead.
+            if let previous, previous.macFingerprint != next.macFingerprint {
+                try? PairingStore.system.clear(macFingerprint: previous.macFingerprint)
+            }
             unpairMessage = nil
             defaults.removeObject(forKey: Keys.revokedConnectionID)
             message = nil
@@ -783,7 +788,7 @@ final class CompanionStore {
         guard routes != saved else { return }
         next.routes = routes
         // Publish only what was saved, so a failed write is retried by the next identical report.
-        guard (try? PairingStore.save(next)) != nil else { return }
+        guard (try? PairingStore.system.save(next)) != nil else { return }
         self.record = next
     }
 

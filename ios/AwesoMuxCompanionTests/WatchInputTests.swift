@@ -19,7 +19,7 @@ final class WatchInputTests: XCTestCase {
         XCTAssertEqual(wire.frames.map(\.frame), [.claim(.init(grid: .init(rows: 30, cols: 42)))])
         XCTAssertTrue(input.keyboardRequested)
         input.ready(opening: .input)
-        await Task.yield()
+        await settle()
         XCTAssertEqual(wire.frames.count, 1)
         input.begin(generation: 11, leader: "mac")
         XCTAssertFalse(input.keyboardRequested)
@@ -36,7 +36,7 @@ final class WatchInputTests: XCTestCase {
         input.updatePhoneGrid(.init(rows: 30, cols: 42))
         input.updatePhoneGrid(.init(rows: 24, cols: 42))
         await drain(wire, count: 1)
-        await Task.yield()
+        await settle()
         XCTAssertEqual(wire.frames.map(\.frame), [.claim(.init(grid: .init(rows: 24, cols: 42)))])
         input.leader = "mac"
         input.updatePhoneGrid(.init(rows: 30, cols: 42))
@@ -45,18 +45,19 @@ final class WatchInputTests: XCTestCase {
         input.updatePhoneGrid(.init(rows: 24, cols: 42))
         await drain(wire, count: 3)
         input.updatePhoneGrid(.init(rows: 24, cols: 42))
-        await Task.yield()
+        await settle()
         XCTAssertEqual(wire.frames.count, 3)
         input.disconnect()
         input.updatePhoneGrid(.init(rows: 40, cols: 42))
-        await Task.yield()
+        await settle()
         XCTAssertEqual(wire.frames.count, 3)
     }
 
     func testInputOpeningWaitsForTheMeasuredGrid() async {
-        let (input, wire) = fixture()
+        let (input, wire) = fixture(grid: nil)
         input.ready(opening: .input)
-        await Task.yield()
+        input.type(Data("a".utf8))
+        await settle()
         XCTAssertTrue(wire.frames.isEmpty)
         XCTAssertFalse(input.keyboardRequested)
         input.updatePhoneGrid(.init(rows: 30, cols: 42))
@@ -66,17 +67,37 @@ final class WatchInputTests: XCTestCase {
     }
 
     func testDrivingPhoneResizesTheMacWithTheKeyboardDown() async {
-        let (input, wire) = fixture(leader: "phone")
+        let (input, wire) = fixture(leader: "phone", grid: nil)
         input.ready()
-        await Task.yield()
+        await settle()
         XCTAssertTrue(wire.frames.isEmpty)
         input.updatePhoneGrid(.init(rows: 30, cols: 42))
         await drain(wire, count: 1)
         XCTAssertEqual(wire.frames.map(\.frame), [.claim(.init(grid: .init(rows: 30, cols: 42)))])
-        input.leader = "mac"
+        // A resize queued before the handback must not reclaim control.
         input.updatePhoneGrid(.init(rows: 20, cols: 42))
-        await Task.yield(); await Task.yield()
+        input.leader = "mac"
+        await settle()
         XCTAssertEqual(wire.frames.count, 1)
+    }
+
+    func testLayoutThatChangesBackWhileSendingStillReachesTheMac() async {
+        let (input, wire) = fixture(grid: nil)
+        input.ready(opening: .input)
+        input.updatePhoneGrid(.init(rows: 24, cols: 42))
+        input.openIfReady(.input)
+        await drain(wire, count: 1)
+        input.leader = "mac"
+        wire.blockGrid = true
+        input.updatePhoneGrid(.init(rows: 30, cols: 42))
+        await drain(wire, count: 2)
+        input.updatePhoneGrid(.init(rows: 24, cols: 42))
+        wire.blockGrid = false
+        wire.releaseGrid()
+        await drain(wire, count: 3)
+        XCTAssertEqual(wire.frames.map(\.frame).suffix(2),
+                       [.grid(.init(rows: 30, cols: 42)), .grid(.init(rows: 24, cols: 42))])
+        input.disconnect()
     }
 
     func testRevokedInputStopsQueuedAndManualWrites() async {
@@ -440,21 +461,27 @@ final class WatchInputTests: XCTestCase {
     }
 
     private func fixture(generation: UInt32 = 10, leader: String? = "mac",
+                         grid: Stream.Grid? = .init(rows: 24, cols: 80),
                          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) -> (WatchInput, InputTestConnection) {
         let wire = InputTestConnection()
         let input = WatchInput(now: now)
         input.attach(wire, ownLeaderID: "phone", authority: { true })
         input.begin(generation: generation, leader: leader)
+        input.preferredGrid = grid
         return (input, wire)
     }
 
+    /// Resizes wait out a settle delay, so frames are polled on the clock rather than by yielding.
     private func drain(_ wire: InputTestConnection, count: Int) async {
-        for _ in 0..<1000 {
+        for _ in 0..<200 {
             if wire.frames.count >= count { return }
-            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(10))
         }
         XCTFail("Expected \(count) frames, got \(wire.frames.count)")
     }
+
+    /// Long enough for a queued resize to have sent if it was going to.
+    private func settle() async { try? await Task.sleep(for: .milliseconds(250)) }
 }
 
 private final class InputTestConnection: WatchConnection, @unchecked Sendable {

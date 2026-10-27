@@ -76,7 +76,8 @@ final class WatchInput {
         var preview: String { String(decoding: encoded, as: UTF8.self).prefix(1200).description }
     }
     private struct Job {
-        let frame: Stream.Frame
+        /// Nil for an automatic resize, whose frame is decided when it sends.
+        let frame: Stream.Frame?
         let sequence: UInt64?
         let paste: Bool
     }
@@ -118,7 +119,7 @@ final class WatchInput {
     init(now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) { self.now = now }
 
     var sessionID: UUID { token }
-    var canType: Bool { isInteractive && isLive && generation != nil && authority() }
+    var canType: Bool { isInteractive && isLive && generation != nil && preferredGrid != nil && authority() }
     var pasteInFlight: Bool { pasteDelivery == .sending }
     var drivingText: String {
         guard let leader else { return "No one has control" }
@@ -176,18 +177,17 @@ final class WatchInput {
         sendPhoneGrid()
     }
 
+    // A queued resize or claim sends the latest grid, so one pending job covers a burst of layouts.
     private func sendPhoneGrid() {
-        guard keyboardRequested || hasControl, canType, let grid = preferredGrid, grid != lastSentGrid else { return }
-        // The Mac only caches a bare grid frame; re-claiming applies the keyboard-sized grid now.
-        let frame: Stream.Frame = claimPending || hasControl ? .claim(.init(grid: grid)) : .grid(grid)
-        // A queued resize sends the latest grid, so a burst of layouts costs the Mac one resize.
-        if let queued = jobs.firstIndex(where: { $0.sequence == nil }) {
-            if case .grid = jobs[queued].frame { jobs[queued] = Job(frame: frame, sequence: nil, paste: false) }
-            return
-        }
-        guard jobs.count < 64 else { return }
-        jobs.append(Job(frame: frame, sequence: nil, paste: false))
+        guard canType, phoneGridFrame() != nil, !jobs.contains(where: { $0.sequence == nil }), jobs.count < 64 else { return }
+        jobs.append(Job(frame: nil, sequence: nil, paste: false))
         runWorker()
+    }
+
+    private func phoneGridFrame() -> Stream.Frame? {
+        guard keyboardRequested || hasControl, let grid = preferredGrid, grid != lastSentGrid else { return nil }
+        // The Mac only caches a bare grid frame; re-claiming applies the keyboard-sized grid now.
+        return claimPending || hasControl ? .claim(.init(grid: grid)) : .grid(grid)
     }
 
     func takeOver() {
@@ -305,15 +305,6 @@ final class WatchInput {
         runWorker()
     }
 
-    private static func resized(_ frame: Stream.Frame, to grid: Stream.Grid?) -> Stream.Frame {
-        guard let grid else { return frame }
-        switch frame {
-        case .claim: return .claim(.init(grid: grid))
-        case .grid: return .grid(grid)
-        default: return frame
-        }
-    }
-
     private func runWorker() {
         guard worker == nil, let connection, let generation else { return }
         let identity = token
@@ -321,16 +312,31 @@ final class WatchInput {
             guard let self else { return }
             do {
                 while self.token == identity, !self.jobs.isEmpty {
+                    if self.jobs[0].frame == nil {
+                        // ponytail: fixed settle delay bounds Mac resizes to ~10/s; tune if TUIs still thrash.
+                        try? await Task.sleep(for: .milliseconds(100))
+                        guard self.token == identity else { return }
+                    }
                     let job = self.jobs.removeFirst()
-                    guard self.canType else { self.disconnect(); return }
-                    if job.sequence != nil, let grid = self.preferredGrid, self.lastSentGrid != grid {
+                    guard self.canType, let grid = self.preferredGrid else { self.disconnect(); return }
+                    let frame: Stream.Frame
+                    switch job.frame {
+                    case nil:
+                        // Leadership is checked now, so a stale layout never undoes a handback to the Mac.
+                        guard let resize = self.phoneGridFrame() else { continue }
+                        frame = resize
+                    case .claim?:
+                        frame = .claim(.init(grid: grid))
+                    case let other?:
+                        frame = other
+                    }
+                    if job.sequence != nil, self.lastSentGrid != grid {
                         try await connection.send(.grid(grid), generation: generation) { [weak self] in
                             self?.maySend(identity) ?? false
                         }
                         guard self.token == identity else { return }
                         self.lastSentGrid = grid
                     }
-                    let frame = Self.resized(job.frame, to: self.preferredGrid)
                     try await connection.send(frame, generation: generation) { [weak self] in
                         guard let self, self.maySend(identity) else { return false }
                         if let sequence = job.sequence {
@@ -343,6 +349,8 @@ final class WatchInput {
                     guard self.token == identity else { return }
                     if case .claim(let claim) = frame { self.lastSentGrid = claim.grid }
                     if case .grid(let grid) = frame { self.lastSentGrid = grid }
+                    // A layout that changed back while this frame was sending still needs to reach the Mac.
+                    if self.jobs.isEmpty { self.sendPhoneGrid() }
                 }
                 guard self.token == identity else { return }
                 self.worker = nil

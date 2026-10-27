@@ -17,9 +17,11 @@ final class WatchModelTests: XCTestCase {
                 let waiting = expectation(description: "snapshot completed")
                 let connection = f.connection(waiting: waiting, role: .interactive)
                 f.open = { _ in connection }
-                f.model.input.preferredGrid = .init(rows: 31, cols: 43)
                 let task = f.start()
                 await fulfillment(of: [waiting], timeout: 2)
+                for _ in 0..<100 { await Task.yield() }
+                XCTAssertTrue(connection.sent.isEmpty)
+                f.model.updatePhoneGrid(.init(rows: 31, cols: 43))
                 for _ in 0..<100 { await Task.yield() }
                 if opening == .input && allowed {
                     XCTAssertEqual(connection.sent.map(\.frame), [.claim(.init(grid: .init(rows: 31, cols: 43)))])
@@ -48,6 +50,7 @@ final class WatchModelTests: XCTestCase {
         f.model.input.type(Data("a".utf8))
         for _ in 0..<100 { await Task.yield() }
         XCTAssertTrue(connection.sent.isEmpty)
+        f.model.updatePhoneGrid(.init(rows: 24, cols: 80))
         f.inputAllowed = true
         XCTAssertTrue(f.model.input.canType)
         f.model.stop()
@@ -62,6 +65,7 @@ final class WatchModelTests: XCTestCase {
         f.open = { _ in connection }
         let task = f.start()
         await fulfillment(of: [waiting], timeout: 2)
+        f.model.updatePhoneGrid(.init(rows: 24, cols: 80))
         XCTAssertTrue(connection.sent.isEmpty)
         f.inputAllowed = true
         f.model.updateInputPermission()
@@ -88,9 +92,13 @@ final class WatchModelTests: XCTestCase {
         let task = f.start()
         await fulfillment(of: [firstWait], timeout: 2)
         for _ in 0..<100 { await Task.yield() }
+        f.model.updatePhoneGrid(.init(rows: 24, cols: 80))
+        for _ in 0..<100 { await Task.yield() }
         XCTAssertEqual(first.sent.count, 1)
         first.deliver(.init(frame: .output(sequence: 8, bytes: Data([9])), generation: 1))
         await fulfillment(of: [nextWait], timeout: 2)
+        for _ in 0..<100 { await Task.yield() }
+        f.model.updatePhoneGrid(.init(rows: 24, cols: 80))
         for _ in 0..<100 { await Task.yield() }
         XCTAssertTrue(second.sent.isEmpty)
         XCTAssertFalse(f.model.input.keyboardRequested)

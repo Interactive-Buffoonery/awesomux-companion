@@ -18,8 +18,9 @@ final class WatchTerminalTests: XCTestCase {
         try live.feed(fixture("away"))
         try restored.feed(fixture("reattach"))
         try await idle([live, restored])
+        // The snapshot holds the Mac's 6-row capture; the taller phone pane shows more history above it.
         let before = try XCTUnwrap(live.readViewportText())
-        XCTAssertEqual(before, restored.readViewportText())
+        XCTAssertTrue(before.hasSuffix(try visibleText(restored)))
         for value in ["AWAY", "$ next", "FINAL"] { XCTAssertTrue(before.contains(value)) }
 
         let continuation = Data("\r\nLIVE-CONTINUE\r\nDONE".utf8)
@@ -27,7 +28,8 @@ final class WatchTerminalTests: XCTestCase {
         try restored.feed(continuation)
         try await idle([live, restored])
         let after = try XCTUnwrap(live.readViewportText())
-        XCTAssertEqual(after, restored.readViewportText())
+        let replayed = try visibleText(restored)
+        XCTAssertTrue(after.hasSuffix(replayed))
         XCTAssertTrue(after.contains("LIVE-CONTINUE"))
         XCTAssertTrue(after.contains("DONE"))
         await displayCycles()
@@ -40,7 +42,13 @@ final class WatchTerminalTests: XCTestCase {
         try restored.feed(fixture("reattach"))
         try restored.feed(continuation)
         try await idle([restored])
-        XCTAssertEqual(after, restored.readViewportText())
+        XCTAssertEqual(try visibleText(restored), replayed)
+    }
+
+    private func visibleText(_ terminal: WatchTerminal) throws -> String {
+        var text = try XCTUnwrap(terminal.readViewportText())
+        while text.hasSuffix("\n") { text.removeLast() }
+        return text
     }
 
     func testModeProbesRecoverAfterNativeParameterDigitWrap() async throws {

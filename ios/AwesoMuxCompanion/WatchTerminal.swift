@@ -31,7 +31,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     private let discardedWrites = WatchDiscardedWrites()
     private static let maximumQueuedBytes = CompanionTerminalStream.maximumSnapshotBytes
     private static let maximumOperations = 256
-    static let fontSizes: ClosedRange<Float> = 8...24
+    static let fontSizes: ClosedRange<Float> = 8...28
     // Native logging is independent of TerminalDebugLog. The pinned engine
     // reads this setting once in ghostty_init, before any controller exists.
     private static let nativeLoggingDisabled = setenv("GHOSTTY_LOG", "no-stderr,no-macos", 1) == 0

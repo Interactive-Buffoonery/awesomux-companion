@@ -389,8 +389,9 @@ is bounded; Watch never invents missing history.
 
 The terminal fills the phone's view, the way a tmux client does. Ghostty measures
 the grid that fits at the chosen text size, and while the phone drives it resizes
-the Mac pane to that grid. Bursts of layout changes coalesce into one resize, and
-an input opening waits for the first measured grid. The keyboard, rotation and
+the Mac pane to that grid. Resizes wait briefly for the layout to settle, so the
+Mac sees about ten per second at most, and an input opening waits for the first
+measured grid. The keyboard, rotation and
 text size all change the measured grid. While watching only, plain output
 rewraps to the phone's width; full-screen apps drawn for the Mac's size settle
 once the phone takes over. Local selection, copy and history scrolling do not

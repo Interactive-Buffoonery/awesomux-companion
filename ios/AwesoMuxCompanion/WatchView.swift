@@ -156,7 +156,7 @@ struct WatchView: View {
     }
 
     private var liveText: String {
-        let grid = model.grid.map { " · \($0.cols)×\($0.rows)" } ?? ""
+        let grid = model.grid.map { " · Mac \($0.cols)×\($0.rows)" } ?? ""
         if let message = model.input.watchMessage { return message }
         return model.input.drivingText.lowercased() + grid
     }

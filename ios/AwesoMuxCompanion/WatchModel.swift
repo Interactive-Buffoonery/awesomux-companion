@@ -162,6 +162,8 @@ final class WatchModel {
 
     private func clearTerminal() {
         renderer.clear()
+        // A measurement belongs to the surface that made it; the replacement must measure again.
+        input.preferredGrid = nil
         grid = nil
         leader = nil
         historyIncomplete = false

@@ -65,86 +65,132 @@ final class WatchTerminalTests: XCTestCase {
         }
     }
 
-    func testWideMacGridRendersAndGrowingPastItsFontRequestsSnapshot() async throws {
-        let terminal = WatchTerminal()
-        let host = try mount([terminal])
-        defer { host.close(); terminal.clear() }
-        let widest = CompanionTerminalStream.Grid(rows: 100, cols: 400)
-        try terminal.reset(grid: widest, scrollbackBound: 4096)
-        try await idle([terminal])
-        XCTAssertEqual(terminal.reportedGrid, widest)
-        let wide = CompanionTerminalStream.Grid(rows: 70, cols: 240)
-        try terminal.reset(grid: wide, scrollbackBound: 4096)
-        try await idle([terminal])
-        XCTAssertEqual(terminal.reportedGrid, wide)
-        try terminal.feed(Data("WIDE".utf8))
-        try await idle([terminal])
-        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("WIDE"))
+    // The wrapper's one-step font and size change, measured at the native
+    // resize callback, which reports every grid the emulator applies.
+    func testAtomicFontAndSizeResizesTheGridOnceAtItsFinalSize() async throws {
+        let host = try mount([])
+        defer { host.close() }
+        let mac = cellArea(cols: 200, rows: 55, fontSize: 6)
+        let phone = cellArea(cols: 40, rows: 55, fontSize: WatchDrawableBudget.maximumFontSize)
+        let atomic = RawTerminal(fontSize: 6, size: mac, in: host.window)
+        let twoStep = RawTerminal(fontSize: 6, size: mac, in: host.window)
+        let reference = RawTerminal(fontSize: WatchDrawableBudget.maximumFontSize, size: phone, in: host.window)
+        defer { for terminal in [atomic, twoStep, reference] { terminal.view.removeFromSuperview() } }
+        try await settle([atomic, twoStep, reference])
+        let rows = Int(try XCTUnwrap(atomic.grids.last).rows)
+        let screen = alternateScreen(rows: rows)
+        for terminal in [atomic, twoStep, reference] { terminal.session.receive(screen) }
+        try await settle([atomic, twoStep, reference])
+        let expected = try XCTUnwrap(reference.session.readViewportText())
+        let final = try XCTUnwrap(reference.grids.last)
+        XCTAssertGreaterThanOrEqual(Int(final.rows), rows)
+        XCTAssertTrue(expected.contains("ROW \(rows)"))
 
-        var failure: Error?
-        terminal.onFailure = { failure = $0 }
-        try terminal.resize(.init(rows: 140, cols: 480))
-        XCTAssertEqual(failure as? WatchTerminalFailure, .gridChangesFont)
+        let before = atomic.grids.count
+        XCTAssertTrue(atomic.view.setFontSize(WatchDrawableBudget.maximumFontSize, size: phone))
+        // Well past the emulator's 25 ms resize coalescing window.
+        try await settle([atomic])
+        let applied = atomic.grids[before...].map { [$0.columns, $0.rows] }
+        XCTAssertEqual(applied, [[final.columns, final.rows]])
+        XCTAssertEqual(atomic.view.fontSize, WatchDrawableBudget.maximumFontSize)
+        XCTAssertEqual(atomic.session.readViewportText(), expected)
+
+        // Control: the font alone, then the size, applies a 13pt grid at the
+        // old height first and drops rows the final grid has room for.
+        let controlBefore = twoStep.grids.count
+        XCTAssertEqual(twoStep.view.surface?.performBindingAction("set_font_size:13"), true)
+        try await settle([twoStep])
+        twoStep.view.frame.size = phone
+        twoStep.view.layoutIfNeeded()
+        try await settle([twoStep])
+        let steps = twoStep.grids[controlBefore...].map(\.rows)
+        XCTAssertEqual(steps.last, final.rows)
+        XCTAssertTrue(steps.contains { $0 < final.rows }, "\(steps)")
+        XCTAssertNotEqual(twoStep.session.readViewportText(), expected)
     }
 
     // TestFlight 202610272000: a phone claim shrank a 200-column Mac grid to
-    // the phone's 40 columns but kept the Mac grid's 6pt font.
-    func testPhoneClaimOnWideMacGridRecoversAtFullFontWithoutLiveFontChange() async throws {
+    // 40 columns but kept the Mac grid's 6pt font.
+    func testFontChangingGridKeepsAlternateScreenAndOrdersOutput() async throws {
         let terminal = WatchTerminal()
         let host = try mount([terminal])
         defer { host.close(); terminal.clear() }
-        var failure: Error?
-        terminal.onFailure = { failure = $0 }
+        var failures: [Error] = []
+        terminal.onFailure = { failures.append($0) }
         let mac = CompanionTerminalStream.Grid(rows: 55, cols: 200)
+        let narrow = CompanionTerminalStream.Grid(rows: 55, cols: 40)
         try terminal.reset(grid: mac, scrollbackBound: 1 << 20)
         try await idle([terminal])
-        let macView = try liveView(host)
-        XCTAssertEqual(macView.fontSize, 6)
-        // A full-screen app's alternate screen has no scrollback to absorb a
-        // transient shrink, so its bottom row is the first casualty.
-        try terminal.feed(Data("\u{1b}[?1049h\u{1b}[55;1HALT-BOTTOM".utf8))
-        try await idle([terminal])
-        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("ALT-BOTTOM"))
-
-        let phone = CompanionTerminalStream.Grid(rows: 19, cols: 40)
-        try terminal.resize(phone)
-        // Detected and released in the same turn, before any native font or
-        // grid change can reach the live surface's cells.
-        XCTAssertEqual(failure as? WatchTerminalFailure, .gridChangesFont)
-        XCTAssertNil(macView.fontSize)
-        XCTAssertNil(terminal.reportedGrid)
-
-        // The daemon keeps the claimed grid across the reconnect (ADR-0041),
-        // so the fresh snapshot arrives at the phone grid.
-        failure = nil
-        try terminal.reset(grid: phone, scrollbackBound: 1 << 20)
-        try await idle([terminal])
         let view = try liveView(host)
-        XCTAssertEqual(view.fontSize, WatchDrawableBudget.maximumFontSize)
-        let cell = WatchDrawableBudget.cellSize(fontSize: WatchDrawableBudget.maximumFontSize)
-        XCTAssertEqual(view.bounds.width, CGFloat(phone.cols) * cell.width, accuracy: cell.width)
-        XCTAssertEqual(view.bounds.height, CGFloat(phone.rows) * cell.height, accuracy: cell.height)
-        // The phone keeps requesting the grid it already has, so no claim loop.
-        XCTAssertEqual(terminal.phoneGrid(for: CGSize(width: view.bounds.width + 1,
-                                                      height: view.bounds.height + 1)), phone)
-        try terminal.feed(Data("\u{1b}[?1049h\u{1b}[19;1HALT-BOTTOM".utf8))
+        XCTAssertEqual(view.fontSize, 6)
+        // A full-screen app's alternate screen has no scrollback to absorb an
+        // interim 13pt grid at the old height (about 25 rows).
+        let screen = alternateScreen(rows: 55)
+        try terminal.feed(screen)
+        try terminal.resize(narrow)
+        // Column 45 exists only before the resize; after it the cursor clamps
+        // to column 40, as in a render made at the final grid.
+        let after = Data("\u{1b}[1;45HX".utf8)
+        try terminal.feed(after)
         try await idle([terminal])
-        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("ALT-BOTTOM"))
-        await displayCycles()
-        attach(host.window, name: "Phone grid after a wide Mac terminal")
-
-        // Keyboard down keeps the font, so the live surface resizes in place.
-        let tall = CompanionTerminalStream.Grid(rows: 35, cols: 40)
-        try terminal.resize(tall)
-        try await idle([terminal])
-        XCTAssertNil(failure)
-        XCTAssertEqual(terminal.reportedGrid, tall)
+        XCTAssertTrue(failures.isEmpty, "\(failures)")
+        XCTAssertEqual(terminal.reportedGrid, narrow)
         XCTAssertTrue(try liveView(host) === view)
         XCTAssertEqual(view.fontSize, WatchDrawableBudget.maximumFontSize)
-        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("ALT-BOTTOM"))
+        let text = try XCTUnwrap(terminal.readViewportText())
+        XCTAssertTrue(text.contains("ROW 26"))
+        XCTAssertTrue(text.contains("ROW 55"))
+        let expected = try await render(narrow, screen + after)
+        XCTAssertEqual(text, expected)
+        await displayCycles()
+        attach(host.window, name: "Alternate screen after a font-changing grid")
+    }
 
-        try terminal.resize(mac)
-        XCTAssertEqual(failure as? WatchTerminalFailure, .gridChangesFont)
+    func testFontChangingGridReflowsWrappedLinesLikeAFreshRender() async throws {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        defer { host.close(); terminal.clear() }
+        let mac = CompanionTerminalStream.Grid(rows: 55, cols: 200)
+        let narrow = CompanionTerminalStream.Grid(rows: 55, cols: 40)
+        try terminal.reset(grid: mac, scrollbackBound: 1 << 20)
+        try await idle([terminal])
+        let bytes = Data(("WRAP-" + String(repeating: "x", count: 150) + "-END\r\n$ ").utf8)
+        try terminal.feed(bytes)
+        try terminal.resize(narrow)
+        try await idle([terminal])
+        XCTAssertNil(terminal.failure)
+        XCTAssertEqual(try liveView(host).fontSize, WatchDrawableBudget.maximumFontSize)
+        let text = try XCTUnwrap(terminal.readViewportText())
+        XCTAssertTrue(text.contains("-END"))
+        let expected = try await render(narrow, bytes)
+        XCTAssertEqual(text, expected)
+    }
+
+    // Council r2-02: Mac-led grid changes that cross a font step, growing
+    // past the font and shrinking back, stay on the live surface.
+    func testMacGridChangesAcrossFontStepsKeepTheLiveSurface() async throws {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        defer { host.close(); terminal.clear() }
+        var failures: [Error] = []
+        terminal.onFailure = { failures.append($0) }
+        try terminal.reset(grid: .init(rows: 55, cols: 200), scrollbackBound: 1 << 20)
+        try await idle([terminal])
+        let view = try liveView(host)
+        try terminal.feed(Data("WIDE".utf8))
+        var fonts: [Float] = [6]
+        for grid in [CompanionTerminalStream.Grid(rows: 55, cols: 177), .init(rows: 140, cols: 480),
+                     .init(rows: 55, cols: 200)] {
+            try terminal.resize(grid)
+            try await idle([terminal])
+            XCTAssertTrue(failures.isEmpty, "\(failures)")
+            XCTAssertEqual(terminal.reportedGrid, grid)
+            XCTAssertTrue(try liveView(host) === view)
+            XCTAssertEqual(view.fontSize, WatchDrawableBudget.fontSize(for: grid))
+            fonts.append(try XCTUnwrap(view.fontSize))
+            XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("WIDE"))
+        }
+        XCTAssertEqual(Set(fonts).count, 3, "\(fonts)")
     }
 
     func testProductionRendererReplaysCapturedReattachAndContinuation() async throws {
@@ -402,6 +448,35 @@ final class WatchTerminalTests: XCTestCase {
         return terminal
     }
 
+    private func alternateScreen(rows: Int) -> Data {
+        Data(("\u{1b}[?1049h" + (1...rows).map { "\u{1b}[\($0);1HROW \($0)" }.joined() + "\u{1b}[H").utf8)
+    }
+
+    private func cellArea(cols: Int, rows: Int, fontSize: Float) -> CGSize {
+        let cell = WatchDrawableBudget.cellSize(fontSize: fontSize)
+        return CGSize(width: CGFloat(cols) * cell.width, height: CGFloat(rows) * cell.height)
+    }
+
+    /// A one-shot render: a fresh terminal sized for `grid` fed `bytes`.
+    private func render(_ grid: CompanionTerminalStream.Grid, _ bytes: Data) async throws -> String {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        defer { host.close(); terminal.clear() }
+        try terminal.reset(grid: grid, scrollbackBound: 1 << 20)
+        try terminal.feed(bytes)
+        try await idle([terminal])
+        return try XCTUnwrap(terminal.readViewportText())
+    }
+
+    private func settle(_ terminals: [RawTerminal]) async throws {
+        try await Task.sleep(for: .milliseconds(300))
+        for terminal in terminals {
+            XCTAssertFalse(terminal.grids.isEmpty)
+            XCTAssertTrue(terminal.session.waitForPendingOutput())
+        }
+        try await Task.sleep(for: .milliseconds(100))
+    }
+
     private func fixture(_ name: String) throws -> Data {
         let bundle = Bundle(for: Self.self)
         let url = try XCTUnwrap(bundle.url(forResource: name, withExtension: "bin", subdirectory: "SnapshotReplay")
@@ -513,4 +588,31 @@ private final class WatchDisplayCycles: NSObject {
         remaining -= 1
         if remaining == 0 { stop(); completed() }
     }
+}
+
+@MainActor
+private final class RawTerminal {
+    let view: UITerminalView
+    let session: InMemoryTerminalSession
+    private let controller: TerminalController
+    private let reports = ResizeReports()
+    var grids: [InMemoryTerminalViewport] { reports.values }
+
+    init(fontSize: Float, size: CGSize, in window: UIWindow) {
+        let reports = self.reports
+        session = InMemoryTerminalSession(write: { _ in }, resize: { reports.append($0) })
+        controller = TerminalController(configSource: .none, terminalConfiguration: TerminalConfiguration()
+            .fontSize(fontSize).windowPaddingX(0).windowPaddingY(0))
+        view = UITerminalView(frame: CGRect(origin: .zero, size: size))
+        view.configuration = TerminalSurfaceOptions(backend: .inMemory(session), fontSize: fontSize)
+        view.controller = controller
+        window.addSubview(view)
+    }
+}
+
+private final class ResizeReports: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reports: [InMemoryTerminalViewport] = []
+    var values: [InMemoryTerminalViewport] { lock.lock(); defer { lock.unlock() }; return reports }
+    func append(_ report: InMemoryTerminalViewport) { lock.lock(); reports.append(report); lock.unlock() }
 }

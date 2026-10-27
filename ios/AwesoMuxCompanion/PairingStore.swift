@@ -103,6 +103,10 @@ struct PairingStore: Sendable {
 
     /// Oldest pairing first. Throws when the Keychain can't be read, or when nothing stored is usable.
     func loadAll() throws -> [PairingRecord] {
+        try loadAll(allowUnusable: false)
+    }
+
+    private func loadAll(allowUnusable: Bool) throws -> [PairingRecord] {
         let items = try keychain.items()
         var records: [String: PairingRecord] = [:]
         var unusable = false
@@ -130,7 +134,7 @@ struct PairingStore: Sendable {
                 try? keychain.delete(account: Self.legacyAccount)
             }
         }
-        if records.isEmpty, unusable { throw PairingStoreFailure.invalidItem }
+        if records.isEmpty, unusable, !allowUnusable { throw PairingStoreFailure.invalidItem }
         return records.values.sorted { ($0.pairedAt, $0.macFingerprint) < ($1.pairedAt, $1.macFingerprint) }
     }
 
@@ -142,7 +146,7 @@ struct PairingStore: Sendable {
 
     func replacementContext(current: PairingRecord?, now: Date = .now) throws
         -> (previous: PairingRecord?, pairedAt: Date) {
-        let previous = try current ?? load()
+        let previous = try current ?? loadAll(allowUnusable: true).last
         return (previous, max(now, previous?.pairedAt.addingTimeInterval(1) ?? .distantPast))
     }
 

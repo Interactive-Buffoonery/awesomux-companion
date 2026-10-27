@@ -320,6 +320,25 @@ final class PairingStoreTests: XCTestCase {
         try assertCoherent(store, identities, "read recovery with clock behind")
     }
 
+    @MainActor
+    func testPairAgainRecoversWhenStoredPairingCannotDecode() throws {
+        let keychain = KeychainFixture()
+        let store = PairingStore(keychain: keychain)
+        let identities = IdentityFixture()
+        keychain.stored[PairingStore.legacyAccount] = Data("not a pairing".utf8)
+        let launched = launch(store, identities)
+        XCTAssertNil(launched.record)
+        XCTAssertThrowsError(try store.load())
+
+        let context = try store.replacementContext(current: launched.record,
+                                                    now: Date(timeIntervalSince1970: 100))
+        XCTAssertNil(context.previous)
+        let b = record(macB, pairedAt: context.pairedAt.timeIntervalSince1970, tag: "b")
+        XCTAssertTrue(try store.replace(context.previous, with: b))
+        XCTAssertEqual(launch(store, identities).record, b)
+        try assertCoherent(store, identities, "pair again after unreadable data")
+    }
+
     func testPairingAgainWithASupersededMacReplacesIt() throws {
         let keychain = KeychainFixture()
         let store = PairingStore(keychain: keychain)

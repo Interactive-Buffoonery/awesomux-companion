@@ -15,6 +15,8 @@ final class HostsTests: XCTestCase {
     private var removed: [String] = []
     private var revoked: [PairingRecord] = []
     private var shared: [String] = []
+    private let cachedSnapshot = GlanceSnapshot(schemaVersion: 1, hostName: "Cached Mac", connected: true,
+        error: nil, updatedAt: Date(timeIntervalSince1970: 100), agents: [])
 
     // MARK: Migration
 
@@ -33,7 +35,7 @@ final class HostsTests: XCTestCase {
         ]
         for (key, value) in values { defaults.set(value, forKey: key) }
         let cache = SessionSnapshotCache(defaults: defaults)
-        cache.save(.sample, for: newest)
+        cache.save(cachedSnapshot, for: newest)
         let scopedCache = HostRegistry.hostKey(SessionSnapshotCache.key, macB)
         let legacyCache = try XCTUnwrap(defaults.data(forKey: scopedCache))
         defaults.set(legacyCache, forKey: SessionSnapshotCache.key)
@@ -52,7 +54,7 @@ final class HostsTests: XCTestCase {
 
             XCTAssertNil(defaults.object(forKey: HostRegistry.hostKey(key, macA)), key)
         }
-        XCTAssertEqual(cache.restore(for: newest), .sample)
+        XCTAssertEqual(cache.restore(for: newest), cachedSnapshot)
         XCTAssertNil(defaults.object(forKey: HostRegistry.legacyUnpairMessageKey))
 
         let hosts = launch()
@@ -230,7 +232,7 @@ final class HostsTests: XCTestCase {
     func testLegacyStateFromAnotherPairingNeverMigrates() throws {
         let a = record(macA), b = record(macB, pairedAt: 200)
         let cache = SessionSnapshotCache(defaults: defaults)
-        cache.save(.sample, for: a)
+        cache.save(cachedSnapshot, for: a)
         defaults.set(defaults.data(forKey: HostRegistry.hostKey(SessionSnapshotCache.key, macA)), forKey: SessionSnapshotCache.key)
         defaults.set(try JSONSerialization.data(withJSONObject: [
             "connectionID": a.connectionID.uuidString, "macFingerprint": macA, "identityTag": a.identityTag]),
@@ -243,7 +245,7 @@ final class HostsTests: XCTestCase {
             XCTAssertNil(defaults.object(forKey: key), key)
         }
         XCTAssertFalse(defaults.bool(forKey: CompanionStore.Keys.liveActivity))
-        XCTAssertEqual(cache.restore(for: a), .sample, "Existing scoped values are preserved")
+        XCTAssertEqual(cache.restore(for: a), cachedSnapshot, "Existing scoped values are preserved")
     }
 
     func testProductionPairingSaveAddsBWithoutRevokingA() throws {
@@ -351,8 +353,8 @@ final class HostsTests: XCTestCase {
         try pairingStore.save(record(macA)); try pairingStore.save(record(macB, pairedAt: 200))
         defaults.set([macA, macB], forKey: HostRegistry.hostsKey)
         let activity = HostActivityFixture()
-        let hosts = Hosts(defaults: defaults, pairingStore: pairingStore) { load in
-            CompanionStore(defaults: defaults, loadPairing: load, pairingStore: pairingStore,
+        let hosts = Hosts(defaults: defaults, pairingStore: pairingStore) { [unowned self] load in
+            CompanionStore(defaults: self.defaults, loadPairing: load, pairingStore: pairingStore,
                 makeClient: { [unowned self] record, _ in client(record.macFingerprint) }, liveActivity: activity,
                 writeShared: { _ in }, clearShared: {})
         }

@@ -429,10 +429,10 @@ uncertain paste. Unacked typing shows a brief notice after two seconds or
 disconnect. Nothing is
 replayed across reconnect, resync or route change.
 
-Mac integration is awesomux #788. For the driving label, the relay must map a
-Mac leader to `mac` and this phone's leader to its paired connection UUID;
-unknown daemon attachment IDs display “Another terminal is driving”. The
-current protocol advertises no mapping from opaque daemon IDs to device names.
+Mac integration is awesomux #788. The relay reports this phone's leadership as
+its paired connection UUID and every other leader as `mac`; older Macs send raw
+daemon attachment IDs, which display “Another terminal has control” and stop
+the phone from resizing the Mac after the opening claim.
 Real Mac integration must also verify grid-before-input, acknowledgements,
 permission changes, concurrent typing and safe-paste behavior in real TUIs.
 

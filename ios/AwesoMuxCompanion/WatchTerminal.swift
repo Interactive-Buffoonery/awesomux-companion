@@ -122,13 +122,10 @@ final class WatchTerminal: ObservableObject, WatchRendering {
     }
 
     func phoneGrid(for size: CGSize) -> CompanionTerminalStream.Grid {
-        var cell = WatchDrawableBudget.cellSize(fontSize: WatchDrawableBudget.maximumFontSize)
-        // Size and viewport only agree once sizing finishes.
-        if isReady, let surface, let viewport = surface.viewport, viewport.columns > 0, viewport.rows > 0 {
-            let ratio = CGFloat(WatchDrawableBudget.maximumFontSize / surface.fontSize)
-            cell = CGSize(width: surface.size.width / CGFloat(viewport.columns) * ratio,
-                          height: surface.size.height / CGFloat(viewport.rows) * ratio)
-        }
+        // Never the current font's cell: claims would move the font and the
+        // font would move the next claim.
+        let cell = surface.flatMap { Self.maximumFontCells[$0.view.traitCollection.displayScale] }
+            ?? scaledCell ?? WatchDrawableBudget.cellSize(fontSize: WatchDrawableBudget.maximumFontSize)
         return .init(rows: max(1, min(1000, Int(size.height / max(1, cell.height)))),
                      cols: max(1, min(1000, Int(size.width / max(1, cell.width)))))
     }
@@ -242,6 +239,7 @@ final class WatchTerminal: ObservableObject, WatchRendering {
                 return
             }
             deadline?.cancel()
+            measureCell(value)
             isReady = true
             pump()
             return
@@ -274,6 +272,30 @@ final class WatchTerminal: ObservableObject, WatchRendering {
             try sizingSurface.resize(to: next)
         } catch {
             _ = invalidate(.drawableTooLarge)
+        }
+    }
+
+    /// Cells measured at the maximum font, per display scale. Scaling up a
+    /// smaller font's cell multiplies its pixel rounding, so that only stands
+    /// in, frozen, until the first maximum-font measurement.
+    private static var maximumFontCells: [CGFloat: CGSize] = [:]
+    private var scaledCell: CGSize?
+
+    private func measureCell(_ viewport: InMemoryTerminalViewport) {
+        guard let surface, viewport.columns > 0, viewport.rows > 0 else { return }
+        // Calibration leaves under a cell of padding, so a measurement is never
+        // below the true cell. Keeping the smallest only ever grows phone
+        // grids, which settles instead of oscillating.
+        let cell = CGSize(width: surface.size.width / CGFloat(viewport.columns),
+                          height: surface.size.height / CGFloat(viewport.rows))
+        if surface.fontSize == WatchDrawableBudget.maximumFontSize {
+            let scale = surface.view.traitCollection.displayScale
+            let known = Self.maximumFontCells[scale] ?? cell
+            Self.maximumFontCells[scale] = CGSize(width: min(known.width, cell.width),
+                                                  height: min(known.height, cell.height))
+        } else if scaledCell == nil {
+            let ratio = CGFloat(WatchDrawableBudget.maximumFontSize / surface.fontSize)
+            scaledCell = CGSize(width: cell.width * ratio, height: cell.height * ratio)
         }
     }
 

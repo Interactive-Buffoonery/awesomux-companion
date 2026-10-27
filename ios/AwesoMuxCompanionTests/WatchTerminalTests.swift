@@ -166,6 +166,77 @@ final class WatchTerminalTests: XCTestCase {
         XCTAssertEqual(text, expected)
     }
 
+    func testPhoneClaimOnWideMacGridChangesFontInPlace() async throws {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        defer { host.close(); terminal.clear() }
+        var failures: [Error] = []
+        terminal.onFailure = { failures.append($0) }
+        let mac = CompanionTerminalStream.Grid(rows: 55, cols: 200)
+        try terminal.reset(grid: mac, scrollbackBound: 1 << 20)
+        try await idle([terminal])
+        let view = try liveView(host)
+        XCTAssertEqual(view.fontSize, 6)
+        try terminal.feed(Data("SIZED-MARKER\r\n$ ".utf8))
+        try await idle([terminal])
+
+        let keyboardUp = CGSize(width: 402, height: 450)
+        let phone = try await claim(terminal, pane: keyboardUp)
+        XCTAssertTrue((30...45).contains(phone.cols), "\(phone)")
+        XCTAssertTrue(failures.isEmpty, "\(failures)")
+        XCTAssertEqual(terminal.reportedGrid, phone)
+        XCTAssertTrue(try liveView(host) === view)
+        XCTAssertEqual(view.fontSize, WatchDrawableBudget.maximumFontSize)
+        let cell = WatchDrawableBudget.cellSize(fontSize: WatchDrawableBudget.maximumFontSize)
+        XCTAssertEqual(view.bounds.width, CGFloat(phone.cols) * cell.width, accuracy: cell.width)
+        XCTAssertEqual(view.bounds.height, CGFloat(phone.rows) * cell.height, accuracy: cell.height)
+        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("SIZED-MARKER"))
+        await displayCycles()
+        attach(host.window, name: "Phone grid on a wide Mac terminal")
+
+        // Keyboard down keeps the font.
+        let tall = CompanionTerminalStream.Grid(rows: 35, cols: phone.cols)
+        try terminal.resize(tall)
+        try await idle([terminal])
+        XCTAssertEqual(terminal.reportedGrid, tall)
+        XCTAssertEqual(view.fontSize, WatchDrawableBudget.maximumFontSize)
+
+        try terminal.resize(mac)
+        try await idle([terminal])
+        XCTAssertTrue(failures.isEmpty, "\(failures)")
+        XCTAssertEqual(terminal.reportedGrid, mac)
+        XCTAssertTrue(try liveView(host) === view)
+        XCTAssertEqual(view.fontSize, 6)
+        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("SIZED-MARKER"))
+    }
+
+    // Council r2-01: an iPad's full-height and keyboard-up grids need
+    // different fonts. Toggling must settle on the same two grids.
+    func testIPadFullHeightAndKeyboardGridsSettleInPlace() async throws {
+        let terminal = WatchTerminal()
+        let host = try mount([terminal])
+        defer { host.close(); terminal.clear() }
+        var failures: [Error] = []
+        terminal.onFailure = { failures.append($0) }
+        try terminal.reset(grid: .init(rows: 55, cols: 200), scrollbackBound: 1 << 20)
+        try await idle([terminal])
+        let view = try liveView(host)
+        try terminal.feed(Data("IPAD-MARKER".utf8))
+        let fullHeight = CGSize(width: 830, height: 1020), keyboardUp = CGSize(width: 830, height: 640)
+        var grids: [CompanionTerminalStream.Grid] = [], fonts: [Float] = []
+        for pane in [fullHeight, keyboardUp, fullHeight, keyboardUp, fullHeight] {
+            let grid = try await claim(terminal, pane: pane)
+            XCTAssertTrue(failures.isEmpty, "\(failures)")
+            XCTAssertTrue(try liveView(host) === view)
+            XCTAssertEqual(view.fontSize, WatchDrawableBudget.fontSize(for: grid))
+            grids.append(grid)
+            fonts.append(try XCTUnwrap(view.fontSize))
+        }
+        XCTAssertNotEqual(fonts[1], fonts[2], "Panes must cross a font step")
+        XCTAssertEqual(Array(grids[3...]), Array(grids[1...2]), "\(grids)")
+        XCTAssertTrue(try XCTUnwrap(terminal.readViewportText()).contains("IPAD-MARKER"))
+    }
+
     // Council r2-02: Mac-led grid changes that cross a font step, growing
     // past the font and shrinking back, stay on the live surface.
     func testMacGridChangesAcrossFontStepsKeepTheLiveSurface() async throws {
@@ -446,6 +517,20 @@ final class WatchTerminalTests: XCTestCase {
         try terminal.reset(grid: initialGrid, scrollbackBound: 4096)
         try await idle([terminal])
         return terminal
+    }
+
+    /// Claims the pane's grid as WatchView does, again on each ready, until
+    /// the grid stops moving. Grids only grow toward the pane, so a settled
+    /// claim takes at most a couple of corrections.
+    private func claim(_ terminal: WatchTerminal, pane: CGSize) async throws -> CompanionTerminalStream.Grid {
+        var grid = terminal.phoneGrid(for: pane)
+        for _ in 0..<3 where terminal.reportedGrid != grid {
+            try terminal.resize(grid)
+            try await idle([terminal])
+            grid = terminal.phoneGrid(for: pane)
+        }
+        XCTAssertEqual(terminal.reportedGrid, grid, "Claims for \(pane) did not settle")
+        return grid
     }
 
     private func alternateScreen(rows: Int) -> Data {

@@ -44,7 +44,6 @@ final class PhoneTerminalTests: XCTestCase {
         }, refresh: {})
         XCTAssertEqual(model.destination?.paneID, created.paneID)
         XCTAssertEqual(model.destination?.targetVersion, created.targetVersion)
-        XCTAssertEqual(model.destination?.opening, .input)
         XCTAssertNil(model.error)
         XCTAssertFalse(model.isCreating)
     }

@@ -16,7 +16,7 @@ final class WatchModel {
     private(set) var activeRoute: CompanionRoute?
     private(set) var error: String?
 
-    @ObservationIgnored private var opening: TerminalOpening
+    @ObservationIgnored private var takeOverOnOpen = true
     @ObservationIgnored private let canInput: @MainActor () -> Bool
     @ObservationIgnored private let renderer: any WatchRendering
     @ObservationIgnored private let canWatch: @MainActor () -> Bool
@@ -39,14 +39,13 @@ final class WatchModel {
         let targetVersion: UUID
     }
 
-    init(renderer: any WatchRendering, opening: TerminalOpening = .watch,
+    init(renderer: any WatchRendering,
          canInput: @escaping @MainActor () -> Bool = { false }, canWatch: @escaping @MainActor () -> Bool = { true },
          makeClient: @escaping (PairingRecord, CompanionRoute) throws -> any WatchClient = { record, route in
              try MacClient(host: route.host, port: record.port, macFingerprint: record.macFingerprint,
                            identity: PhoneIdentity.load(tag: record.identityTag, storage: record.identityStorage))
          },
          sleep: @escaping @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
-        self.opening = opening
         self.canInput = canInput
         self.renderer = renderer
         self.canWatch = canWatch
@@ -88,10 +87,17 @@ final class WatchModel {
         applyOpening()
     }
 
-    // The opening choice applies once; a reconnect must not take control back from the Mac.
+    // Opening the pane takes over once; a reconnect must not take control back from the Mac.
     private func applyOpening() {
-        input.openIfReady(canInput() ? opening : .watch)
-        if input.keyboardRequested { opening = .watch }
+        guard takeOverOnOpen, input.canType else { return }
+        input.takeOver()
+        takeOverOnOpen = false
+    }
+
+    // Taking over waits for the first measured grid so the Mac never resizes to a placeholder.
+    func updatePhoneGrid(_ grid: CompanionTerminalStream.Grid) {
+        input.updatePhoneGrid(grid)
+        if status == .live { applyOpening() }
     }
 
     func reconnect() {
@@ -128,12 +134,7 @@ final class WatchModel {
             return
         }
         WatchDiagnostics.watch.notice("retry_suppressed origin=renderer reason=\(WatchDiagnostics.reason(error), privacy: .public)")
-        if let failure = error as? WatchTerminalFailure,
-           failure == .invalidGrid || failure == .drawableTooLarge {
-            self.error = String(localized: "This terminal's dimensions can't be displayed.")
-        } else {
-            self.error = String(localized: "This terminal couldn't be displayed. Reconnect to try again.")
-        }
+        self.error = String(localized: "This terminal couldn't be displayed. Reconnect to try again.")
     }
 
     private func launchIfAllowed() {
@@ -161,6 +162,8 @@ final class WatchModel {
 
     private func clearTerminal() {
         renderer.clear()
+        // A measurement belongs to the surface that made it; the replacement must measure again.
+        input.preferredGrid = nil
         grid = nil
         leader = nil
         historyIncomplete = false
@@ -258,7 +261,7 @@ final class WatchModel {
                 let client = try makeClient(target.record, route)
                 let opened = try await WatchDiagnostics.$current.withValue(diagnostic) {
                     try await client.openWatch(connectionID: target.record.connectionID,
-                        paneID: target.paneID, targetVersion: target.targetVersion, preferredGrid: input.preferredGrid,
+                        paneID: target.paneID, targetVersion: target.targetVersion, preferredGrid: input.preferredGrid ?? .init(rows: 24, cols: 80),
                         canSend: { [weak self] in self?.isCurrent(epoch) ?? false })
                 }
                 return (opened, route)
@@ -284,12 +287,10 @@ final class WatchModel {
             historyIncomplete = true
             status = .snapshot
             error = nil
-            try renderer.reset(grid: begin.grid, scrollbackBound: begin.scrollbackBound)
+            try renderer.reset(scrollbackBound: begin.scrollbackBound)
         case .bytes(let bytes): try renderer.feed(bytes)
         case .ready: status = .live; error = nil; input.ready(); applyOpening()
-        case .grid(let grid):
-            try renderer.resize(grid)
-            self.grid = grid
+        case .grid(let grid): self.grid = grid
         case .leader(let leader): self.leader = leader; input.leader = leader
         case .ack(let sequence):
             if let generation = input.generation { input.acknowledge(sequence, generation: generation) }
@@ -299,7 +300,7 @@ final class WatchModel {
 
     private static func isTransientRendererFailure(_ error: Error) -> Bool {
         guard let failure = error as? WatchTerminalFailure else { return false }
-        return [.nativeBusy, .overflow, .readinessTimeout, .drainTimeout, .gridOutgrewFont].contains(failure)
+        return [.nativeBusy, .overflow, .readinessTimeout, .drainTimeout].contains(failure)
     }
 
     private static func canRetry(_ error: Error) -> Bool {

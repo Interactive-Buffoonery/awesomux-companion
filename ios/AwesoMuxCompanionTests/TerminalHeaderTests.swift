@@ -25,14 +25,14 @@ final class TerminalHeaderTests: XCTestCase {
                               availability: "attached", state: nil, targetVersion: version.uuidString)
         let listed = try XCTUnwrap(pane.terminalTarget(in: "api-server"))
         XCTAssertEqual(listed, TerminalDestination(paneID: paneID, targetVersion: version,
-                                                   title: "build", workspace: "api-server", opening: .input))
+                                                   title: "build", workspace: "api-server"))
 
         let created = CreatedTerminal(workspaceID: UUID(), paneID: UUID(), targetVersion: UUID())
         let model = TerminalCreationModel()
         await model.create(workspaceID: created.workspaceID, workspaceName: "api-server", isCurrent: { true },
                            canCreate: { true }, send: { _ in created }, refresh: {})
         XCTAssertEqual(model.destination, TerminalDestination(paneID: created.paneID, targetVersion: created.targetVersion,
-                                                              title: "Terminal", workspace: "api-server", opening: .input))
+                                                              title: "Terminal", workspace: "api-server"))
     }
 
     /// Real `WatchView` header at iPhone SE width with long names. Inactive lock keeps it offline.

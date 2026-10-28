@@ -206,14 +206,6 @@ struct SessionsView: View {
                               detailIsTerminal: pane.preview?.isEmpty == false)
         if let target = pane.terminalTarget(in: workspace.name) {
             Button { destination = target } label: { row }
-                .contextMenu {
-                    Button("Watch", systemImage: "eye") {
-                        var watch = target
-                        watch.opening = .watch
-                        destination = watch
-                    }
-                    .accessibilityLabel("Watch")
-                }
         } else {
             row
         }

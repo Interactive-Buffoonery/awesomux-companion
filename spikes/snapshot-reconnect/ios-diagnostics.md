@@ -26,6 +26,10 @@ When the pinned iOS binary reports zero cell metrics, bounded sizing feedback
 uses the actual reported grid to converge; explicit fixed sizing prevents
 SwiftUI compression. Requested point sizes and raw pixel/cell metrics are exported.
 Every feed requires an actual 20-column, 6-row report; sizing times out closed.
+This pinning is deliberate and differs from the app, whose terminal fills the
+phone and resizes the Mac pane to match. The fixtures are byte captures of a
+20×6 Mac terminal, and a restored snapshot only matches uninterrupted output,
+cursor included, at the grid it was captured from.
 Build success does not establish that dimensions converge or replay passes.
 
 Diagnostic action links `awesomuxdiagnostics://replay`, `awesomuxdiagnostics://connect`, and `awesomuxdiagnostics://disconnect` drive smoke checks without changing manual results. Configuration links remain load-only.

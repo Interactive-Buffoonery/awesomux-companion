@@ -23,6 +23,7 @@ targets:
     dependencies:
       - package: libghostty-spm
         product: GhosttyTerminal
+      - package: AwesoMuxCompanionProtocol
     info:
       path: AwesoMuxDiagnostics/Info.plist
       properties:

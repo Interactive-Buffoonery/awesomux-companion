@@ -13,7 +13,7 @@ struct WatchView: View {
     @State private var model: WatchModel
     @State private var isVisible = false
     @State private var keyboardShown = false
-    @State private var zoom = 1.0
+    @AppStorage("terminalFontSize") private var fontSize = 13.0
     @State private var terminalSize = CGSize.zero
     @State private var securityObserver: UUID?
 
@@ -30,7 +30,7 @@ struct WatchView: View {
         }
         renderer.canRender = canRender
         _terminal = StateObject(wrappedValue: renderer)
-        _model = State(initialValue: WatchModel(renderer: renderer, opening: target.opening,
+        _model = State(initialValue: WatchModel(renderer: renderer,
             canInput: { [weak store] in store?.panes.terminalAccess.inputAllowed == true }, canWatch: canRender))
     }
 
@@ -40,16 +40,22 @@ struct WatchView: View {
     }
 
     var body: some View {
-        WatchTerminalView(terminal: terminal, zoom: zoom)
+        WatchTerminalView(terminal: terminal)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Opening takes over with the keyboard down; tapping the terminal starts typing.
+            .simultaneousGesture(TapGesture().onEnded { if model.input.canType { keyboardShown = true } })
             .accessibilityHint("The Mac snapshot preserves terminal cells, but earlier command history and line wraps are unavailable.")
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 terminalSize = size
-                model.input.updatePhoneGrid(terminal.phoneGrid(for: size))
                 if model.status == .idle { connect() }
             }
-            .onChange(of: terminal.isReady) { _, ready in
-                if ready { model.input.updatePhoneGrid(terminal.phoneGrid(for: terminalSize)) }
+            // The Mac pane follows the phone's grid while the phone drives, as tmux does.
+            .onChange(of: terminal.measuredGrid) { _, grid in
+                if let grid { model.updatePhoneGrid(grid) }
+            }
+            .onChange(of: fontSize, initial: true) { _, size in
+                terminal.setFontSize(Float(size))
+                fontSize = Double(terminal.fontSize)
             }
             .background(WatchKeyboard(input: model.input, terminal: terminal, isShown: $keyboardShown)
                 .frame(width: 1, height: 1))
@@ -66,9 +72,6 @@ struct WatchView: View {
             .background(Cat.page)
             .terminalTitle(target.path, subtitle: host, accessibilityLabel: target.accessibilityHeader(host: host))
             .toolbarBackground(Cat.page, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { ModeChip(driving: model.input.hasControl) }
-            }
             .onAppear {
                 isVisible = true
                 if securityObserver == nil {
@@ -98,8 +101,13 @@ struct WatchView: View {
             .onChange(of: inputAnnouncement) { _, message in
                 if !message.isEmpty { UIAccessibility.post(notification: .announcement, argument: message) }
             }
-            .onChange(of: model.input.keyboardRequested) { _, requested in keyboardShown = requested }
             .onChange(of: model.input.canType) { _, canType in if !canType { keyboardShown = false } }
+            .onChange(of: model.input.hasControl) { had, has in
+                // A Mac handback drops the keyboard so the status and Take over are visible again.
+                guard had, !has else { return }
+                keyboardShown = false
+                UIAccessibility.post(notification: .announcement, argument: model.input.drivingText)
+            }
             .sheet(item: Binding(get: { model.input.confirmation }, set: { _ in model.input.cancelPaste() })) { confirmation in
                 NavigationStack {
                     VStack(alignment: .leading, spacing: 16) {
@@ -151,7 +159,7 @@ struct WatchView: View {
     }
 
     private var liveText: String {
-        let grid = model.grid.map { " · \($0.cols)×\($0.rows)" } ?? ""
+        let grid = model.grid.map { " · Mac \($0.cols)×\($0.rows)" } ?? ""
         if let message = model.input.watchMessage { return message }
         return model.input.drivingText.lowercased() + grid
     }
@@ -198,12 +206,13 @@ struct WatchView: View {
     /// Display size and Mac scrollback, kept out of the way of the terminal.
     private var optionsMenu: some View {
         Menu {
-            Section("Text size \(Int(zoom * 100))%") {
-                Button("Larger", systemImage: "plus.magnifyingglass") { zoom = min(2, zoom + 0.25) }
-                    .disabled(zoom >= 2)
-                Button("Smaller", systemImage: "minus.magnifyingglass") { zoom = max(1, zoom - 0.25) }
-                    .disabled(zoom <= 1)
+            Section("Text size \(Int(fontSize)) pt") {
+                Button("Larger", systemImage: "plus.magnifyingglass") { fontSize += 1 }
+                    .disabled(Float(fontSize) >= WatchTerminal.fontSizes.upperBound)
+                Button("Smaller", systemImage: "minus.magnifyingglass") { fontSize -= 1 }
+                    .disabled(Float(fontSize) <= WatchTerminal.fontSizes.lowerBound)
             }
+            .menuActionDismissBehavior(.disabled)
             Section("History") {
                 Button("Earlier", systemImage: "chevron.up") { terminal.scrollHistory("scroll_page_up") }
                 Button("Later", systemImage: "chevron.down") { terminal.scrollHistory("scroll_page_down") }
@@ -265,23 +274,6 @@ struct WatchView: View {
         guard canWatch, isVisible, terminalSize.width > 0, terminalSize.height > 0,
               let record = store.record else { return }
         model.start(record: record, paneID: target.paneID, targetVersion: target.targetVersion)
-    }
-}
-
-/// WATCH is outlined; DRIVE is the only filled chip, so it's obvious when keys reach the Mac.
-private struct ModeChip: View {
-    let driving: Bool
-
-    var body: some View {
-        Text(driving ? "DRIVE" : "WATCH")
-            .font(.caption2.monospaced().weight(.bold)).tracking(1)
-            .foregroundStyle(driving ? Cat.crust : Cat.running)
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(driving ? Cat.accent : .clear, in: RoundedRectangle(cornerRadius: 4))
-            .overlay { if !driving { RoundedRectangle(cornerRadius: 4).stroke(Cat.running, lineWidth: 1) } }
-            .lineLimit(1)
-            .fixedSize()
-            .accessibilityLabel(driving ? "You have control" : "Watching")
     }
 }
 

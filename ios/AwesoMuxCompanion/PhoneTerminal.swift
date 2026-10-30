@@ -7,6 +7,17 @@ struct TerminalDestination: Hashable {
     let targetVersion: UUID
     var title = ""
     var workspace = ""
+    /// The Mac this pane is on; a terminal connects only through that Mac's pairing.
+    var macFingerprint = ""
+    var host = ""
+
+    /// Stamps the Mac whose list opened it.
+    func on(_ record: PairingRecord?) -> TerminalDestination {
+        var target = self
+        target.macFingerprint = record?.macFingerprint ?? ""
+        target.host = record?.macName ?? ""
+        return target
+    }
 
     var path: String {
         let pane = title.isEmpty ? String(localized: "Terminal") : title

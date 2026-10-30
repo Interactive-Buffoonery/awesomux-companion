@@ -120,6 +120,58 @@ final class WatchInputTests: XCTestCase {
         input.disconnect()
     }
 
+    func testHostChangesRejectQueuedTypingBeforeViewTeardown() async throws {
+        for transition in ["host", "add", "notification", "remove"] {
+            let suite = "HostInput.\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let keychain = KeychainFixture()
+            let storage = PairingStore(keychain: keychain)
+            let fingerprints = [Data(repeating: 0xA1, count: 32).base64URLEncodedString,
+                                Data(repeating: 0xB2, count: 32).base64URLEncodedString]
+            for fingerprint in fingerprints {
+                try storage.save(PairingRecord(macName: fingerprint, host: "fixture.invalid", port: 1234,
+                    macFingerprint: fingerprint, transport: .lan, routes: nil, connectionID: UUID(),
+                    identityTag: fingerprint, identityStorage: .keychain, pairedAt: .now))
+            }
+            defaults.set(fingerprints, forKey: HostRegistry.hostsKey)
+            let hosts = Hosts(defaults: defaults, pairingStore: storage) { load in
+                CompanionStore(defaults: defaults, loadPairing: load, pairingStore: storage,
+                    makeClient: { _, _ in PaneClientFixture() }, removePairing: { try storage.clear(macFingerprint: $0.macFingerprint) },
+                    liveActivity: nil, writeShared: { _ in }, clearShared: {})
+            }
+            let a = hosts.stores[0], b = hosts.stores[1]
+            hosts.open(a)
+            let authority = a.decisionPairing
+            var unlocked = true
+            let wire = InputTestConnection()
+            wire.blockGrid = true
+            let input = WatchInput()
+            input.attach(wire, ownLeaderID: "phone", authority: { unlocked && authority != nil && a.decisionPairing == authority })
+            input.begin(generation: 1, leader: "mac")
+            input.ready()
+            input.preferredGrid = .init(rows: 30, cols: 40)
+            input.type(Data("a".utf8))
+            await drain(wire, count: 1)
+            switch transition {
+            case "host": hosts.open(b)
+            case "add": hosts.startAdding()
+            case "notification": hosts.openNotification(paneID: "another-pane", macFingerprint: fingerprints[0])
+            default: await a.unpair()
+            }
+            unlocked = false
+            wire.releaseGrid()
+            for _ in 0..<100 { await Task.yield() }
+            unlocked = true
+            hosts.open(a)
+            input.type(Data("b".utf8))
+            for _ in 0..<100 { await Task.yield() }
+            XCTAssertFalse(input.canType, transition)
+            XCTAssertEqual(wire.frames.count, 1, "\(transition): neither queued nor new bytes reuse the old authority")
+            input.disconnect()
+        }
+    }
+
     func testAttachAndSnapshotNeverSendAndWatchReasonExplainsPermission() async {
         let wire = InputTestConnection(accepted: .init(role: .watch, watchReason: .inputOff))
         let input = WatchInput()

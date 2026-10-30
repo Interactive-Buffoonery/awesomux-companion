@@ -9,71 +9,69 @@ struct SessionsView: View {
     @State private var destination: TerminalDestination?
 
     var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                List {
-                    if let message = store.message {
-                        Button { Task { await store.refresh() } } label: {
-                            SystemLine(text: "[\(message) · tap to retry]")
-                        }
-                        .terminalRow()
+        ScrollViewReader { proxy in
+            List {
+                if let message = store.message {
+                    Button { Task { await store.refresh() } } label: {
+                        SystemLine(text: "[\(message) · tap to retry]")
                     }
-                    if !decisions.pending.isEmpty || !decisions.outcomes.isEmpty {
-                        NavigationLink { DecisionsView(store: store) } label: {
-                            TerminalRow(glyph: .agent, title: String(localized: "permission requests"),
-                                        tag: decisions.pending.isEmpty ? nil : "\(decisions.pending.count)",
-                                        detail: String(localized: "Claude is asking to run a tool"))
-                        }
-                        .terminalRow()
+                    .terminalRow()
+                }
+                if !decisions.pending.isEmpty || !decisions.outcomes.isEmpty {
+                    NavigationLink { DecisionsView(store: store) } label: {
+                        TerminalRow(glyph: .agent, title: String(localized: "permission requests"),
+                                    tag: decisions.pending.isEmpty ? nil : "\(decisions.pending.count)",
+                                    detail: String(localized: "Claude is asking to run a tool"))
                     }
-                    roster
+                    .terminalRow()
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .background(Cat.page)
-                .environment(\.defaultMinListRowHeight, 0)
-                .task(id: visibleFocusedPaneID) {
-                    guard let paneID = visibleFocusedPaneID else { return }
-                    await Task.yield()
-                    guard !Task.isCancelled, visibleFocusedPaneID == paneID else { return }
-                    withAnimation { proxy.scrollTo(paneID, anchor: .center) }
-                    do { try await Task.sleep(for: .seconds(3)) } catch { return }
-                    guard !terminalLock.isLocked, store.focusedPaneID == paneID else { return }
-                    store.focusedPaneID = nil
-                }
+                roster
             }
-            .terminalTitle(store.record?.macName ?? String(localized: "Sessions"), subtitle: connectionLine)
-            .toolbarBackground(Cat.page, for: .navigationBar)
-            .navigationDestination(item: $destination) { target in
-                WatchView(store: store, target: target, terminalLock: terminalLock)
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Cat.page)
+            .environment(\.defaultMinListRowHeight, 0)
+            .task(id: visibleFocusedPaneID) {
+                guard let paneID = visibleFocusedPaneID else { return }
+                await Task.yield()
+                guard !Task.isCancelled, visibleFocusedPaneID == paneID else { return }
+                withAnimation { proxy.scrollTo(paneID, anchor: .center) }
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                guard !terminalLock.isLocked, store.focusedPaneID == paneID else { return }
+                store.focusedPaneID = nil
             }
-            .onChange(of: creation.destination) { _, target in
-                if let target { destination = target; creation.destination = nil }
-            }
-            .alert("Couldn't create terminal", isPresented: Binding(
-                get: { creation.error != nil }, set: { if !$0 { creation.error = nil } })) {
-                Button("OK", role: .cancel) { creation.error = nil }
-            } message: { Text(creation.error ?? "") }
-            .toolbar {
-                if store.panes.terminalAccess.createWorkspaceAllowed {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { createTerminal(in: nil) } label: {
-                            Image(systemName: "plus").accessibilityLabel("New Workspace")
-                        }
-                        .disabled(creation.isCreating)
-                    }
-                }
+        }
+        .terminalTitle(store.record?.macName ?? String(localized: "Sessions"), subtitle: connectionLine)
+        .toolbarBackground(Cat.page, for: .navigationBar)
+        .navigationDestination(item: $destination) { target in
+            WatchView(store: store, target: target, terminalLock: terminalLock)
+        }
+        .onChange(of: creation.destination) { _, target in
+            if let target { destination = target.on(store.record); creation.destination = nil }
+        }
+        .alert("Couldn't create terminal", isPresented: Binding(
+            get: { creation.error != nil }, set: { if !$0 { creation.error = nil } })) {
+            Button("OK", role: .cancel) { creation.error = nil }
+        } message: { Text(creation.error ?? "") }
+        .toolbar {
+            if store.panes.terminalAccess.createWorkspaceAllowed {
                 ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink { SettingsView(store: store) } label: {
-                        Image(systemName: "gearshape").accessibilityLabel("Settings")
+                    Button { createTerminal(in: nil) } label: {
+                        Image(systemName: "plus").accessibilityLabel("New Workspace")
                     }
+                    .disabled(creation.isCreating)
                 }
             }
-            .refreshable {
-                await store.refresh()
-                await store.refreshPanes()
-                await decisions.refresh()
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink { SettingsView(store: store) } label: {
+                    Image(systemName: "gearshape").accessibilityLabel("Mac Settings")
+                }
             }
+        }
+        .refreshable {
+            await store.refresh()
+            await store.refreshPanes()
+            await decisions.refresh()
         }
     }
 
@@ -205,7 +203,7 @@ struct SessionsView: View {
                               detail: pane.preview?.isEmpty == false ? pane.preview : agent?.status ?? pane.status,
                               detailIsTerminal: pane.preview?.isEmpty == false)
         if let target = pane.terminalTarget(in: workspace.name) {
-            Button { destination = target } label: { row }
+            Button { destination = target.on(store.record) } label: { row }
         } else {
             row
         }

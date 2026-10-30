@@ -52,14 +52,16 @@ extension CompanionSessionClient {
 
 extension MacClient: CompanionSessionClient {}
 
+extension CompanionStore: Identifiable {}
+
 @MainActor @Observable
 final class CompanionStore {
     private(set) var panes = PaneRoster()
     private(set) var decisionPairingID = UUID()
-    var decisionPairing: UUID? { record == nil || isUnpairing ? nil : decisionPairingID }
+    var decisionPairing: UUID? { record == nil || isUnpairing || removalPending ? nil : decisionPairingID }
     private(set) var decisionSessionID = UUID()
     private(set) var decisionAccessDenied = false
-    var decisionSession: UUID? { record == nil || isUnpairing ? nil : decisionSessionID }
+    var decisionSession: UUID? { record == nil || isUnpairing || removalPending ? nil : decisionSessionID }
 
     private(set) var record: PairingRecord?
     private(set) var snapshot: GlanceSnapshot?
@@ -68,21 +70,30 @@ final class CompanionStore {
     private(set) var reachable = false
     private(set) var message: String?
     private(set) var isUnpairing = false
-    private(set) var unpairMessage: String? {
-        didSet { defaults.set(unpairMessage, forKey: Keys.unpairMessage) }
-    }
+    private(set) var removalPending = false
+    /// Set when the Mac couldn't confirm an unpair; `Hosts` keeps it as that Mac's reminder once the pairing is gone.
+    private(set) var unpairMessage: String?
     private(set) var pairingStep: PairingStep = .idle
     /// The route that answered the latest read; cleared when no route answers.
     private(set) var activeRoute: CompanionRoute?
-    /// Pair Again from Settings; the welcome screen also shows whenever no Mac is paired.
+    /// Pair Again from this Mac's settings, or adding a Mac on a store with no pairing yet.
     var showingPairing = false
+    /// Set by `Hosts`: whether a fingerprint is already one of the paired Macs, so adding can't replace it.
+    @ObservationIgnored var isPairedHost: @MainActor (String) -> Bool = { _ in false }
+    @ObservationIgnored var preparePairingSave: @MainActor () throws -> Void = {}
+    /// Set by `Hosts`: called once a store that had no pairing has saved its first one.
+    @ObservationIgnored var didPair: @MainActor (CompanionStore) -> Void = { _ in }
+    /// Set by `Hosts`: called once this store's pairing has been removed, with the record it had.
+    @ObservationIgnored var didUnpair: @MainActor (CompanionStore, PairingRecord) -> Void = { _, _ in }
+    /// Set by `Hosts`: only the selected Mac writes the widget snapshot and Live Activity, until B3 merges hosts.
+    @ObservationIgnored var publishesGlance: @MainActor () -> Bool = { true }
     /// Pane named by a tapped notification; the list scrolls to and highlights it.
     var focusedPaneID: String?
     var isConnected: Bool { reachable && snapshot?.connected == true }
     var liveActivityEnabled: Bool {
         didSet {
             defaults.set(liveActivityEnabled, forKey: Keys.liveActivity)
-            if !liveActivityEnabled { Task { await liveActivity?.endAll() } }
+            if !liveActivityEnabled { endGlanceActivity() }
         }
     }
 
@@ -121,36 +132,42 @@ final class CompanionStore {
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var pairingTask: Task<Void, Never>?
     @ObservationIgnored private var lastSharedWrite = Date.distantPast
-    @ObservationIgnored private var tracker: AttentionTracker { didSet { tracker.save(defaults: defaults) } }
+    @ObservationIgnored private var glanceRevision = UUID()
+    @ObservationIgnored private var tracker: AttentionTracker {
+        didSet { if let key = hostKey(AttentionTracker.key) { tracker.save(defaults: defaults, key: key) } }
+    }
     /// Alerts raised since the last roster read; posted once workspace names are known.
     @ObservationIgnored private var pendingAlerts: [APIResponse.Event] = []
-    @ObservationIgnored private let liveActivity: LiveActivityController?
+    @ObservationIgnored private let liveActivity: (any LiveActivityPublishing)?
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let cache: SessionSnapshotCache
+    @ObservationIgnored private let pairingStore: PairingStore
     @ObservationIgnored private let makeClient: (PairingRecord, CompanionRoute) throws -> any CompanionSessionClient
     @ObservationIgnored private let removePairing: (PairingRecord) throws -> Void
+    @ObservationIgnored private let revokePrevious: ((PairingRecord) -> Void)?
     @ObservationIgnored private let writeShared: (GlanceSnapshot) -> Void
     @ObservationIgnored private let clearShared: () -> Void
 
-    // ponytail: one slot each; stored values name the pairing they belong to. Multi-host keys them by fingerprint.
-    private enum Keys {
+    /// Per-Mac values live under `<key>.<fingerprint>` (`HostRegistry.hostKey`); the Live Activity switch is app-wide.
+    enum Keys {
         static let liveActivity = "liveActivityEnabled"
         static let previewSuppression = "terminalPreviewSuppression"
-        static let unpairMessage = "unpairMessage"
         static let revokedConnectionID = "revokedConnectionID"
+        static let removalPending = "localUnpairPending"
     }
 
     init(
         defaults: UserDefaults = .standard,
-        loadPairing: () throws -> PairingRecord? = { try PairingStore.system.load() },
+        loadPairing: () throws -> PairingRecord? = { nil },
+        pairingStore: PairingStore = .system,
         makeClient: @escaping (PairingRecord, CompanionRoute) throws -> any CompanionSessionClient = { record, route in
             try MacClient(host: route.host, port: record.port, macFingerprint: record.macFingerprint,
                           identity: PhoneIdentity.load(tag: record.identityTag, storage: record.identityStorage))
         },
-        removePairing: @escaping (PairingRecord) throws -> Void = {
-            try PairingStore.system.clearAll(current: $0, deletingIdentity: PhoneIdentity.delete(tag:))
-        },
-        liveActivity: LiveActivityController? = LiveActivityController(),
+        removePairing: ((PairingRecord) throws -> Void)? = nil,
+        deleteIdentity: @escaping (String) throws -> Void = PhoneIdentity.delete(tag:),
+        revokePrevious: ((PairingRecord) -> Void)? = nil,
+        liveActivity: (any LiveActivityPublishing)? = LiveActivityController(),
         writeShared: @escaping (GlanceSnapshot) -> Void = {
             SharedSnapshot.write($0); WidgetCenter.shared.reloadAllTimelines()
         },
@@ -158,27 +175,44 @@ final class CompanionStore {
             SharedSnapshot.clear(); WidgetCenter.shared.reloadAllTimelines()
         }
     ) {
+        var loaded: PairingRecord?
+        var loadFailed = false
+        do { loaded = try loadPairing() } catch { loadFailed = true }
         self.defaults = defaults
         cache = SessionSnapshotCache(defaults: defaults)
+        self.pairingStore = pairingStore
         self.makeClient = makeClient
-        self.removePairing = removePairing
+        // Keep the record until key deletion succeeds, so a failed removal can be retried after relaunch.
+        self.removePairing = removePairing ?? { record in
+            try deleteIdentity(record.identityTag)
+            defaults.set(record.connectionID.uuidString,
+                         forKey: HostRegistry.hostKey(Keys.removalPending, record.macFingerprint))
+            try pairingStore.clear(macFingerprint: record.macFingerprint)
+        }
+        self.revokePrevious = revokePrevious
         self.liveActivity = liveActivity
         self.writeShared = writeShared
         self.clearShared = clearShared
-        tracker = AttentionTracker.load(defaults: defaults)
+        tracker = loaded.map {
+            AttentionTracker.load(defaults: defaults, key: HostRegistry.hostKey(AttentionTracker.key, $0.macFingerprint))
+        } ?? AttentionTracker()
         liveActivityEnabled = defaults.object(forKey: Keys.liveActivity) as? Bool ?? true
-        unpairMessage = defaults.string(forKey: Keys.unpairMessage)
-        do {
-            record = try loadPairing()
-            if let record, let data = defaults.data(forKey: Keys.previewSuppression),
+        record = loaded
+        removalPending = loaded.map {
+            defaults.string(forKey: HostRegistry.hostKey(Keys.removalPending, $0.macFingerprint)) == $0.connectionID.uuidString
+        } ?? false
+        if loadFailed {
+            message = String(localized: "This iPhone's pairing couldn't be read. Pair again to continue.")
+        } else if removalPending {
+            message = String(localized: "This iPhone couldn’t finish unpairing. Choose Unpair This iPhone to try again.")
+        } else {
+            if let record, let key = hostKey(Keys.previewSuppression), let data = defaults.data(forKey: key),
                let suppression = try? JSONDecoder().decode(PreviewSuppression.self, from: data),
                suppression == PreviewSuppression(record) {
                 panes.previewIntent = .keepOff
             }
             snapshot = cache.restore(for: record)
             isSnapshotCached = snapshot != nil
-        } catch {
-            message = String(localized: "This iPhone's pairing couldn't be read. Pair again to continue.")
         }
         pathMonitor.pathUpdateHandler = { [weak self] path in
             WatchDiagnostics.routing.notice("path_changed satisfied=\(path.status == .satisfied) expensive=\(path.isExpensive) constrained=\(path.isConstrained)")
@@ -192,6 +226,7 @@ final class CompanionStore {
     func startPairing(_ link: PairingLink) {
         guard !isUnpairing else { return }
         pairingTask?.cancel()
+        if let conflict = pairingConflict(link) { pairingStep = .failed(conflict.message); return }
         pairingStep = .connecting(macName: link.macName)
         pairingTask = Task { await pair(link) }
     }
@@ -212,10 +247,30 @@ final class CompanionStore {
         }
         do throws(PairingLink.Failure) {
             let link = try PairingLink(text)
+            if let conflict = pairingConflict(link) { pairingStep = .failed(conflict.message); return }
             if review { pairingStep = .review(link) } else { startPairing(link) }
         } catch {
             pairingStep = .failed(error.message)
         }
+    }
+
+    struct PairingConflict: Error { let message: String }
+
+    /// Pair Again stays with this store's Mac; adding a Mac never replaces one that is already paired.
+    /// Both are checked before anything contacts the Mac in the link, and again before saving.
+    func pairingConflict(_ link: PairingLink) -> PairingConflict? {
+        pairingConflict(fingerprint: link.macFingerprint, name: link.macName)
+    }
+
+    private func pairingConflict(fingerprint: String, name: String) -> PairingConflict? {
+        if let record {
+            guard fingerprint != record.macFingerprint else { return nil }
+            return PairingConflict(message: String(localized:
+                "This code is for “\(name)”, not “\(record.macName)”. To add another Mac, go back to Hosts and choose + pair a mac."))
+        }
+        guard isPairedHost(fingerprint) else { return nil }
+        return PairingConflict(message: String(localized:
+            "“\(name)” is already paired. To pair it again, open its settings and choose Pair Again."))
     }
 
     private func pair(_ link: PairingLink) async {
@@ -232,27 +287,39 @@ final class CompanionStore {
             let reply = try await withTaskCancellationHandler { try await session.outcome() } onCancel: { session.cancel() }
             try Task.checkCancellation()
             guard let connectionID = reply.connectionID else { throw MacClientFailure.denied }
+            if let conflict = pairingConflict(link) { throw conflict }
             let v1 = link.version == 1 ? link.routes.first : nil
-            let (previous, pairedAt) = try PairingStore.system.replacementContext(current: record)
+            // Only an item with this same Mac is ever overwritten; no other pairing is read for replacement.
+            let (_, pairedAt) = try pairingStore.replacementContext(for: link.macFingerprint)
             let next = PairingRecord(
                 macName: reply.macName ?? link.macName, host: v1?.host, port: link.port,
                 macFingerprint: link.macFingerprint, transport: v1?.transport, routes: v1 == nil ? link.routes : nil,
                 connectionID: connectionID, identityTag: created.tag, identityStorage: created.storage, pairedAt: pairedAt)
-            let previousGone = try PairingStore.system.replace(previous, with: next)
-            replacePairing(with: next)
-            if let previous, previous.identityTag != next.identityTag { revoke(previous, deletingIdentity: previousGone) }
-            unpairMessage = nil
-            defaults.removeObject(forKey: Keys.revokedConnectionID)
-            message = nil
-            pairingStep = .idle
-            showingPairing = false
+            try savePairing(next)
             requestNotificationPermission()
             await refresh()
         } catch {
             if let identity { try? PhoneIdentity.delete(tag: identity.tag) }
             guard !Task.isCancelled else { return }
-            pairingStep = .failed(Self.pairingMessage(for: error))
+            pairingStep = .failed((error as? PairingConflict)?.message ?? Self.pairingMessage(for: error))
         }
+    }
+
+    /// Commits an allowed pairing without changing any other Mac's membership or grant.
+    func savePairing(_ next: PairingRecord) throws {
+        try preparePairingSave()
+        if let conflict = pairingConflict(fingerprint: next.macFingerprint, name: next.macName) { throw conflict }
+        let previous = try pairingStore.replacementContext(for: next.macFingerprint).previous
+        try pairingStore.save(next)
+        let added = record == nil
+        replacePairing(with: next)
+        if let previous, previous.identityTag != next.identityTag { revoke(previous) }
+        unpairMessage = nil
+        if let key = hostKey(Keys.revokedConnectionID) { defaults.removeObject(forKey: key) }
+        message = nil
+        pairingStep = .idle
+        showingPairing = false
+        if added { didPair(self) }
     }
 
     func unpair() async {
@@ -261,7 +328,8 @@ final class CompanionStore {
         cancelPairing()
         forgetConnection()
         defer { isUnpairing = false }
-        var notifiedMac = defaults.string(forKey: Keys.revokedConnectionID) == record.connectionID.uuidString
+        let revokedKey = HostRegistry.hostKey(Keys.revokedConnectionID, record.macFingerprint)
+        var notifiedMac = defaults.string(forKey: revokedKey) == record.connectionID.uuidString
         if !notifiedMac {
             do {
                 _ = try await firstAnswering(record.allRoutes) { route in
@@ -269,7 +337,7 @@ final class CompanionStore {
                 }
                 notifiedMac = true
                 // Keep the acknowledgement if local deletion needs another attempt.
-                defaults.set(record.connectionID.uuidString, forKey: Keys.revokedConnectionID)
+                defaults.set(record.connectionID.uuidString, forKey: revokedKey)
             } catch {
                 // Local removal must finish even when the Mac cannot acknowledge it.
             }
@@ -278,20 +346,24 @@ final class CompanionStore {
             "To finish, also choose Unpair in awesoMux Settings on your Mac.")
         do {
             try removePairing(record)
-            defaults.removeObject(forKey: Keys.revokedConnectionID)
-            self.record = nil
             discardPreviewSuppression()
+            for key in HostRegistry.hostKeys(record.macFingerprint) { defaults.removeObject(forKey: key) }
+            self.record = nil
+            removalPending = false
             message = nil
+            didUnpair(self, record)
         } catch {
+            removalPending = defaults.string(forKey: HostRegistry.hostKey(Keys.removalPending, record.macFingerprint))
+                == record.connectionID.uuidString
             message = String(localized: "This iPhone couldn’t finish unpairing. Choose Unpair This iPhone to try again.")
         }
     }
 
-    /// Best effort, after a new pairing replaces `previous`: if the old Mac can't be reached, its grant stays
-    /// until the person unpairs there, the same as an unacknowledged unpair. The old key is deleted only when
-    /// `previous` is gone; otherwise unpairing deletes it along with the superseded pairing.
+    /// Best effort, after pairing the same Mac again overwrote `previous`: if the Mac can't be reached, its old grant
+    /// stays until the person unpairs there, the same as an unacknowledged unpair. Never called for another Mac.
     // This attempt is not persisted; quitting before it finishes can leave the old key in Keychain.
-    private func revoke(_ previous: PairingRecord, deletingIdentity: Bool) {
+    private func revoke(_ previous: PairingRecord) {
+        if let revokePrevious { revokePrevious(previous); return }
         Task {
             if let identity = try? PhoneIdentity.load(tag: previous.identityTag, storage: previous.identityStorage) {
                 _ = try? await firstAnswering(previous.allRoutes) { route in
@@ -299,7 +371,7 @@ final class CompanionStore {
                                         identity: identity).unpair(connectionID: previous.connectionID)
                 }
             }
-            if deletingIdentity { try? PhoneIdentity.delete(tag: previous.identityTag) }
+            try? PhoneIdentity.delete(tag: previous.identityTag)
         }
     }
 
@@ -307,15 +379,72 @@ final class CompanionStore {
     func replacePairing(with next: PairingRecord) {
         forgetConnection()
         discardPreviewSuppression()
+        if let key = hostKey(Keys.removalPending) { defaults.removeObject(forKey: key) }
+        removalPending = false
         record = next
     }
 
     private func discardPreviewSuppression() {
-        defaults.removeObject(forKey: Keys.previewSuppression)
+        if let key = hostKey(Keys.previewSuppression) { defaults.removeObject(forKey: key) }
         panes.previewIntent = .followHost
     }
 
+    private func hostKey(_ key: String) -> String? {
+        record.map { HostRegistry.hostKey(key, $0.macFingerprint) }
+    }
+
+    nonisolated static func legacyPreviewValue(_ value: Any, matches record: PairingRecord) -> Bool {
+        guard let data = value as? Data,
+              let suppression = try? JSONDecoder().decode(PreviewSuppression.self, from: data) else { return false }
+        return suppression == PreviewSuppression(record)
+    }
+
+    /// Another Mac was opened: anything this store authorized for the screen it showed (watching, typing,
+    /// creating terminals, answering decisions) stops, and needs fresh authority if this Mac is opened again.
+    func resignSelection() {
+        glanceRevision = UUID()
+        decisionPairingID = UUID()
+        decisionSessionID = UUID()
+        focusedPaneID = nil
+        suspendPanes()
+    }
+
+    /// Becoming the selected Mac: its snapshot replaces the widget's and the Live Activity's, or clears them.
+    func publishGlance() {
+        guard publishesGlance() else { return }
+        if let snapshot {
+            writeShared(snapshot); lastSharedWrite = .now
+            let connected = snapshot.connected && reachable
+            let current = glanceAuthority()
+            Task { await syncGlanceActivity(snapshot, connected: connected, isCurrent: current) }
+        } else {
+            clearShared()
+            endGlanceActivity()
+        }
+    }
+
+    private func glanceAuthority() -> @MainActor () -> Bool {
+        let started = glanceRevision
+        return { [weak self] in
+            guard let self else { return false }
+            return self.glanceRevision == started && self.publishesGlance()
+        }
+    }
+
+    private func syncGlanceActivity(_ snapshot: GlanceSnapshot, connected: Bool,
+                                   isCurrent: (@MainActor () -> Bool)? = nil) async {
+        let current = isCurrent ?? glanceAuthority()
+        await liveActivity?.sync(snapshot, connected: connected,
+                                 isCurrent: { current() && self.liveActivityEnabled })
+    }
+
+    private func endGlanceActivity() {
+        let current = glanceAuthority()
+        Task { await liveActivity?.endAll(isCurrent: current) }
+    }
+
     private func forgetConnection() {
+        glanceRevision = UUID()
         decisionPairingID = UUID()
         decisionAccessDenied = false
         decisionSessionID = UUID()
@@ -329,13 +458,14 @@ final class CompanionStore {
         previewMutationTask = nil
         focusedPaneID = nil
         refreshTask?.cancel(); refreshTask = nil
-        cache.clear()
+        cache.clear(for: record)
         clients = [:]; activeRoute = nil; snapshot = nil; reachable = false; isSnapshotCached = false
         lanFailed = false; routesCheckedAt = .distantPast
         tracker = AttentionTracker()
         pendingAlerts = []
+        guard publishesGlance() else { return }
         clearShared()
-        Task { await liveActivity?.endAll() }
+        endGlanceActivity()
     }
 
     // MARK: Reading
@@ -354,10 +484,20 @@ final class CompanionStore {
         }
     }
 
+    /// A Mac that isn't open: alerts and agents every 30 s while the app is in the foreground, panes stay suspended.
+    /// `Hosts` ends it with the scene, which suspends this store and so ends the foreground session.
+    func pollAttention() async {
+        if foregroundSession == nil { foregroundSession = UUID() }
+        while !Task.isCancelled {
+            await refresh()
+            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+        }
+    }
+
     /// One read of alerts and agents; overlapping callers share the read already in flight.
     func refresh() async {
         if let refreshTask { return await refreshTask.value }
-        guard !isUnpairing, let record else { return }
+        guard !isUnpairing, !removalPending, let record else { return }
         let started = revision
         let task = Task { await read(record, revision: started) }
         refreshTask = task
@@ -382,10 +522,10 @@ final class CompanionStore {
             if let snapshot {
                 if snapshot.connected {
                     let offline = snapshot.offline()
-                    writeShared(offline)
+                    if publishesGlance() { writeShared(offline) }
                     self.snapshot = offline
                 }
-                if liveActivityEnabled { await liveActivity?.sync(snapshot, connected: false) }
+                await syncGlanceActivity(snapshot, connected: false)
             }
         }
     }
@@ -433,7 +573,7 @@ final class CompanionStore {
             if !page.hasMore { break }
         }
         let snapshot = try await roster()
-        postPendingAlerts(workspaceNames: workspaceNames)
+        postPendingAlerts(workspaceNames: workspaceNames, record: record)
         return snapshot
     }
 
@@ -441,13 +581,14 @@ final class CompanionStore {
         let previous = snapshot
         snapshot = next; reachable = true; message = nil; isSnapshotCached = false
         reconcilePaneFocus()
+        guard publishesGlance() else { return }
         if previous?.agents != next.agents || previous?.connected != next.connected || previous?.hostName != next.hostName
             || SharedSnapshot.read()?.connected != next.connected
             // Refresh well inside the widget's freshness window so a quiet, healthy Mac never ages out.
             || Date.now.timeIntervalSince(lastSharedWrite) > SharedSnapshot.freshFor / 3 {
             writeShared(next); lastSharedWrite = .now
         }
-        if liveActivityEnabled { await liveActivity?.sync(next, connected: next.connected) }
+        await syncGlanceActivity(next, connected: next.connected)
     }
 
     // MARK: Foreground pane content
@@ -485,7 +626,7 @@ final class CompanionStore {
 
     /// Only active polling calls this; background refresh remains agent-only.
     func refreshPanes() async {
-        guard panes.lifecycle == .active, !isUnpairing, let record else { return }
+        guard panes.lifecycle == .active, !isUnpairing, !removalPending, let record else { return }
         guard previewMutationTask == nil else { return }
         if let paneReadTask { return await paneReadTask.value }
         let generation = panes.generation
@@ -573,11 +714,13 @@ final class CompanionStore {
     }
 
     func setTerminalPreview(_ allowed: Bool) async {
+        guard !removalPending else { return }
         guard panes.lifecycle == .active, !isUnpairing, let record,
               panes.permission.canChange || previewMutationTask != nil else { return }
         previewChoice = PreviewChoice(allowed: allowed, pairingRevision: revision)
         // Persist suppression before contacting the host, including an enable awaiting confirmation.
-        defaults.set(try? JSONEncoder().encode(PreviewSuppression(record)), forKey: Keys.previewSuppression)
+        defaults.set(try? JSONEncoder().encode(PreviewSuppression(record)),
+                     forKey: HostRegistry.hostKey(Keys.previewSuppression, record.macFingerprint))
         panes.previewIntent = .keepOff
         invalidatePaneRead()
         permissionRevision += 1
@@ -626,7 +769,7 @@ final class CompanionStore {
             guard status.terminalPreviewAllowed == choice.allowed else { throw MacClientFailure.invalidResponse }
             // An explicit, confirmed enable is the only way to release this pairing's local suppression.
             if choice.allowed {
-                defaults.removeObject(forKey: Keys.previewSuppression)
+                defaults.removeObject(forKey: HostRegistry.hostKey(Keys.previewSuppression, record.macFingerprint))
                 panes.previewIntent = .followHost
             }
             publish(PaneRoster.permission(status.terminalPreviewAllowed))
@@ -707,8 +850,10 @@ final class CompanionStore {
         if reportOffline, let snapshot, snapshot.connected {
             let offline = snapshot.offline()
             self.snapshot = offline
+            guard publishesGlance() else { return }
             writeShared(offline)
-            if liveActivityEnabled { Task { await liveActivity?.sync(offline, connected: false) } }
+            let current = glanceAuthority()
+            Task { await syncGlanceActivity(offline, connected: false, isCurrent: current) }
         }
     }
 
@@ -784,7 +929,7 @@ final class CompanionStore {
         guard routes != saved else { return }
         next.routes = routes
         // Publish only what was saved, so a failed write is retried by the next identical report.
-        guard (try? PairingStore.system.save(next)) != nil else { return }
+        guard (try? pairingStore.save(next)) != nil else { return }
         self.record = next
     }
 
@@ -819,17 +964,25 @@ final class CompanionStore {
         Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
     }
 
-    private func postPendingAlerts(workspaceNames: [String: String]) {
+    /// Each alert names its Mac and carries its fingerprint, so a tap opens that Mac's pane and no other.
+    private func postPendingAlerts(workspaceNames: [String: String], record: PairingRecord) {
         for event in pendingAlerts {
             let content = UNMutableNotificationContent()
             content.title = Self.alertTitle(provider: event.provider, reason: event.reason)
+            content.subtitle = record.macName
             content.body = workspaceNames[event.workspaceID] ?? ""
             content.sound = .default
-            content.threadIdentifier = event.paneID
-            content.userInfo = ["paneID": event.paneID, "attentionID": event.attentionID]
-            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: event.attentionID, content: content, trigger: nil))
+            content.threadIdentifier = "\(record.macFingerprint):\(event.paneID)"
+            content.userInfo = Self.notificationInfo(paneID: event.paneID, attentionID: event.attentionID,
+                                                     macFingerprint: record.macFingerprint)
+            UNUserNotificationCenter.current().add(UNNotificationRequest(
+                identifier: "\(record.macFingerprint):\(event.attentionID)", content: content, trigger: nil))
         }
         pendingAlerts.removeAll()
+    }
+
+    static func notificationInfo(paneID: String, attentionID: String, macFingerprint: String) -> [String: String] {
+        ["paneID": paneID, "attentionID": attentionID, "macFingerprint": macFingerprint]
     }
 
     private static func alertTitle(provider: String, reason: String) -> String {
@@ -879,20 +1032,20 @@ final class CompanionStore {
 struct AttentionTracker: Codable {
     static let recoveryStatuses: Set<String> = ["history_gap", "app_restarted", "access_changed"]
     static let knownStatuses = recoveryStatuses.union(["initial", "current"])
-    private static let key = "attentionTracker"
+    static let key = "attentionTracker"
 
     var cursor: String?
     var openAlerts: [String: APIResponse.Event] = [:]
     var readingInitialHistory = true
 
-    static func load(defaults: UserDefaults = .standard) -> AttentionTracker {
+    static func load(defaults: UserDefaults = .standard, key: String = key) -> AttentionTracker {
         defaults.data(forKey: key).flatMap { try? CompanionProtocol.decoder().decode(Self.self, from: $0) } ?? Self()
     }
 
-    func save(defaults: UserDefaults = .standard) {
+    func save(defaults: UserDefaults = .standard, key: String = key) {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        defaults.set(try? encoder.encode(self), forKey: Self.key)
+        defaults.set(try? encoder.encode(self), forKey: key)
     }
 
     mutating func apply(_ events: [APIResponse.Event], cursorStatus: String,

@@ -2,13 +2,13 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
+/// One Mac's settings: its pairing, terminal previews and permission requests. App-wide settings are in
+/// `AppSettingsView`, from the host list.
 struct SettingsView: View {
-    @Bindable var store: CompanionStore
-    @Environment(TerminalLockModel.self) private var terminalLock
+    let store: CompanionStore
+    /// Permission requests are read from the open Mac only, so other Macs' settings don't link them.
+    var showsDecisions = true
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var notifications: UNAuthorizationStatus?
     @State private var confirmingUnpair = false
 
     var body: some View {
@@ -28,13 +28,44 @@ struct SettingsView: View {
                     } else if let message = store.message {
                         Text(message).font(.footnote).foregroundStyle(Cat.subtext0)
                     }
-                    if let message = store.unpairMessage {
-                        Text(message).font(.footnote).foregroundStyle(Cat.subtext0)
-                    }
-                } header: { Text("Your Mac").foregroundStyle(Cat.subtext0) }
+                } header: { Text("This Mac").foregroundStyle(Cat.subtext0) }
+                    footer: { Text("Pair Again renews this Mac's pairing. To add another Mac, use + pair a mac in Hosts.").foregroundStyle(Cat.subtext0) }
                 .disabled(store.isUnpairing)
                 .listRowBackground(Cat.card)
+                TerminalPreviewSection(store: store)
+                if showsDecisions {
+                    Section {
+                        NavigationLink("Permission requests") { DecisionsView(store: store) }.foregroundStyle(Cat.text)
+                    } footer: {
+                        Text("Answer Claude's once-only permission requests from this iPhone.").foregroundStyle(Cat.subtext0)
+                    }
+                    .listRowBackground(Cat.card)
+                }
             }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Cat.page)
+        .navigationTitle(store.record?.macName ?? String(localized: "Settings"))
+        .onChange(of: store.record == nil) { _, unpaired in if unpaired { dismiss() } }
+        .confirmationDialog("Unpair this iPhone?", isPresented: $confirmingUnpair, titleVisibility: .visible) {
+            Button("Unpair", role: .destructive) { Task { await store.unpair() } }
+        } message: {
+            Text("Unpair this iPhone from \(store.record?.macName ?? "your Mac"). Your other Macs stay paired. If this Mac can’t be reached, you can finish there later.")
+        }
+    }
+}
+
+/// Settings for the whole app, whichever Mac is open.
+struct AppSettingsView: View {
+    @Bindable var hosts: Hosts
+    @Environment(TerminalLockModel.self) private var terminalLock
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var notifications: UNAuthorizationStatus?
+
+    var body: some View {
+        List {
             Section {
                 Button(action: openNotificationSettings) {
                     LabeledContent("Notifications") {
@@ -46,18 +77,10 @@ struct SettingsView: View {
                     }
                     .foregroundStyle(Cat.text)
                 }
-                Toggle("Live Activity", isOn: $store.liveActivityEnabled).foregroundStyle(Cat.text)
+                Toggle("Live Activity", isOn: $hosts.liveActivityEnabled).foregroundStyle(Cat.text)
             } header: { Text("Alerts").foregroundStyle(Cat.subtext0) }
+                footer: { Text("Alerts come from every paired Mac. The widget and Live Activity show the Mac you opened last.").foregroundStyle(Cat.subtext0) }
             .listRowBackground(Cat.card)
-            if store.record != nil {
-                TerminalPreviewSection(store: store)
-                Section {
-                    NavigationLink("Permission requests") { DecisionsView(store: store) }.foregroundStyle(Cat.text)
-                } footer: {
-                    Text("Answer Claude's once-only permission requests from this iPhone.").foregroundStyle(Cat.subtext0)
-                }
-                .listRowBackground(Cat.card)
-            }
             Section {
                 TerminalProtectionToggle(model: terminalLock).foregroundStyle(Cat.text)
                 if let message = terminalLock.authenticationFailureMessage {
@@ -78,11 +101,6 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .task(id: scenePhase) {
             notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
-        }
-        .confirmationDialog("Unpair this iPhone?", isPresented: $confirmingUnpair, titleVisibility: .visible) {
-            Button("Unpair", role: .destructive) { Task { await store.unpair() } }
-        } message: {
-            Text("Unpair this iPhone from your Mac. If your Mac can’t be reached, you can finish there later.")
         }
     }
 

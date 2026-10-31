@@ -316,10 +316,13 @@ final class PendingDecisionsModel {
         return effectiveNow < deadline.wall && uptime() < deadline.monotonic
     }
 
-    func answer(_ identity: CompanionDecisionIdentity, choice: CompanionDecisionChoice) async {
+    func answer(_ identity: CompanionDecisionIdentity, choice: CompanionDecisionChoice, note: String? = nil) async {
         synchronizeConnection()
-        guard canAnswer(identity, choice: choice) else { return }
-        await authenticate(CompanionDecisionAnswer(identity: identity, choice: choice, retryID: UUID()))
+        let note = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canAnswer(identity, choice: choice),
+              let answer = CompanionDecisionAnswer(identity: identity, choice: choice, retryID: UUID(), note: note)
+        else { return }
+        await authenticate(answer)
     }
 
     func retry(_ identity: CompanionDecisionIdentity) async {

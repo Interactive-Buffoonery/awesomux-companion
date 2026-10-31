@@ -281,6 +281,7 @@ struct WatchView: View {
 private struct QuestionDock: View {
     let request: CompanionPendingDecision
     let decisions: PendingDecisionsModel
+    @State private var noteTarget: CompanionDecisionIdentity?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -298,7 +299,21 @@ private struct QuestionDock: View {
             if let message = decisions.message {
                 Text(verbatim: message).foregroundStyle(Cat.subtext0)
             }
-            HStack(spacing: 6) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { answerButtons }
+                VStack(alignment: .leading, spacing: 6) { answerButtons }
+            }
+        }
+        .font(.caption.monospaced())
+        .foregroundStyle(Cat.text)
+        .padding(10)
+        .background(Cat.mauve.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Cat.mauve, lineWidth: 1))
+        .padding(.horizontal, 8).padding(.bottom, 8)
+        .denyNoteSheet(target: $noteTarget, model: decisions)
+    }
+
+    @ViewBuilder private var answerButtons: some View {
                 if decisions.isAnswering {
                     Text("checking your Mac…").foregroundStyle(Cat.subtext0)
                 } else if decisions.hasAttempt(request.identity) {
@@ -308,22 +323,20 @@ private struct QuestionDock: View {
                         .accessibilityHint("An answer may have reached your Mac. This retries only the original choice.")
                 } else {
                     ForEach(request.choices, id: \.rawValue) { choice in
-                        Button(choice == .allow ? "Allow once" : "Deny once") {
+                        Button(choice == .allow ? "Allow" : "Deny") {
                             Task { await decisions.answer(request.identity, choice: choice) }
                         }
                         .buttonStyle(BarButtonStyle(filled: choice == .allow))
                         .disabled(!decisions.canAnswer(request.identity, choice: choice))
                         .accessibilityHint("Authenticates before answering this Claude permission request.")
                     }
+                    if request.choices.contains(.deny) {
+                        Button("Deny and tell Claude…") { noteTarget = request.identity }
+                            .buttonStyle(BarButtonStyle(filled: false))
+                            .disabled(!decisions.canAnswer(request.identity, choice: .deny))
+                            .accessibilityHint("Write a note for Claude, then authenticate to deny this request.")
+                    }
                 }
-            }
-        }
-        .font(.caption.monospaced())
-        .foregroundStyle(Cat.text)
-        .padding(10)
-        .background(Cat.mauve.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Cat.mauve, lineWidth: 1))
-        .padding(.horizontal, 8).padding(.bottom, 8)
     }
 }
 

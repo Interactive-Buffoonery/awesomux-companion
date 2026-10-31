@@ -48,11 +48,31 @@ public struct CompanionPendingDecision: Codable, Equatable, Sendable {
     }
 }
 public struct CompanionDecisionAnswer: Codable, Equatable, Sendable {
+    /// Counted in Unicode scalars so the Mac's hook reply stays within its transport frame.
+    public static let maximumNoteLength = 500
     public let identity: CompanionDecisionIdentity
     public let choice: CompanionDecisionChoice
     public let retryID: UUID
-    public init(identity: CompanionDecisionIdentity, choice: CompanionDecisionChoice, retryID: UUID) {
-        self.identity = identity; self.choice = choice; self.retryID = retryID
+    /// Text for Claude; only a deny carries one, because Claude's hook accepts a message only there.
+    public let note: String?
+    public init(identity: CompanionDecisionIdentity, choice: CompanionDecisionChoice, retryID: UUID, note: String? = nil) {
+        self.identity = identity; self.choice = choice; self.retryID = retryID; self.note = note
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        identity = try container.decode(CompanionDecisionIdentity.self, forKey: .identity)
+        choice = try container.decode(CompanionDecisionChoice.self, forKey: .choice)
+        retryID = try container.decode(UUID.self, forKey: .retryID)
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+        if let note {
+            guard choice == .deny, note.contains(where: { !$0.isWhitespace }),
+                note.unicodeScalars.count <= Self.maximumNoteLength
+            else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .note, in: container, debugDescription: "A note needs a deny and 1...500 characters")
+            }
+        }
     }
 }
 public struct CompanionDecisionReceipt: Codable, Equatable, Sendable {

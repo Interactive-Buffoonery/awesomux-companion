@@ -167,6 +167,23 @@ final class PendingDecisionsModelTests: XCTestCase {
         XCTAssertEqual(uncertain.announcements.count, 1)
     }
 
+    func testDenyNoteIsTrimmedAndRetriedUnchanged() async {
+        let rejected = DecisionFixture()
+        await rejected.model.refresh()
+        await rejected.model.answer(rejected.identity, choice: .allow, note: "go ahead")
+        await rejected.model.answer(rejected.identity, choice: .deny, note: String(repeating: "a", count: 501))
+        await rejected.model.answer(rejected.identity, choice: .deny, note: " \n ")
+        XCTAssertTrue(rejected.sent.isEmpty)
+
+        let f = DecisionFixture()
+        f.dropReply = true
+        await f.model.refresh()
+        await f.model.answer(f.identity, choice: .deny, note: "  Use the staging bucket\n")
+        await f.model.retry(f.identity)
+        XCTAssertEqual(f.sent.map(\.note), ["Use the staging bucket", "Use the staging bucket"])
+        XCTAssertEqual(Set(f.sent.map(\.retryID)).count, 1)
+    }
+
     func testAuthenticationAndExpiryAnnouncementsRequireActiveUnlockedScene() async {
         let f = DecisionFixture()
         await f.model.refresh()

@@ -106,4 +106,34 @@ import Testing
         }
     }
 
+    // Failure modes: a note must never ride along with an allow, arrive empty,
+    // or exceed the Mac's limit; an old answer without a note still decodes.
+    @Test(arguments: [
+        (CompanionDecisionChoice.deny, "Use the staging bucket instead" as String?, true),
+        (.deny, nil, true),
+        (.allow, nil, true),
+        (.deny, String(repeating: "a", count: 500), true),
+        (.deny, String(repeating: "\u{1F600}", count: 500), true),
+        (.deny, String(repeating: "a", count: 501), false),
+        (.deny, " \n ", false),
+        (.deny, "", false),
+        (.allow, "go ahead", false),
+    ])
+    func noteDecodingEnforcesDenyOnlyLimit(choice: CompanionDecisionChoice, note: String?, valid: Bool) throws {
+        let identity = CompanionDecisionIdentity(
+            runtimeID: UUID(), workspaceID: UUID(), paneID: UUID(),
+            targetVersion: UUID(), providerSessionID: "session", invocationID: UUID(), revision: 1)
+        let answer = CompanionDecisionAnswer(identity: identity, choice: choice, retryID: UUID(), note: note)
+        let data = try CompanionProtocol.encoder().encode(answer)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect((object["note"] != nil) == (note != nil))
+        if valid {
+            #expect(try CompanionProtocol.decoder().decode(CompanionDecisionAnswer.self, from: data) == answer)
+        } else {
+            #expect(throws: DecodingError.self) {
+                try CompanionProtocol.decoder().decode(CompanionDecisionAnswer.self, from: data)
+            }
+        }
+    }
+
 }

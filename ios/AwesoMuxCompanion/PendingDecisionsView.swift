@@ -97,7 +97,7 @@ extension View {
     func denyNoteSheet(target: Binding<CompanionDecisionIdentity?>, model: PendingDecisionsModel) -> some View {
         sheet(isPresented: Binding(get: { target.wrappedValue != nil }, set: { if !$0 { target.wrappedValue = nil } })) {
             if let identity = target.wrappedValue {
-                DenyNoteSheet { note in
+                DenyNoteSheet(canSend: model.canAnswer(identity, choice: .deny)) { note in
                     target.wrappedValue = nil
                     Task { await model.answer(identity, choice: .deny, note: note) }
                 }
@@ -108,6 +108,8 @@ extension View {
 
 /// Collects the note Claude receives with a deny. Sending authenticates like any other answer.
 private struct DenyNoteSheet: View {
+    /// False during background refreshes too, so the draft stays until the Mac can take it.
+    let canSend: Bool
     let send: (String) -> Void
     @State private var note = ""
     @FocusState private var focused: Bool
@@ -124,8 +126,14 @@ private struct DenyNoteSheet: View {
                         .lineLimit(4...10)
                         .focused($focused)
                 } footer: {
-                    Text("Claude sees this note with the deny. \(count)/\(CompanionDecisionAnswer.maximumNoteLength)")
-                        .foregroundStyle(PendingDecisionsModel.fits(trimmed) ? Cat.subtext0 : Cat.red)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Claude sees this note with the deny. \(count)/\(CompanionDecisionAnswer.maximumNoteLength)")
+                            .foregroundStyle(PendingDecisionsModel.fits(trimmed) ? Cat.subtext0 : Cat.red)
+                        if !canSend {
+                            Text("Waiting for your Mac. If this request has closed, your note can't be sent.")
+                                .foregroundStyle(Cat.subtext0)
+                        }
+                    }
                 }
             }
             .navigationTitle("Deny and Tell Claude")
@@ -134,7 +142,7 @@ private struct DenyNoteSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Deny") { send(trimmed) }
-                        .disabled(trimmed.isEmpty || !PendingDecisionsModel.fits(trimmed))
+                        .disabled(!canSend || trimmed.isEmpty || !PendingDecisionsModel.fits(trimmed))
                 }
             }
             .onAppear { focused = true }

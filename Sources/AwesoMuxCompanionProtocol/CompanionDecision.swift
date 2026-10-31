@@ -55,8 +55,19 @@ public struct CompanionDecisionAnswer: Codable, Equatable, Sendable {
     public let retryID: UUID
     /// Text for Claude; only a deny carries one, because Claude's hook accepts a message only there.
     public let note: String?
-    public init(identity: CompanionDecisionIdentity, choice: CompanionDecisionChoice, retryID: UUID, note: String? = nil) {
+    public init(identity: CompanionDecisionIdentity, choice: CompanionDecisionChoice, retryID: UUID) {
+        self.identity = identity; self.choice = choice; self.retryID = retryID; self.note = nil
+    }
+
+    /// Nil when the note breaks ``accepts(note:for:)``, so an invalid answer can't be built or sent.
+    public init?(identity: CompanionDecisionIdentity, choice: CompanionDecisionChoice, retryID: UUID, note: String?) {
+        guard Self.accepts(note: note, for: choice) else { return nil }
         self.identity = identity; self.choice = choice; self.retryID = retryID; self.note = note
+    }
+
+    public static func accepts(note: String?, for choice: CompanionDecisionChoice) -> Bool {
+        guard let note else { return true }
+        return choice == .deny && note.contains { !$0.isWhitespace } && note.unicodeScalars.count <= maximumNoteLength
     }
 
     public init(from decoder: any Decoder) throws {
@@ -65,13 +76,9 @@ public struct CompanionDecisionAnswer: Codable, Equatable, Sendable {
         choice = try container.decode(CompanionDecisionChoice.self, forKey: .choice)
         retryID = try container.decode(UUID.self, forKey: .retryID)
         note = try container.decodeIfPresent(String.self, forKey: .note)
-        if let note {
-            guard choice == .deny, note.contains(where: { !$0.isWhitespace }),
-                note.unicodeScalars.count <= Self.maximumNoteLength
-            else {
-                throw DecodingError.dataCorruptedError(
-                    forKey: .note, in: container, debugDescription: "A note needs a deny and 1...500 characters")
-            }
+        guard Self.accepts(note: note, for: choice) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .note, in: container, debugDescription: "A note needs a deny and 1...500 characters")
         }
     }
 }

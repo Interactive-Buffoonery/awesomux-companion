@@ -5,10 +5,14 @@ import Testing
 // Failure modes: dropped replies must preserve the exact identity/retry tuple;
 // older peers must decode envelopes with no decision fields.
 @Suite struct DecisionTests {
-    @Test func answerRoundTripsExactIdentity() throws {
-        let identity = CompanionDecisionIdentity(
+    static func identity() -> CompanionDecisionIdentity {
+        CompanionDecisionIdentity(
             runtimeID: UUID(), workspaceID: UUID(), paneID: UUID(),
             targetVersion: UUID(), providerSessionID: "session", invocationID: UUID(), revision: 1)
+    }
+
+    @Test func answerRoundTripsExactIdentity() throws {
+        let identity = Self.identity()
         let answer = CompanionDecisionAnswer(identity: identity, choice: .deny, retryID: UUID())
         let request = CompanionAPIRequest(
             operation: CompanionOperation.answerDecision.rawValue,
@@ -37,9 +41,7 @@ import Testing
         "decisionReceipt.choice",
     ])
     func unknownResponseDecisionValueDropsWholeOptionalField(_ mutation: String) throws {
-        let identity = CompanionDecisionIdentity(
-            runtimeID: UUID(), workspaceID: UUID(), paneID: UUID(),
-            targetVersion: UUID(), providerSessionID: "session", invocationID: UUID(), revision: 1)
+        let identity = Self.identity()
         let pending = CompanionPendingDecision(
             identity: identity, tool: "Bash", summary: "echo ready",
             remoteExpiresAt: Date(timeIntervalSince1970: 1000), choices: [.allow, .deny])
@@ -92,9 +94,7 @@ import Testing
     }
 
     @Test func unknownAnswerChoiceRemainsStrict() throws {
-        let identity = CompanionDecisionIdentity(
-            runtimeID: UUID(), workspaceID: UUID(), paneID: UUID(),
-            targetVersion: UUID(), providerSessionID: "session", invocationID: UUID(), revision: 1)
+        let identity = Self.identity()
         let answer = CompanionDecisionAnswer(identity: identity, choice: .allow, retryID: UUID())
         var object = try #require(
             JSONSerialization.jsonObject(with: CompanionProtocol.encoder().encode(answer))
@@ -120,15 +120,19 @@ import Testing
         (.allow, "go ahead", false),
     ])
     func noteDecodingEnforcesDenyOnlyLimit(choice: CompanionDecisionChoice, note: String?, valid: Bool) throws {
-        let identity = CompanionDecisionIdentity(
-            runtimeID: UUID(), workspaceID: UUID(), paneID: UUID(),
-            targetVersion: UUID(), providerSessionID: "session", invocationID: UUID(), revision: 1)
+        let identity = Self.identity()
         let answer = CompanionDecisionAnswer(identity: identity, choice: choice, retryID: UUID(), note: note)
-        let data = try CompanionProtocol.encoder().encode(answer)
-        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect((object["note"] != nil) == (note != nil))
+        #expect((answer != nil) == valid)
+        // Build the wire form by hand so the decoder also sees notes the initializer refuses.
+        var object = try #require(
+            JSONSerialization.jsonObject(
+                with: CompanionProtocol.encoder().encode(CompanionDecisionAnswer(identity: identity, choice: choice, retryID: UUID())))
+                as? [String: Any])
+        object["note"] = note
+        let data = try JSONSerialization.data(withJSONObject: object)
         if valid {
-            #expect(try CompanionProtocol.decoder().decode(CompanionDecisionAnswer.self, from: data) == answer)
+            let decoded = try CompanionProtocol.decoder().decode(CompanionDecisionAnswer.self, from: data)
+            #expect(decoded.note == note)
         } else {
             #expect(throws: DecodingError.self) {
                 try CompanionProtocol.decoder().decode(CompanionDecisionAnswer.self, from: data)

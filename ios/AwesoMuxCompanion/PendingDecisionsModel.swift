@@ -320,12 +320,9 @@ final class PendingDecisionsModel {
         synchronizeConnection()
         let note = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canAnswer(identity, choice: choice),
-              note.map({ choice == .deny && !$0.isEmpty && Self.fits($0) }) ?? true else { return }
-        await authenticate(CompanionDecisionAnswer(identity: identity, choice: choice, retryID: UUID(), note: note))
-    }
-
-    static func fits(_ note: String) -> Bool {
-        note.unicodeScalars.count <= CompanionDecisionAnswer.maximumNoteLength
+              let answer = CompanionDecisionAnswer(identity: identity, choice: choice, retryID: UUID(), note: note)
+        else { return }
+        await authenticate(answer)
     }
 
     func retry(_ identity: CompanionDecisionIdentity) async {

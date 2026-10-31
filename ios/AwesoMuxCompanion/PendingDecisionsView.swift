@@ -128,7 +128,7 @@ private struct DenyNoteSheet: View {
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Claude sees this note with the deny. \(count)/\(CompanionDecisionAnswer.maximumNoteLength)")
-                            .foregroundStyle(PendingDecisionsModel.fits(trimmed) ? Cat.subtext0 : Cat.red)
+                            .foregroundStyle(count <= CompanionDecisionAnswer.maximumNoteLength ? Cat.subtext0 : Cat.red)
                         if !canSend {
                             Text("Waiting for your Mac. If this request has closed, your note can't be sent.")
                                 .foregroundStyle(Cat.subtext0)
@@ -142,7 +142,7 @@ private struct DenyNoteSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Deny") { send(trimmed) }
-                        .disabled(!canSend || trimmed.isEmpty || !PendingDecisionsModel.fits(trimmed))
+                        .disabled(!canSend || !CompanionDecisionAnswer.accepts(note: trimmed, for: .deny))
                 }
             }
             .onAppear { focused = true }

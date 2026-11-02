@@ -4,6 +4,7 @@ import SwiftUI
 struct PendingDecisionsSection: View {
     let model: PendingDecisionsModel
     var context: (CompanionDecisionIdentity) -> DecisionContext = { DecisionContext(identity: $0) }
+    @State private var noteTarget: CompanionDecisionIdentity?
 
     var body: some View {
         Section {
@@ -51,14 +52,20 @@ struct PendingDecisionsSection: View {
                             .disabled(!model.canRetry(request.identity))
                             .accessibilityHint("Authenticates again, checks the Mac, and retries the same choice and request identifier.")
                     } else {
-                        // Separate rows keep both choices usable at large text sizes.
+                        // Separate rows keep every choice usable at large text sizes.
                         ForEach(request.choices, id: \.rawValue) { choice in
-                            Button(choice == .allow ? "Allow Once" : "Deny Once") {
+                            Button(choice == .allow ? "Allow" : "Deny") {
                                 Task { await model.answer(request.identity, choice: choice) }
                             }
                             .buttonStyle(.borderless)
                             .disabled(!model.canAnswer(request.identity, choice: choice))
                             .accessibilityHint("Authenticates before answering this Claude permission request.")
+                        }
+                        if request.choices.contains(.deny) {
+                            Button("Deny and Tell Claude…") { noteTarget = request.identity }
+                                .buttonStyle(.borderless)
+                                .disabled(!model.canAnswer(request.identity, choice: .deny))
+                                .accessibilityHint("Write a note for Claude, then authenticate to deny this request.")
                         }
                     }
                 }
@@ -82,6 +89,65 @@ struct PendingDecisionsSection: View {
         }
         .foregroundStyle(Cat.text)
         .listRowBackground(Cat.card)
+        .denyNoteSheet(target: $noteTarget, model: model)
+    }
+}
+
+extension View {
+    func denyNoteSheet(target: Binding<CompanionDecisionIdentity?>, model: PendingDecisionsModel) -> some View {
+        sheet(isPresented: Binding(get: { target.wrappedValue != nil }, set: { if !$0 { target.wrappedValue = nil } })) {
+            if let identity = target.wrappedValue {
+                DenyNoteSheet(canSend: model.canAnswer(identity, choice: .deny)) { note in
+                    target.wrappedValue = nil
+                    Task { await model.answer(identity, choice: .deny, note: note) }
+                }
+            }
+        }
+    }
+}
+
+/// Collects the note Claude receives with a deny. Sending authenticates like any other answer.
+private struct DenyNoteSheet: View {
+    /// False during background refreshes too, so the draft stays until the Mac can take it.
+    let canSend: Bool
+    let send: (String) -> Void
+    @State private var note = ""
+    @FocusState private var focused: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    private var trimmed: String { note.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var count: Int { trimmed.unicodeScalars.count }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("What should Claude do instead?", text: $note, axis: .vertical)
+                        .lineLimit(4...10)
+                        .focused($focused)
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Claude sees this note with the deny. \(count)/\(CompanionDecisionAnswer.maximumNoteLength)")
+                            .foregroundStyle(count <= CompanionDecisionAnswer.maximumNoteLength ? Cat.subtext0 : Cat.red)
+                        if !canSend {
+                            Text("Waiting for your Mac. If this request has closed, your note can't be sent.")
+                                .foregroundStyle(Cat.subtext0)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Deny and Tell Claude")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Deny") { send(trimmed) }
+                        .disabled(!canSend || !CompanionDecisionAnswer.accepts(note: trimmed, for: .deny))
+                }
+            }
+            .onAppear { focused = true }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

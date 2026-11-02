@@ -5,10 +5,14 @@ import Testing
 // Failure modes: dropped replies must preserve the exact identity/retry tuple;
 // older peers must decode envelopes with no decision fields.
 @Suite struct DecisionTests {
-    @Test func answerRoundTripsExactIdentity() throws {
-        let identity = CompanionDecisionIdentity(
+    static func identity() -> CompanionDecisionIdentity {
+        CompanionDecisionIdentity(
             runtimeID: UUID(), workspaceID: UUID(), paneID: UUID(),
             targetVersion: UUID(), providerSessionID: "session", invocationID: UUID(), revision: 1)
+    }
+
+    @Test func answerRoundTripsExactIdentity() throws {
+        let identity = Self.identity()
         let answer = CompanionDecisionAnswer(identity: identity, choice: .deny, retryID: UUID())
         let request = CompanionAPIRequest(
             operation: CompanionOperation.answerDecision.rawValue,
@@ -37,9 +41,7 @@ import Testing
         "decisionReceipt.choice",
     ])
     func unknownResponseDecisionValueDropsWholeOptionalField(_ mutation: String) throws {
-        let identity = CompanionDecisionIdentity(
-            runtimeID: UUID(), workspaceID: UUID(), paneID: UUID(),
-            targetVersion: UUID(), providerSessionID: "session", invocationID: UUID(), revision: 1)
+        let identity = Self.identity()
         let pending = CompanionPendingDecision(
             identity: identity, tool: "Bash", summary: "echo ready",
             remoteExpiresAt: Date(timeIntervalSince1970: 1000), choices: [.allow, .deny])
@@ -92,9 +94,7 @@ import Testing
     }
 
     @Test func unknownAnswerChoiceRemainsStrict() throws {
-        let identity = CompanionDecisionIdentity(
-            runtimeID: UUID(), workspaceID: UUID(), paneID: UUID(),
-            targetVersion: UUID(), providerSessionID: "session", invocationID: UUID(), revision: 1)
+        let identity = Self.identity()
         let answer = CompanionDecisionAnswer(identity: identity, choice: .allow, retryID: UUID())
         var object = try #require(
             JSONSerialization.jsonObject(with: CompanionProtocol.encoder().encode(answer))
@@ -103,6 +103,40 @@ import Testing
         let data = try JSONSerialization.data(withJSONObject: object)
         #expect(throws: (any Error).self) {
             try CompanionProtocol.decoder().decode(CompanionDecisionAnswer.self, from: data)
+        }
+    }
+
+    // Failure modes: a note must never ride along with an allow, arrive empty,
+    // or exceed the Mac's limit; an old answer without a note still decodes.
+    @Test(arguments: [
+        (CompanionDecisionChoice.deny, "Use the staging bucket instead" as String?, true),
+        (.deny, nil, true),
+        (.allow, nil, true),
+        (.deny, String(repeating: "a", count: 500), true),
+        (.deny, String(repeating: "\u{1F600}", count: 500), true),
+        (.deny, String(repeating: "a", count: 501), false),
+        (.deny, " \n ", false),
+        (.deny, "", false),
+        (.allow, "go ahead", false),
+    ])
+    func noteDecodingEnforcesDenyOnlyLimit(choice: CompanionDecisionChoice, note: String?, valid: Bool) throws {
+        let identity = Self.identity()
+        let answer = CompanionDecisionAnswer(identity: identity, choice: choice, retryID: UUID(), note: note)
+        #expect((answer != nil) == valid)
+        // Build the wire form by hand so the decoder also sees notes the initializer refuses.
+        var object = try #require(
+            JSONSerialization.jsonObject(
+                with: CompanionProtocol.encoder().encode(CompanionDecisionAnswer(identity: identity, choice: choice, retryID: UUID())))
+                as? [String: Any])
+        object["note"] = note
+        let data = try JSONSerialization.data(withJSONObject: object)
+        if valid {
+            let decoded = try CompanionProtocol.decoder().decode(CompanionDecisionAnswer.self, from: data)
+            #expect(decoded.note == note)
+        } else {
+            #expect(throws: DecodingError.self) {
+                try CompanionProtocol.decoder().decode(CompanionDecisionAnswer.self, from: data)
+            }
         }
     }
 

@@ -130,14 +130,13 @@ final class CompanionStore {
     @ObservationIgnored private var panePollID: UUID?
     @ObservationIgnored private var paneReadTask: Task<Void, Never>?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshOwners = OSAllocatedUnfairLock(initialState: Set<UUID>())
     @ObservationIgnored private var pairingTask: Task<Void, Never>?
     @ObservationIgnored private var lastSharedWrite = Date.distantPast
     @ObservationIgnored private var glanceRevision = UUID()
     @ObservationIgnored private var tracker: AttentionTracker {
         didSet { if let key = hostKey(AttentionTracker.key) { tracker.save(defaults: defaults, key: key) } }
     }
-    /// Alerts raised since the last roster read; posted once workspace names are known.
-    @ObservationIgnored private var pendingAlerts: [APIResponse.Event] = []
     @ObservationIgnored private let liveActivity: (any LiveActivityPublishing)?
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let cache: SessionSnapshotCache
@@ -147,6 +146,7 @@ final class CompanionStore {
     @ObservationIgnored private let revokePrevious: ((PairingRecord) -> Void)?
     @ObservationIgnored private let writeShared: (GlanceSnapshot) -> Void
     @ObservationIgnored private let clearShared: () -> Void
+    @ObservationIgnored private let enqueueNotification: (UNNotificationRequest) -> Void
 
     /// Per-Mac values live under `<key>.<fingerprint>` (`HostRegistry.hostKey`); the Live Activity switch is app-wide.
     enum Keys {
@@ -173,6 +173,9 @@ final class CompanionStore {
         },
         clearShared: @escaping () -> Void = {
             SharedSnapshot.clear(); WidgetCenter.shared.reloadAllTimelines()
+        },
+        enqueueNotification: @escaping (UNNotificationRequest) -> Void = {
+            UNUserNotificationCenter.current().add($0)
         }
     ) {
         var loaded: PairingRecord?
@@ -193,6 +196,7 @@ final class CompanionStore {
         self.liveActivity = liveActivity
         self.writeShared = writeShared
         self.clearShared = clearShared
+        self.enqueueNotification = enqueueNotification
         tracker = loaded.map {
             AttentionTracker.load(defaults: defaults, key: HostRegistry.hostKey(AttentionTracker.key, $0.macFingerprint))
         } ?? AttentionTracker()
@@ -462,7 +466,6 @@ final class CompanionStore {
         clients = [:]; activeRoute = nil; snapshot = nil; reachable = false; isSnapshotCached = false
         lanFailed = false; routesCheckedAt = .distantPast
         tracker = AttentionTracker()
-        pendingAlerts = []
         guard publishesGlance() else { return }
         clearShared()
         endGlanceActivity()
@@ -496,12 +499,31 @@ final class CompanionStore {
 
     /// One read of alerts and agents; overlapping callers share the read already in flight.
     func refresh() async {
-        if let refreshTask { return await refreshTask.value }
-        guard !isUnpairing, !removalPending, let record else { return }
-        let started = revision
-        let task = Task { await read(record, revision: started) }
-        refreshTask = task
-        await task.value
+        guard !Task.isCancelled, !isUnpairing, !removalPending, let record else { return }
+        if refreshTask == nil || refreshTask?.isCancelled == true {
+            let started = revision
+            refreshOwners = OSAllocatedUnfairLock(initialState: Set<UUID>())
+            refreshTask = Task { await read(record, revision: started) }
+        }
+        guard let task = refreshTask else { return }
+        let owner = UUID()
+        let owners = refreshOwners
+        owners.withLock { $0.insert(owner) }
+        if task.isCancelled {
+            owners.withLock { $0.remove(owner) }
+            if refreshTask == task { refreshTask = nil }
+            return await refresh()
+        }
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            // A canceled waiter must not stop another caller's shared read.
+            owners.withLock {
+                $0.remove(owner)
+                if $0.isEmpty { task.cancel() }
+            }
+        }
+        owners.withLock { $0.remove(owner) }
         if refreshTask == task { refreshTask = nil }
     }
 
@@ -510,7 +532,7 @@ final class CompanionStore {
         let foregroundStarted = foregroundSession
         do {
             let next = try await readFeed(record: record, revision: started)
-            guard revision == started else { return }
+            guard revision == started, !Task.isCancelled else { return }
             cache.save(next, for: record)
             await apply(next)
         } catch {
@@ -530,10 +552,10 @@ final class CompanionStore {
         }
     }
 
-    /// Page alerts from the saved cursor, then read the roster. A recovery
-    /// status drops open alerts and queued notifications, and the cursor only advances once the roster
-    /// read that recovery requires succeeds.
+    /// Commit the cursor only after the roster and notification handoff, so a failed read can be retried.
     private func readFeed(record: PairingRecord, revision started: Int) async throws -> GlanceSnapshot {
+        var next = tracker
+        var pendingAlerts: [APIResponse.Event] = []
         func call(_ operation: String, limit: Int? = nil, cursor: String? = nil) async throws -> APIResponse {
             try await sessionCall(operation, record: record, revision: started, limit: limit, cursor: cursor,
                                   reportOffline: false)
@@ -547,33 +569,33 @@ final class CompanionStore {
             let response = try await call("list_agents")
             guard let agents = response.agents else { throw MacClientFailure.invalidResponse }
             workspaceNames = Dictionary(agents.map { ($0.workspaceID, $0.workspaceName) }) { first, _ in first }
-            return GlanceSnapshot(macName: record.macName, agents: agents, openAlerts: tracker.openAlerts,
+            return GlanceSnapshot(macName: record.macName, agents: agents, openAlerts: next.openAlerts,
                                   capturedAt: response.capturedAt ?? .now)
         }
 
         while true {
-            guard let page = try await call("get_attention_events", limit: 100, cursor: tracker.cursor).attentionEvents,
+            guard let page = try await call("get_attention_events", limit: 100, cursor: next.cursor).attentionEvents,
                   AttentionTracker.knownStatuses.contains(page.cursorStatus), !page.nextCursor.isEmpty else {
                 throw MacClientFailure.invalidResponse
             }
             if page.currentStateRecoveryRequired || AttentionTracker.recoveryStatuses.contains(page.cursorStatus) {
-                tracker.openAlerts.removeAll()
+                next.openAlerts.removeAll()
                 pendingAlerts.removeAll()
-                let snapshot = try await roster()
-                tracker.cursor = page.nextCursor
-                tracker.readingInitialHistory = false
-                return snapshot
+                next.cursor = page.nextCursor
+                next.readingInitialHistory = false
+                break
             }
-            var next = tracker
             try next.apply(page.events, cursorStatus: page.cursorStatus, pendingAlerts: &pendingAlerts)
-            if page.hasMore && page.nextCursor == tracker.cursor { throw MacClientFailure.invalidResponse }
+            if page.hasMore && page.nextCursor == next.cursor { throw MacClientFailure.invalidResponse }
             next.cursor = page.nextCursor
             if !page.hasMore { next.readingInitialHistory = false }
-            tracker = next
             if !page.hasMore { break }
         }
         let snapshot = try await roster()
-        postPendingAlerts(workspaceNames: workspaceNames, record: record)
+        try Task.checkCancellation()
+        guard revision == started else { throw CancellationError() }
+        postPendingAlerts(pendingAlerts, workspaceNames: workspaceNames, record: record)
+        tracker = next
         return snapshot
     }
 
@@ -965,8 +987,8 @@ final class CompanionStore {
     }
 
     /// Each alert names its Mac and carries its fingerprint, so a tap opens that Mac's pane and no other.
-    private func postPendingAlerts(workspaceNames: [String: String], record: PairingRecord) {
-        for event in pendingAlerts {
+    private func postPendingAlerts(_ events: [APIResponse.Event], workspaceNames: [String: String], record: PairingRecord) {
+        for event in events {
             let content = UNMutableNotificationContent()
             content.title = Self.alertTitle(provider: event.provider, reason: event.reason)
             content.subtitle = record.macName
@@ -975,10 +997,9 @@ final class CompanionStore {
             content.threadIdentifier = "\(record.macFingerprint):\(event.paneID)"
             content.userInfo = Self.notificationInfo(paneID: event.paneID, attentionID: event.attentionID,
                                                      macFingerprint: record.macFingerprint)
-            UNUserNotificationCenter.current().add(UNNotificationRequest(
+            enqueueNotification(UNNotificationRequest(
                 identifier: "\(record.macFingerprint):\(event.attentionID)", content: content, trigger: nil))
         }
-        pendingAlerts.removeAll()
     }
 
     static func notificationInfo(paneID: String, attentionID: String, macFingerprint: String) -> [String: String] {

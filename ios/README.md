@@ -45,10 +45,11 @@ xcodebuild -project AwesoMuxCompanion.xcodeproj -scheme AwesoMuxCompanion \
 `AwesoMuxCompanion.xcodeproj`, both `Info.plist` files and both entitlements files are
 generated from `project.yml`; edit the spec, not the outputs.
 
-Signing is ad-hoc ("Sign to Run Locally"). The Simulator needs a signature to
-grant the App Group from the simulated entitlements, so signing is on even
-without a team. A device build needs a team and a provisioning profile with the
-App Group; set `DEVELOPMENT_TEAM` and switch `CODE_SIGN_STYLE` to Automatic.
+The generated project uses automatic signing with the maintainers' development
+team. Contributors should choose their own team in Xcode for device builds,
+with a provisioning profile supporting the App Group. Simulator builds also
+need a signature for the simulated App Group entitlements; local ad-hoc builds
+can override `DEVELOPMENT_TEAM='' CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual`.
 
 ## Pairing
 
@@ -63,7 +64,8 @@ the Mac's SPKI fingerprint from the link. The pairing record lives in the
 Keychain, one item per Mac keyed by that fingerprint. Earlier builds kept a
 single item; the first launch copies it to its Mac's item and removes the old
 one only after the copy reads back unchanged, retrying on later launches.
-The phone pairs with any number of Macs. `+ pair a mac` on Hosts adds one: it
+The phone pairs with any number of Macs. From Sessions, go back to Hosts and
+choose `+ pair a mac` to add one: it
 saves only that Mac's item and never reads, replaces or revokes another Mac's.
 A code for a Mac that's already paired is refused there; use Pair Again in that
 Mac's settings (long-press its row). Pair Again only accepts that same
@@ -416,12 +418,17 @@ VoiceOver still need separate acceptance.
 
 ## Watch
 
-Tap an attached terminal in Sessions to watch its real paired snapshot and live
+Tap an attached terminal in Sessions to open its real paired snapshot and live
 output over the direct LAN/Tailscale connection. Watch is one switch per phone
 in Mac Companion settings, covering every workspace, separately from terminal
 previews. A Mac
 without the stream contract needs an update. Documents and unknown pane kinds
 remain metadata-only.
+
+With Input allowed, a normal tap takes control at the phone's size. To observe
+without changing control, long-press the pane and choose **Watch**, or use its
+VoiceOver **Watch** action. That opening stays read-only across reconnects,
+including when the Mac allows Input; keyboard, paste and takeover stay hidden.
 
 Every attach, reconnect and overflow resync starts a fresh generation. The phone
 checks target identity, dimensions, contiguous byte sequences and snapshot byte

@@ -13,7 +13,8 @@ enum Cat {
     static let card = dynamic(mocha: "#313244", latte: "#eff1f5")
     static let tile = dynamic(mocha: "#1e1e2e", latte: "#ccd0da")
     static let text = dynamic(mocha: "#cdd6f4", latte: "#4c4f69", mochaHC: "#ffffff", latteHC: "#0a0a14")
-    static let subtext0 = dynamic(mocha: "#a6adc8", latte: "#6c6f85", mochaHC: "#e8edff", latteHC: "#1e1e2e")
+    // Darker than the Mac's secondary text to clear 4.5:1 on the phone's sunken light page.
+    static let subtext0 = dynamic(mocha: "#a6adc8", latte: "#5c5f77", mochaHC: "#e8edff", latteHC: "#1e1e2e")
 
     static let peach = dynamic(mocha: "#fab387", latte: "#fe640b", mochaHC: "#ffc8a3", latteHC: "#9b3d07")
     static let lavender = dynamic(mocha: "#b4befe", latte: "#7287fd", mochaHC: "#d0d8ff", latteHC: "#354fb5")

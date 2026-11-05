@@ -30,7 +30,7 @@ struct WatchView: View {
         }
         renderer.canRender = canRender
         _terminal = StateObject(wrappedValue: renderer)
-        _model = State(initialValue: WatchModel(renderer: renderer,
+        _model = State(initialValue: WatchModel(renderer: renderer, watchOnly: target.watchOnly,
             canInput: { [weak store] in store?.panes.terminalAccess.inputAllowed == true }, canWatch: canRender))
     }
 
@@ -160,6 +160,7 @@ struct WatchView: View {
 
     private var liveText: String {
         let grid = model.grid.map { " · Mac \($0.cols)×\($0.rows)" } ?? ""
+        if target.watchOnly { return String(localized: "Watching") + grid }
         if let message = model.input.watchMessage { return message }
         return model.input.drivingText.lowercased() + grid
     }
@@ -180,7 +181,7 @@ struct WatchView: View {
                 .buttonStyle(BarButtonStyle(filled: true))
                 .disabled(!canWatch)
                 .accessibilityHint("Starts a new snapshot from your Mac.")
-            } else if model.input.isInteractive {
+            } else if model.input.isInteractive && !target.watchOnly {
                 if !model.input.hasControl {
                     Button("Take over") { model.input.takeOver() }
                         .buttonStyle(BarButtonStyle(filled: true))

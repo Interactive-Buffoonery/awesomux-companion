@@ -45,7 +45,8 @@ def render(text, config):
 def personal_spec(config):
     spec = (ROOT / "ios/project.yml").read_text()
     spec = spec.replace(DEFAULT_GROUP, config["app_group"])
-    spec = spec.replace(DEFAULT_BUNDLE, config["bundle_id"])
+    spec = spec.replace("PRODUCT_BUNDLE_IDENTIFIER: " + DEFAULT_BUNDLE,
+                        "PRODUCT_BUNDLE_IDENTIFIER: " + config["bundle_id"])
     # The global team setting covers app and widget; no command-line bundle
     # override that would accidentally give both targets the same identifier.
     if spec.count("DEVELOPMENT_TEAM: 7CNK4YPCQX") != 1:

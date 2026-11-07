@@ -80,7 +80,10 @@ an IPA or joining TestFlight does not grant signing or device coverage.
    A new bundle namespace has independent pairing, Keychain and app data.
    The generator updates both targets and their runtime group together through
    `AwesoMuxAppGroup` in both plists. The default group stays unchanged for normal
-   builds. Do not override `PRODUCT_BUNDLE_IDENTIFIER` globally in Xcode: it
+   builds. Background-task IDs and the existing pairing URL scheme stay aligned
+   with the unchanged runtime. With both apps installed, paste the pairing link
+   inside the intended app; system-wide `awesomuxcompanion://` routing can select
+   either app. Do not override `PRODUCT_BUNDLE_IDENTIFIER` globally in Xcode: it
    would give app and widget the same ID.
 4. Keep profiles, export options and connection JSON outside Git, under the
    ignored directory or another private directory. `chmod 700 ios/.squircle`

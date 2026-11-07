@@ -44,6 +44,67 @@ final class PaneRosterTests: XCTestCase {
         XCTAssertEqual(AttentionTracker.load(defaults: defaults, key: key).cursor, "after")
     }
 
+    func testCancelingDuringRosterPreservesCursorAndPendingAlert() async throws {
+        let client = PaneClientFixture()
+        let record = panePairing()
+        let key = HostRegistry.hostKey(AttentionTracker.key, record.macFingerprint)
+        AttentionTracker(cursor: "before", readingInitialHistory: false).save(defaults: defaults, key: key)
+        let event = APIResponse.Event(id: "event", attentionID: "attention", change: "raised", paneID: "agent",
+            workspaceID: "workspace", provider: "Codex", occurredAt: .now, reason: "userInputRequired")
+        client.attentionPage = .init(events: [event], nextCursor: "after", cursorStatus: "current",
+            hasMore: false, currentStateRecoveryRequired: false)
+        let gate = RequestGate("roster held")
+        client.holdNext["list_agents"] = gate
+        var notifications: [UNNotificationRequest] = []
+        let store = store(client, enqueueNotification: { notifications.append($0) })
+        let read = Task { await store.refresh() }
+        await fulfillment(of: [gate.started], timeout: 2)
+        read.cancel()
+        gate.release()
+        await read.value
+        XCTAssertEqual(AttentionTracker.load(defaults: defaults, key: key).cursor, "before")
+        XCTAssertTrue(notifications.isEmpty)
+        XCTAssertNil(store.snapshot)
+        XCTAssertNil(store.message)
+    }
+
+    func testFailedLaterAttentionPagePreservesCursorAndPendingAlert() async {
+        let client = PaneClientFixture()
+        let record = panePairing()
+        let key = HostRegistry.hostKey(AttentionTracker.key, record.macFingerprint)
+        AttentionTracker(cursor: "before", readingInitialHistory: false).save(defaults: defaults, key: key)
+        let event = APIResponse.Event(id: "event", attentionID: "attention", change: "raised", paneID: "agent",
+            workspaceID: "workspace", provider: "Codex", occurredAt: .now, reason: "userInputRequired")
+        client.attentionPage = .init(events: [event], nextCursor: "page-two", cursorStatus: "current",
+            hasMore: true, currentStateRecoveryRequired: false)
+        client.attentionFailureCursor = "page-two"
+        var notifications: [UNNotificationRequest] = []
+        await store(client, enqueueNotification: { notifications.append($0) }).refresh()
+        XCTAssertEqual(client.calls.map(\.operation), ["get_attention_events", "get_attention_events"])
+        XCTAssertEqual(client.calls.map(\.cursor), ["before", "page-two"])
+        XCTAssertEqual(AttentionTracker.load(defaults: defaults, key: key).cursor, "before")
+        XCTAssertTrue(notifications.isEmpty)
+    }
+
+    func testFailedRecoveryRosterPreservesCursorAndOpenAlerts() async {
+        let client = PaneClientFixture()
+        let record = panePairing()
+        let key = HostRegistry.hostKey(AttentionTracker.key, record.macFingerprint)
+        let event = APIResponse.Event(id: "event", attentionID: "attention", change: "raised", paneID: "agent",
+            workspaceID: "workspace", provider: "Codex", occurredAt: .now, reason: "userInputRequired")
+        AttentionTracker(cursor: "before", openAlerts: [event.attentionID: event], readingInitialHistory: false)
+            .save(defaults: defaults, key: key)
+        client.attentionPage = .init(events: [], nextCursor: "recovered", cursorStatus: "history_gap",
+            hasMore: false, currentStateRecoveryRequired: true)
+        client.errors["list_agents"] = .closed
+        var notifications: [UNNotificationRequest] = []
+        await store(client, enqueueNotification: { notifications.append($0) }).refresh()
+        let saved = AttentionTracker.load(defaults: defaults, key: key)
+        XCTAssertEqual(saved.cursor, "before")
+        XCTAssertEqual(Set(saved.openAlerts.keys), [event.attentionID])
+        XCTAssertTrue(notifications.isEmpty)
+    }
+
     func testCancelingTheLastRefreshOwnerStopsBeforeTheNextRequest() async {
         let client = PaneClientFixture()
         let gate = RequestGate("feed held")
@@ -1038,6 +1099,7 @@ final class PaneClientFixture: CompanionSessionClient {
     var errors: [String: MacClientFailure] = [:]
     var holdNext: [String: RequestGate] = [:]
     var attentionPage: APIResponse.AttentionPage?
+    var attentionFailureCursor: String?
 
     func call(_ operation: String, connectionID: UUID, limit: Int?, cursor: String?) async throws -> APIResponse {
         calls.append(Call(operation: operation, connectionID: connectionID, allowed: nil, cursor: cursor))
@@ -1053,7 +1115,8 @@ final class PaneClientFixture: CompanionSessionClient {
                       executionLocation: "local", availability: "attached", state: agentState)
             ])
         }
-        let error = errors[operation]
+        let error: MacClientFailure? = operation == "get_attention_events" && cursor != nil && cursor == attentionFailureCursor
+            ? .closed : errors[operation]
         if let gate = holdNext.removeValue(forKey: operation) { await gate.pause() }
         if let error { throw error }
         return response

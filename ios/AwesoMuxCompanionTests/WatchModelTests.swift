@@ -28,6 +28,41 @@ final class WatchModelTests: XCTestCase {
         await task?.value
     }
 
+    func testExplicitWatchStaysReadOnlyAcrossReconnectAndPermissionChanges() async {
+        let f = WatchModelFixture()
+        f.watchOnly = true
+        f.inputAllowed = true
+        let firstWait = expectation(description: "first Watch snapshot")
+        let secondWait = expectation(description: "reconnected Watch snapshot")
+        let first = f.connection(waiting: firstWait, role: .interactive)
+        let second = f.connection(waiting: secondWait, role: .interactive)
+        f.sleep = { _ in }
+        f.open = { _ in f.openCount == 1 ? first : second }
+        let task = f.start()
+        await fulfillment(of: [firstWait], timeout: 2)
+        attemptWrites()
+        first.deliver(.init(frame: .output(sequence: 8, bytes: Data([9])), generation: 1))
+        await fulfillment(of: [secondWait], timeout: 2)
+        attemptWrites()
+        XCTAssertTrue(first.sent.isEmpty)
+        XCTAssertTrue(second.sent.isEmpty)
+        XCTAssertEqual(f.openCount, 2)
+        f.model.stop()
+        await task?.value
+
+        func attemptWrites() {
+            for allowed in [false, true] {
+                f.inputAllowed = allowed
+                f.model.updatePhoneGrid(.init(rows: 31, cols: 43))
+                f.model.updateInputPermission()
+                f.model.input.takeOver()
+                f.model.input.type(Data("a".utf8))
+                f.model.input.paste("safe paste", modes: WatchInputModes())
+                XCTAssertFalse(f.model.input.canType)
+            }
+        }
+    }
+
     func testSnapshotCompletionTakesOverOnlyWithTheInputGrant() async {
         for allowed in [false, true] {
             let f = WatchModelFixture()

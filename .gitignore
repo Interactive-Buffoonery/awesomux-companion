@@ -14,3 +14,13 @@ build/
 
 .build/
 .swiftpm/
+
+# Keep shared skills while ignoring local agent state.
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/merge-risk/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/merge-risk

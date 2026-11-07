@@ -153,6 +153,16 @@ Do not share a build made with embedded credentials. This adapter never loads
 `client.json` resources; enrollment is imported on each phone. Still inspect
 artifacts before sharing, and do not share private logs or intermediate archives.
 
+Inspect a separately built normal Release app before distribution:
+
+```sh
+python3 developer/squircle/check-release.py /absolute/normal/Release.app \
+  --config ios/.squircle/config.json
+```
+
+This inspects the artifact only. A signature check and a signed archive/export
+remain separate evidence from an unsigned SDK build.
+
 ## Enroll, connect and renew on each phone
 
 After explicit phone/install approval, manually install the verified personal

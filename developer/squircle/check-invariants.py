@@ -25,6 +25,7 @@ assert 'bundle.url(forResource: "client"' not in config
 model = (src / 'SquircleModel.swift').read_text()
 mode = model.split('var runtimeMode: T3RuntimeMode', 1)[1].split('func consumeConfig', 1)[0]
 assert '.auto' not in mode
+assert 'guard let id = selectedSessionID, let run = state.activeRunID else { return }' in model
 assert 'guard id.threadID == DeveloperPolicy.coordinator' in model
 assert '.filter { DeveloperPolicy.projects.contains($0.id) }' in model
 inject = (r / 'src/overlay.rs').read_text()

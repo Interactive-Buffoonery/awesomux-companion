@@ -17,6 +17,7 @@ final class WatchModel {
     private(set) var error: String?
 
     @ObservationIgnored private var takeOverOnOpen = true
+    @ObservationIgnored private let watchOnly: Bool
     @ObservationIgnored private let canInput: @MainActor () -> Bool
     @ObservationIgnored private let renderer: any WatchRendering
     @ObservationIgnored private let canWatch: @MainActor () -> Bool
@@ -39,7 +40,7 @@ final class WatchModel {
         let targetVersion: UUID
     }
 
-    init(renderer: any WatchRendering,
+    init(renderer: any WatchRendering, watchOnly: Bool = false,
          canInput: @escaping @MainActor () -> Bool = { false }, canWatch: @escaping @MainActor () -> Bool = { true },
          makeClient: @escaping (PairingRecord, CompanionRoute) throws -> any WatchClient = { record, route in
              try MacClient(host: route.host, port: record.port, macFingerprint: record.macFingerprint,
@@ -47,6 +48,7 @@ final class WatchModel {
          },
          sleep: @escaping @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.canInput = canInput
+        self.watchOnly = watchOnly
         self.renderer = renderer
         self.canWatch = canWatch
         self.makeClient = makeClient
@@ -188,7 +190,7 @@ final class WatchModel {
                 input.attach(opened, ownLeaderID: target.record.connectionID.uuidString.lowercased(),
                              authority: { [weak self] in
                                  guard let self else { return false }
-                                 return self.isCurrent(epoch) && self.canInput()
+                                 return self.isCurrent(epoch) && !self.watchOnly && self.canInput()
                              })
                 activeRoute = route
                 if route.transport == .tailscale { lanFailed = true }

@@ -1,6 +1,7 @@
 import AwesoMuxCompanionProtocol
 import XCTest
 import Observation
+import UserNotifications
 @testable import AwesoMuxCompanion
 
 @MainActor
@@ -14,9 +15,128 @@ final class PaneRosterTests: XCTestCase {
     private func store(_ client: PaneClientFixture, record: PairingRecord = panePairing(),
                        makeClient: ((PairingRecord, CompanionRoute) throws -> any CompanionSessionClient)? = nil,
                        removePairing: @escaping (PairingRecord) throws -> Void = { _ in },
-                       writeShared: @escaping (GlanceSnapshot) -> Void = { _ in }) -> CompanionStore {
+                       writeShared: @escaping (GlanceSnapshot) -> Void = { _ in },
+                       enqueueNotification: @escaping (UNNotificationRequest) -> Void = { _ in }) -> CompanionStore {
         CompanionStore(defaults: defaults, loadPairing: { record }, makeClient: makeClient ?? { _, _ in client },
-                       removePairing: removePairing, liveActivity: nil, writeShared: writeShared, clearShared: {})
+                       removePairing: removePairing, liveActivity: nil, writeShared: writeShared, clearShared: {},
+                       enqueueNotification: enqueueNotification)
+    }
+
+    func testFailedRosterDoesNotConsumeAnUndeliveredAlertAcrossRelaunch() async throws {
+        let client = PaneClientFixture()
+        let record = panePairing()
+        let key = HostRegistry.hostKey(AttentionTracker.key, record.macFingerprint)
+        AttentionTracker(cursor: "before", readingInitialHistory: false).save(defaults: defaults, key: key)
+        let event = APIResponse.Event(id: "event", attentionID: "attention", change: "raised", paneID: "agent",
+            workspaceID: "workspace", provider: "Codex", occurredAt: .now, reason: "userInputRequired")
+        client.attentionPage = .init(events: [event], nextCursor: "after", cursorStatus: "current",
+            hasMore: false, currentStateRecoveryRequired: false)
+        client.errors["list_agents"] = .closed
+        var notifications: [UNNotificationRequest] = []
+        await store(client, enqueueNotification: { notifications.append($0) }).refresh()
+        XCTAssertTrue(notifications.isEmpty)
+        XCTAssertEqual(AttentionTracker.load(defaults: defaults, key: key).cursor, "before")
+
+        client.errors = [:]
+        await store(client, enqueueNotification: { notifications.append($0) }).refresh()
+        XCTAssertEqual(client.calls.filter { $0.operation == "get_attention_events" }.map(\.cursor), ["before", "before"])
+        XCTAssertEqual(notifications.map(\.identifier), ["\(record.macFingerprint):attention"])
+        XCTAssertEqual(AttentionTracker.load(defaults: defaults, key: key).cursor, "after")
+    }
+
+    func testCancelingDuringRosterPreservesCursorAndPendingAlert() async throws {
+        let client = PaneClientFixture()
+        let record = panePairing()
+        let key = HostRegistry.hostKey(AttentionTracker.key, record.macFingerprint)
+        AttentionTracker(cursor: "before", readingInitialHistory: false).save(defaults: defaults, key: key)
+        let event = APIResponse.Event(id: "event", attentionID: "attention", change: "raised", paneID: "agent",
+            workspaceID: "workspace", provider: "Codex", occurredAt: .now, reason: "userInputRequired")
+        client.attentionPage = .init(events: [event], nextCursor: "after", cursorStatus: "current",
+            hasMore: false, currentStateRecoveryRequired: false)
+        let gate = RequestGate("roster held")
+        client.holdNext["list_agents"] = gate
+        var notifications: [UNNotificationRequest] = []
+        let store = store(client, enqueueNotification: { notifications.append($0) })
+        let read = Task { await store.refresh() }
+        await fulfillment(of: [gate.started], timeout: 2)
+        read.cancel()
+        gate.release()
+        await read.value
+        XCTAssertEqual(AttentionTracker.load(defaults: defaults, key: key).cursor, "before")
+        XCTAssertTrue(notifications.isEmpty)
+        XCTAssertNil(store.snapshot)
+        XCTAssertNil(store.message)
+    }
+
+    func testFailedLaterAttentionPagePreservesCursorAndPendingAlert() async {
+        let client = PaneClientFixture()
+        let record = panePairing()
+        let key = HostRegistry.hostKey(AttentionTracker.key, record.macFingerprint)
+        AttentionTracker(cursor: "before", readingInitialHistory: false).save(defaults: defaults, key: key)
+        let event = APIResponse.Event(id: "event", attentionID: "attention", change: "raised", paneID: "agent",
+            workspaceID: "workspace", provider: "Codex", occurredAt: .now, reason: "userInputRequired")
+        client.attentionPage = .init(events: [event], nextCursor: "page-two", cursorStatus: "current",
+            hasMore: true, currentStateRecoveryRequired: false)
+        client.attentionFailureCursor = "page-two"
+        var notifications: [UNNotificationRequest] = []
+        await store(client, enqueueNotification: { notifications.append($0) }).refresh()
+        XCTAssertEqual(client.calls.map(\.operation), ["get_attention_events", "get_attention_events"])
+        XCTAssertEqual(client.calls.map(\.cursor), ["before", "page-two"])
+        XCTAssertEqual(AttentionTracker.load(defaults: defaults, key: key).cursor, "before")
+        XCTAssertTrue(notifications.isEmpty)
+    }
+
+    func testFailedRecoveryRosterPreservesCursorAndOpenAlerts() async {
+        let client = PaneClientFixture()
+        let record = panePairing()
+        let key = HostRegistry.hostKey(AttentionTracker.key, record.macFingerprint)
+        let event = APIResponse.Event(id: "event", attentionID: "attention", change: "raised", paneID: "agent",
+            workspaceID: "workspace", provider: "Codex", occurredAt: .now, reason: "userInputRequired")
+        AttentionTracker(cursor: "before", openAlerts: [event.attentionID: event], readingInitialHistory: false)
+            .save(defaults: defaults, key: key)
+        client.attentionPage = .init(events: [], nextCursor: "recovered", cursorStatus: "history_gap",
+            hasMore: false, currentStateRecoveryRequired: true)
+        client.errors["list_agents"] = .closed
+        var notifications: [UNNotificationRequest] = []
+        await store(client, enqueueNotification: { notifications.append($0) }).refresh()
+        let saved = AttentionTracker.load(defaults: defaults, key: key)
+        XCTAssertEqual(saved.cursor, "before")
+        XCTAssertEqual(Set(saved.openAlerts.keys), [event.attentionID])
+        XCTAssertTrue(notifications.isEmpty)
+    }
+
+    func testCancelingTheLastRefreshOwnerStopsBeforeTheNextRequest() async {
+        let client = PaneClientFixture()
+        let gate = RequestGate("feed held")
+        client.holdNext["get_attention_events"] = gate
+        let store = store(client)
+        let read = Task { await store.refresh() }
+        await fulfillment(of: [gate.started], timeout: 2)
+        read.cancel()
+        gate.release()
+        await read.value
+        XCTAssertEqual(client.calls.map(\.operation), ["get_attention_events"])
+        XCTAssertNil(store.snapshot)
+        XCTAssertNil(store.message, "Cancellation isn't a connectivity failure")
+        await store.refresh()
+        XCTAssertNotNil(store.snapshot, "A fresh caller must not join a canceled read")
+    }
+
+    func testCancelingOneCoalescedOwnerKeepsTheOtherReadAlive() async {
+        let client = PaneClientFixture()
+        let gate = RequestGate("shared feed held")
+        client.holdNext["get_attention_events"] = gate
+        let store = store(client)
+        let first = Task { await store.refresh() }
+        await fulfillment(of: [gate.started], timeout: 2)
+        let second = Task { await store.refresh() }
+        for _ in 0..<100 { await Task.yield() }
+        first.cancel()
+        gate.release()
+        await second.value
+        await first.value
+        XCTAssertEqual(client.calls.map(\.operation), ["get_attention_events", "list_agents"])
+        XCTAssertNotNil(store.snapshot)
     }
 
     func testEveryVersionedTerminalCanOpenIncludingAwaitingHydration() {
@@ -953,7 +1073,7 @@ final class RequestGate {
 
 @MainActor
 final class PaneClientFixture: CompanionSessionClient {
-    struct Call { let operation: String; let connectionID: UUID; let allowed: Bool? }
+    struct Call { let operation: String; let connectionID: UUID; let allowed: Bool?; var cursor: String? = nil }
     let created = CreatedTerminal(workspaceID: UUID(), paneID: UUID(), targetVersion: UUID())
     var createdWorkspaces: [UUID?] = []
     var createConnections: [UUID] = []
@@ -978,22 +1098,25 @@ final class PaneClientFixture: CompanionSessionClient {
     var workspaces: [APIResponse.Workspace]? = paneWorkspaces()
     var errors: [String: MacClientFailure] = [:]
     var holdNext: [String: RequestGate] = [:]
+    var attentionPage: APIResponse.AttentionPage?
+    var attentionFailureCursor: String?
 
     func call(_ operation: String, connectionID: UUID, limit: Int?, cursor: String?) async throws -> APIResponse {
-        calls.append(Call(operation: operation, connectionID: connectionID, allowed: nil))
+        calls.append(Call(operation: operation, connectionID: connectionID, allowed: nil, cursor: cursor))
         let response: APIResponse
         switch operation {
         case "get_connection_status": response = terminalStatus ?? APIResponse(terminalPreviewAllowed: allowed)
         case "list_panes": response = APIResponse(workspaces: workspaces)
         case "get_attention_events":
-            response = APIResponse(attentionEvents: .init(events: [], nextCursor: "cursor", cursorStatus: "initial", hasMore: false, currentStateRecoveryRequired: false))
+            response = APIResponse(attentionEvents: attentionPage ?? .init(events: [], nextCursor: "cursor", cursorStatus: "initial", hasMore: false, currentStateRecoveryRequired: false))
         default:
             response = APIResponse(capturedAt: capturedAt, agents: [
                 .init(paneID: "agent", workspaceID: "workspace", workspaceName: "awesoMux", provider: "Codex",
                       executionLocation: "local", availability: "attached", state: agentState)
             ])
         }
-        let error = errors[operation]
+        let error: MacClientFailure? = operation == "get_attention_events" && cursor != nil && cursor == attentionFailureCursor
+            ? .closed : errors[operation]
         if let gate = holdNext.removeValue(forKey: operation) { await gate.pause() }
         if let error { throw error }
         return response

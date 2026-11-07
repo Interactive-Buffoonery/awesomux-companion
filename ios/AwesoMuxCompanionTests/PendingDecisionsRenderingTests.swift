@@ -26,6 +26,42 @@ final class PendingDecisionsRenderingTests: XCTestCase {
         try await attach(f, name: "inline-claude-production-disabled")
     }
 
+    func testLightModePermissionDock() async throws {
+        let fixture = DecisionFixture()
+        await fixture.model.refresh()
+        fixture.auth.success = false
+        await fixture.model.answer(fixture.identity, choice: .allow)
+        XCTAssertNotNil(fixture.model.message)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive })
+        let previousKeyWindow = scene.windows.first { $0.isKeyWindow }
+        let host = DecisionRenderingHost(rootView: VStack {
+            Spacer()
+            QuestionDock(request: fixture.pending, decisions: fixture.model)
+        }.background(Cat.page).preferredColorScheme(.light))
+        let appeared = expectation(description: "Light permission dock appeared")
+        host.appeared = { appeared.fulfill() }
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.effectiveGeometry.coordinateSpace.bounds
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            previousKeyWindow?.makeKey()
+        }
+        await fulfillment(of: [appeared], timeout: 5)
+        window.layoutIfNeeded()
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+        }
+        XCTAssertTrue(hasVisibleContent(image))
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Light permission dock with authentication message"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     private func attach(_ fixture: DecisionFixture, name: String) async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .first { $0.activationState == .foregroundActive })

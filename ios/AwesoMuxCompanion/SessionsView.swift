@@ -204,6 +204,18 @@ struct SessionsView: View {
                               detailIsTerminal: pane.preview?.isEmpty == false)
         if let target = pane.terminalTarget(in: workspace.name) {
             Button { destination = target.on(store.record) } label: { row }
+                .contextMenu {
+                    Button("Watch", systemImage: "eye") {
+                        var watching = target.on(store.record)
+                        watching.watchOnly = true
+                        destination = watching
+                    }
+                }
+                .accessibilityAction(named: Text("Watch")) {
+                    var watching = target.on(store.record)
+                    watching.watchOnly = true
+                    destination = watching
+                }
         } else {
             row
         }

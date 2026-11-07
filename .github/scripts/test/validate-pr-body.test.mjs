@@ -62,3 +62,24 @@ test("the untouched template fails and a completed template passes", async () =>
     .replace("Models: ", "Models: None");
   assert.equal(validatePullRequest({ body, files: [".github/workflows/pr-template.yml"] }).valid, true);
 });
+
+test("rejects empty screenshot tables and bare bullets", () => {
+  for (const content of [
+    "| Before | After |\n| --- | --- |\n| | |",
+    "| Before | After |\n| --- | --- |\n| <!-- image/video/link --> | <!-- image/video/link --> |",
+    "| | |",
+    "  -  ",
+    "  *  ",
+  ]) {
+    const body = fullBody.replace(/## UI \/ UX[\s\S]*?(?=## Notes)/, `## UI / UX\n${content}\n\n`);
+    const result = validatePullRequest({ body, files: ["ios/App.swift"] });
+    assert.equal(result.valid, false, content);
+    assert(result.errors.includes("Fill in the `UI / UX` section."), content);
+  }
+});
+
+test("accepts screenshot tables with image content", () => {
+  const table = "| Before | After |\n| --- | --- |\n| ![Before](https://example.com/before.png) | ![After](https://example.com/after.png) |";
+  const body = fullBody.replace(/## UI \/ UX[\s\S]*?(?=## Notes)/, `## UI / UX\n${table}\n\n`);
+  assert.equal(validatePullRequest({ body, files: ["ios/App.swift"] }).valid, true);
+});

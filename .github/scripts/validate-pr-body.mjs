@@ -42,6 +42,7 @@ function visibleText(lines) {
     .join("\n")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/^\s*[-*]\s*$/gm, "")
+    .replace(/^[ \t]*\|[ \t]*Before[ \t]*\|[ \t]*After[ \t]*\|[ \t]*$/gim, "")
     .replace(/^\s*\|(?:\s*:?-+:?\s*\|)+\s*$/gm, "")
     .replace(/[|`*_#>[\]()!-]/g, " ")
     .replace(/\s+/g, " ")

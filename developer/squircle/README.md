@@ -12,8 +12,8 @@ physical-phone acceptance; see [VALIDATION.md](VALIDATION.md).
 The upstream source is pinned to Squircle
 `737f2e881483a4c7237b49d5696adff7d44cad1b`, under the included MIT license.
 The adapter derives from Organized Glitter PR 98 at
-`f8438e8dcfb3e92ee74c233a2e9019aa815382ed` (Interactive Buffoonery's MIT
-adaptation), including its Swift 6 fixes, protocol-2 client, V2-only SQL and
+`f8438e8dcfb3e92ee74c233a2e9019aa815382ed` (see `LICENSE-OG` for its Apache-2.0
+license), including its Swift 6 fixes, protocol-2 client, V2-only SQL and
 explicit Keychain enrollment. OG PR 98 advanced to `e8287a6` during grounding;
 its adapter patch and enrollment source were unchanged. Companion started at
 `76e944a78f7f1bb701aca50c8aaf1338a02a7d34`, ahead of the prior research revision.

@@ -1,0 +1,7 @@
+Companion Squircle adapter
+
+Includes Squircle by Anshu Chimala, MIT License (LICENSE).
+Adapted from developer/squircle in Interactive-Buffoonery/organized-glitter-app
+at f8438e8dcfb3e92ee74c233a2e9019aa815382ed, Apache License 2.0 (LICENSE-OG).
+Companion changes: validated identifiers, isolated offline archive injection,
+personal signing/export checks, coordinated App Group configuration and docs.

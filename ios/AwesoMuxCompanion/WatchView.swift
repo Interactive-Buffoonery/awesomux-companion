@@ -279,7 +279,7 @@ struct WatchView: View {
 }
 
 /// A permission request docked in the pane it came from. Answering never takes over the terminal.
-private struct QuestionDock: View {
+struct QuestionDock: View {
     let request: CompanionPendingDecision
     let decisions: PendingDecisionsModel
     @State private var noteTarget: CompanionDecisionIdentity?
@@ -288,7 +288,7 @@ private struct QuestionDock: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Text(verbatim: "◆ \(request.tool)").foregroundStyle(Cat.mauve)
-                Text("asks permission").foregroundStyle(Cat.subtext0)
+                Text("asks permission").foregroundStyle(Cat.text)
             }
             Text(verbatim: request.summary)
                 .lineLimit(6)
@@ -298,7 +298,7 @@ private struct QuestionDock: View {
                 .background(Cat.crust, in: RoundedRectangle(cornerRadius: 6))
                 .accessibilityLabel("Request summary from Claude, untrusted: \(request.summary)")
             if let message = decisions.message {
-                Text(verbatim: message).foregroundStyle(Cat.subtext0)
+                Text(verbatim: message).foregroundStyle(Cat.text)
             }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 6) { answerButtons }
@@ -316,7 +316,7 @@ private struct QuestionDock: View {
 
     @ViewBuilder private var answerButtons: some View {
                 if decisions.isAnswering {
-                    Text("checking your Mac…").foregroundStyle(Cat.subtext0)
+                    Text("checking your Mac…").foregroundStyle(Cat.text)
                 } else if decisions.hasAttempt(request.identity) {
                     Button("Retry same answer") { Task { await decisions.retry(request.identity) } }
                         .buttonStyle(BarButtonStyle(filled: true))

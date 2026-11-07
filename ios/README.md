@@ -429,6 +429,7 @@ With Input allowed, a normal tap takes control at the phone's size. To observe
 without changing control, long-press the pane and choose **Watch**, or use its
 VoiceOver **Watch** action. That opening stays read-only across reconnects,
 including when the Mac allows Input; keyboard, paste and takeover stay hidden.
+Permission requests can still be answered without taking control of the terminal.
 
 Every attach, reconnect and overflow resync starts a fresh generation. The phone
 checks target identity, dimensions, contiguous byte sequences and snapshot byte

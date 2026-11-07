@@ -43,12 +43,22 @@ class PersonalTests(unittest.TestCase):
     def test_alternate_namespace_covers_both_targets_and_group(self):
         config = {**self.config, 'bundle_id': 'net.example.companion', 'app_group': 'group.net.example.companion', 'team_id': 'ABCDEFGHIJ'}
         spec = personal_spec(config)
-        self.assertNotIn(self.config['bundle_id'], spec)
+        self.assertNotIn('PRODUCT_BUNDLE_IDENTIFIER: ' + self.config['bundle_id'], spec)
         self.assertNotIn(self.config['app_group'], spec)
         self.assertIn('PRODUCT_BUNDLE_IDENTIFIER: net.example.companion.widgets', spec)
         self.assertEqual(spec.count('AwesoMuxAppGroup: group.net.example.companion'), 2)
         self.assertIn('Verify public renderer', spec)
         self.assertIn('watch-manifest.py', spec)
+
+    def test_alternate_namespace_preserves_background_task_contract(self):
+        config = {**self.config, 'bundle_id': 'net.example.companion', 'app_group': 'group.net.example.companion'}
+        spec = personal_spec(config)
+        # Registration uses this source constant; BG task identifiers are scoped
+        # to the installed app and do not need to follow its signing namespace.
+        app = (ROOT / 'ios/AwesoMuxCompanion/App.swift').read_text()
+        import re
+        identifier = re.search(r'static let refreshTaskID = "([^"]+)"', app)[1]
+        self.assertIn('BGTaskSchedulerPermittedIdentifiers: [' + identifier + ']', spec)
 
     def test_export_method_and_destination_matrix(self):
         for method in METHODS | {'app-store', 'app-store-connect', 'enterprise', '', 'Debug'}:

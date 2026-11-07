@@ -29,6 +29,8 @@ def main():
     (args.destination / "app/Squircle/Sources/DeveloperEnrollment.swift").write_text(enrollment)
     (args.destination / "companion-enrollment.swift").write_text(enrollment)
     (args.destination / "companion-config.json").write_text(json.dumps(config, sort_keys=True))
+    notices = "\n\n".join((ROOT / name).read_text() for name in ["NOTICE", "LICENSE", "LICENSE-OG"])
+    (args.destination / "app/Squircle/Overlay/CompanionSquircleNotices.txt").write_text(notices)
     binary = args.destination / "src/bin/companion-inject.rs"
     binary.parent.mkdir(exist_ok=True)
     binary.write_bytes((ROOT / "companion-inject.rs").read_bytes())

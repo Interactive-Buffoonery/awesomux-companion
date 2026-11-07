@@ -23,7 +23,7 @@ class PersonalTests(unittest.TestCase):
         self.fingerprint = hashlib.sha1(self.cert).hexdigest().upper()
         self.options = {'method': 'debugging', 'teamID': self.config['team_id'], 'signingStyle': 'manual',
                         'signingCertificate': self.fingerprint, 'provisioningProfiles': {
-                            self.config['bundle_id']: 'APP-UUID', self.config['bundle_id'] + '.widgets': 'WIDGET-UUID'}}
+                            self.config['bundle_id']: '11111111-1111-1111-1111-111111111111', self.config['bundle_id'] + '.widgets': '22222222-2222-2222-2222-222222222222'}}
 
     def write_json(self, data):
         self.path.write_text(json.dumps(data))
@@ -63,14 +63,14 @@ class PersonalTests(unittest.TestCase):
 
     def test_export_requires_exact_profiles_and_identity(self):
         for change in [{'teamID': 'ABCDEFGHIJ'}, {'signingStyle': 'automatic'}, {'signingCertificate': 'Apple Development'},
-                       {'provisioningProfiles': {self.config['bundle_id']: 'APP-UUID'}}]:
+                       {'provisioningProfiles': {self.config['bundle_id']: '11111111-1111-1111-1111-111111111111'}}]:
             self.path.write_bytes(plistlib.dumps({**self.options, **change}))
             with self.assertRaises(ValueError):
                 export_options(self.path, self.config)
 
     def test_profile_mismatch_fails_before_build(self):
         bundle = self.config['bundle_id']
-        data = {'UUID': 'APP-UUID', 'ApplicationIdentifierPrefix': ['OLDPREFIX1'], 'TeamIdentifier': [self.config['team_id']],
+        data = {'UUID': '11111111-1111-1111-1111-111111111111', 'ApplicationIdentifierPrefix': ['OLDPREFIX1'], 'TeamIdentifier': [self.config['team_id']],
                 'ExpirationDate': datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) + datetime.timedelta(days=1),
                 'ProvisionedDevices': ['synthetic-device'], 'DeveloperCertificates': [self.cert],
                 'Entitlements': {'application-identifier': 'OLDPREFIX1.' + bundle,
@@ -79,7 +79,7 @@ class PersonalTests(unittest.TestCase):
         def check(candidate):
             with patch('personal.run', return_value=subprocess.CompletedProcess([], 0, plistlib.dumps(candidate))):
                 return profile(self.path, bundle, self.config, self.options)
-        self.assertEqual(check(data), 'APP-UUID')
+        self.assertEqual(check(data), '11111111-1111-1111-1111-111111111111')
         for key, value in [('ExpirationDate', datetime.datetime(2000, 1, 1)), ('ProvisionedDevices', []),
                            ('ProvisionsAllDevices', True), ('TeamIdentifier', ['ABCDEFGHIJ']),
                            ('UUID', 'WRONG'), ('DeveloperCertificates', [])]:

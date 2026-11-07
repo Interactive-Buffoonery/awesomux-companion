@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import plistlib
 import shutil
@@ -59,6 +60,8 @@ def profile(path, bundle, config, options):
         raise ValueError("profile does not contain the selected signing certificate")
     if options["provisioningProfiles"][bundle] != data.get("UUID"):
         raise ValueError("export mapping must use this profile UUID")
+    if not re.fullmatch(r"[A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}", data["UUID"]):
+        raise ValueError("invalid provisioning profile UUID")
     return data["UUID"]
 
 
@@ -95,7 +98,7 @@ def generate(config, profiles=None, identity=None):
             if spec.count(marker) != 1:
                 raise ValueError("target signing layout changed")
             spec = spec.replace(marker, marker + "        PROVISIONING_PROFILE_SPECIFIER: " + profile_id + "\n")
-        spec = spec.replace("CODE_SIGN_STYLE: Automatic", "CODE_SIGN_STYLE: Manual\n    CODE_SIGN_IDENTITY: " + identity)
+        spec = spec.replace("CODE_SIGN_STYLE: Automatic", 'CODE_SIGN_STYLE: Manual\n    CODE_SIGN_IDENTITY: "' + identity + '"')
     destination = ROOT / "ios/project.squircle.local.yml"
     destination.write_text(spec)
     package = (ROOT / "ios/build/diagnostics-native/local-package-path.txt").read_text().strip()
@@ -164,6 +167,14 @@ def main():
     verify(exported[0], config)
     if not (exported[0] / "Frameworks/SquircleOverlay.framework/SquircleOverlay").is_file():
         raise ValueError("export lost the overlay")
+    info = plistlib.loads((exported[0] / "Info.plist").read_bytes())
+    linked = run(["otool", "-L", exported[0] / info["CFBundleExecutable"]], capture_output=True).stdout
+    if b"@executable_path/Frameworks/SquircleOverlay.framework/SquircleOverlay" not in linked:
+        raise ValueError("export lost the overlay load command")
+    if not (exported[0] / "Frameworks/SquircleOverlay.framework/CompanionSquircleNotices.txt").is_file():
+        raise ValueError("export lost third-party attribution")
+    if any(path.name == "client.json" for path in exported[0].rglob("*")):
+        raise ValueError("export contains an embedded connection file")
     (output / "receipt.json").write_text(json.dumps({"build_id": build_id, "configuration": "Debug", "method": options["method"],
         "ipa_sha256": hashlib.sha256(ipas[0].read_bytes()).hexdigest()}, indent=2) + "\n")
     print("Personal Debug export verified. No upload, install, service or provider changes.")

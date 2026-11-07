@@ -28,3 +28,5 @@ assert 'static let orchestrationProtocol = "2"' in gateway
 print('PASS: dispatch scope, no mode/model writes, enrollment storage, no embedded credential load, release injection exclusion, service default')
 
 assert (r / 'src/bin/companion-inject.rs').read_bytes() == (adapter / 'companion-inject.rs').read_bytes(), 'Offline injector is stale or modified'
+
+assert (r / 'app/Squircle/Overlay/CompanionSquircleNotices.txt').read_text() == "\n\n".join((adapter / name).read_text() for name in ['NOTICE', 'LICENSE', 'LICENSE-OG']), 'Attribution is stale or missing'

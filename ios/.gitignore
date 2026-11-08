@@ -1,3 +1,7 @@
 AwesoMuxCompanion.xcodeproj/
 AwesoMuxDiagnostics.xcodeproj/
 AwesoMuxDiagnostics/source-manifest.txt
+
+# Personal Squircle setup and generated namespace overrides.
+.squircle/
+project.squircle.local.yml

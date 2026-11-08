@@ -520,3 +520,12 @@ Lifecycle events expose inactive scenes and lock state independently. An age of
 `-1` means no frame or heartbeat has arrived. Byte counts contain no payload.
 Terminal output, input, names, pairing material and credentials are never logged.
 Native renderer and package terminal logging remain disabled.
+
+## Personal Squircle Debug build
+
+Sarah and Ed can prepare an opt-in coding overlay using
+[`developer/squircle/README.md`](../developer/squircle/README.md). It uses a local
+post-archive injector and device-only enrollment, with coordinated app/widget
+signing for the same team or a separate personal namespace. Normal Release and
+TestFlight generation does not include the overlay. Setup, signing, delivery and
+physical-phone acceptance are separate steps; see the guide's current evidence.

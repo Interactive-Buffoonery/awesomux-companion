@@ -84,7 +84,8 @@ struct GlanceSnapshot: Codable, Equatable, Sendable {
 
 /// The latest snapshot, shared with the widget extension through the App Group container.
 enum SharedSnapshot {
-    static let appGroup = "group.com.interactivebuffoonery.awesomux.companion"
+    static let appGroup = Bundle.main.object(forInfoDictionaryKey: "AwesoMuxAppGroup") as? String
+        ?? "group.com.interactivebuffoonery.awesomux.companion"
     /// The widget shows the update age once a connected snapshot is this old.
     static let freshFor: TimeInterval = 15 * 60
 

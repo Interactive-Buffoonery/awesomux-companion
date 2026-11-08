@@ -44,6 +44,13 @@ def render(text, config):
 
 def personal_spec(config):
     spec = (ROOT / "ios/project.yml").read_text()
+    # XcodeGen writes these paths. Keep personal metadata outside tracked files.
+    for target in ["AwesoMuxCompanion", "AwesoMuxCompanionWidgets"]:
+        for filename in ["Info.plist", target + ".entitlements"]:
+            original = target + "/" + filename
+            if spec.count("path: " + original) != 1:
+                raise ValueError("generated metadata layout changed")
+            spec = spec.replace("path: " + original, "path: .squircle/generated/" + target + "/" + filename)
     spec = spec.replace(DEFAULT_GROUP, config["app_group"])
     spec = spec.replace("PRODUCT_BUNDLE_IDENTIFIER: " + DEFAULT_BUNDLE,
                         "PRODUCT_BUNDLE_IDENTIFIER: " + config["bundle_id"])

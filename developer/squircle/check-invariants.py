@@ -8,7 +8,7 @@ r = Path(sys.argv[1])
 adapter = Path(__file__).resolve().parent
 settings = load(r / 'companion-config.json')
 assert subprocess.check_output(['git', '-C', str(r), 'rev-parse', 'HEAD'], text=True).strip() == '737f2e881483a4c7237b49d5696adff7d44cad1b'
-prepared_patch = subprocess.check_output(['git', '-C', str(r), 'diff', '--binary', '--', '.', ':(exclude)app/Squircle/Squircle.xcodeproj'], text=True).replace(' \n', '\n')
+prepared_patch = subprocess.check_output(['git', '-C', str(r), '-c', 'core.abbrev=7', '-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false', 'diff', '--no-color', '--no-ext-diff', '--no-renames', '--binary', '--', '.', ':(exclude)app/Squircle/Squircle.xcodeproj'], text=True).replace(' \n', '\n')
 assert prepared_patch == render((adapter / 'integration.patch').read_text(), settings), 'Prepared adapter is stale or modified'
 assert (r / 'app/Squircle/Sources/DeveloperEnrollment.swift').read_text() == render((adapter / 'DeveloperEnrollment.swift').read_text(), settings), 'Enrollment is stale or modified' 
 src = r / 'app/Squircle/Sources'

@@ -238,3 +238,8 @@ approval. Do not change service configuration as a setup shortcut.
 Public push/PR, delivery publication, phone selection/installation, and any
 service/network changes remain separate explicit approvals. No merge, release,
 TestFlight upload, PR comments or release approvals are included.
+
+Personal generation writes plist and entitlement files under ignored
+`ios/.squircle/generated/`; it never writes alternate namespaces into tracked
+metadata. Use dedicated profiles containing exactly the configured App Group;
+profiles carrying extra groups are deliberately rejected.

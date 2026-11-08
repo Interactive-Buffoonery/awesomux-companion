@@ -50,6 +50,13 @@ class PersonalTests(unittest.TestCase):
         self.assertIn('Verify public renderer', spec)
         self.assertIn('watch-manifest.py', spec)
 
+    def test_personal_metadata_paths_are_ignored(self):
+        spec = personal_spec(self.config)
+        for target in ['AwesoMuxCompanion', 'AwesoMuxCompanionWidgets']:
+            for filename in ['Info.plist', target + '.entitlements']:
+                self.assertIn('path: .squircle/generated/' + target + '/' + filename, spec)
+                self.assertNotIn('path: ' + target + '/' + filename, spec)
+
     def test_alternate_namespace_preserves_background_task_contract(self):
         config = {**self.config, 'bundle_id': 'net.example.companion', 'app_group': 'group.net.example.companion'}
         spec = personal_spec(config)

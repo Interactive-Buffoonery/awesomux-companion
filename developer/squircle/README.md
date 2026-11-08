@@ -174,13 +174,52 @@ route with manual iOS confirmation. No delivery route is configured here. A
 successful archive, download, or install link does not prove installation.
 Manually launch and match the build receipt separately. No silent self-update.
 
-Create a private JSON file through your existing authorized session-enrollment
-process, containing only the upstream fields `t3_url`, `t3_token`,
-`squircle_url`, `squircle_token`, `diagnostic_token`. URLs must be HTTPS. The
+Create a dedicated session on your own T3 Mac. The installed Nightly CLI's
+`auth session issue --help` confirmed these flags during implementation. Replace
+the application path if your installation has a different name, and confirm its
+help before issuance. Run this yourself after approving the session's authority:
+
+```sh
+umask 077
+ELECTRON_RUN_AS_NODE=1 "/Applications/T3 Code (Nightly).app/Contents/MacOS/T3 Code (Nightly)" \
+  "/Applications/T3 Code (Nightly).app/Contents/Resources/app.asar/apps/server/dist/bin.mjs" \
+  auth session issue --scope orchestration:read --scope orchestration:operate \
+  --scope filesystem:read --ttl 30d --label "Companion personal phone" --json \
+  > ios/.squircle/t3-session.json
+```
+
+Keep the issued session ID for later revocation. Copy its token locally into
+`t3_token`; do not use a pairing token, desktop session or database edit. This
+scope set still permits operations beyond the one chat the client displays.
+For renewal, issue a replacement, import it and confirm it works, then use
+`auth session revoke --help` and revoke the old session by ID. Do not revoke
+another client's session.
+
+Ask the owner of the existing Squircle service to authorize your access and
+provide its HTTPS origin, control credential and diagnostic credential through
+a private channel. Do not extract OG's enrollment or change the service to
+obtain them. A service control credential has broader server authority than the
+client's local policy. Without approved service access and reachable HTTPS
+origins, stop enrollment; a successful export cannot supply those prerequisites.
+Ed uses his own approved T3 session and service access.
+
+In a local editor create a private JSON file with exactly these fields:
+
+```json
+{
+  "t3_url": "https://your-existing-t3-origin",
+  "t3_token": "YOUR_OWN_ISSUED_SESSION_TOKEN",
+  "squircle_url": "https://your-authorized-existing-service-origin",
+  "squircle_token": "YOUR_AUTHORIZED_SERVICE_CONTROL_CREDENTIAL",
+  "diagnostic_token": "YOUR_AUTHORIZED_SERVICE_DIAGNOSTIC_CREDENTIAL"
+}
+```
+
+Both origins must be HTTPS without a path, query or embedded credentials. The
 last credential is used for a launch receipt only. Obtain secrets through a
-private secret-input card when working with an agent, never chat. Do not copy
-OG's credentials or read its service config wholesale. Transfer the file through
-a private method you trust to your own phone, then:
+private secret-input card when working with an agent, never chat. Do not put
+values in shell arguments or print the file. Transfer it through a private
+method you trust to your own phone, then:
 
 1. Open the personal app; choose **Import connection file** in Developer tools.
 2. Import your file and choose **Connect** explicitly. The app stores it in its

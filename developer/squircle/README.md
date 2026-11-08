@@ -219,7 +219,8 @@ prepares a separately approved delivery action.
   check trust and phone reachability without disabling TLS or exposing services.
 - To restore normal generation, run `zsh ios/script/generate-watch.sh` through
   process-gate and build normally. It overwrites the ignored personal project
-  and generated plists/entitlements. Never archive TestFlight from a personal
+  to use normal plists/entitlements; ignored personal metadata stays unused.
+  Never archive TestFlight from a personal
   generated project; the TestFlight path regenerates its own normal project.
 - On the phone, Forget the developer connection and revoke its session on the
   Mac. A separately approved normal build removes the injected overlay. Deleting

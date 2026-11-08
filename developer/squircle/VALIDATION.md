@@ -43,8 +43,13 @@ One focused cross-provider Fable source review identified:
 
 The alternate-namespace background-task regression also caught a mismatch:
 bundle replacement is now confined to product IDs and preserves the task ID
-registered by `App.swift`. A fresh focused source recheck is pending; passing
-review does not replace execution evidence.
+registered by `App.swift`. A second fresh focused Fable source recheck approved the code through
+`6b4bb42` and confirmed S1/S2 fixed. Its remaining Git-format nit was narrowed
+with explicit prefixes/context/algorithm. Its proposed Release metadata check
+was added for both app and widget. The suggested failure rationale (absent key
+breaks normal widgets) does not apply: `GlanceSnapshot` retains the existing
+App Group fallback. Actual generated metadata remains an execution checkpoint.
+Source approval does not replace execution evidence.
 
 ## Remaining checks and acceptance
 

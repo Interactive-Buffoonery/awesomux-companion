@@ -1,19 +1,74 @@
 # Companion Squircle evidence
 
-Initial state: clean `feat/squircle-development` at `76e944a`, identical to fetched
-`origin/main`; no open Companion PRs or other Companion Squircle owner found.
-Upstream Squircle HEAD still matched the pinned `737f2e8`. The active OG owner
-was read only; its service, checkout, devices and build state were not changed.
+## Scope and revisions
 
-Preparation into a fresh `/tmp/companion-squircle-prepared` succeeded from the
-upstream pin. The adapter includes the MIT license and parameterizes only
-validated, credential-free Companion identifiers.
+Initial clean branch `feat/squircle-development` and fetched `origin/main`:
+`76e944a78f7f1bb701aca50c8aaf1338a02a7d34`. No open Companion PR or other
+Companion Squircle owner was found. Upstream Squircle still matched pin
+`737f2e881483a4c7237b49d5696adff7d44cad1b`. OG PR98 advanced from the reviewed
+`f8438e8` to `e8287a6`; its reused core adapter/enrollment were unchanged.
+The OG checkout/thread were read only. Its service/build/device state was not
+changed. No phone, service, provider, hook, delivery or release change was made.
 
-Checks and artifact results are recorded below after execution. A source check
-is not a build, and a build is not an interactive or signed-device pass.
+## Executed evidence
 
-Pending: fixture suite, Rust tests/offline injector build, Swift 6 overlay device
-SDK build, renderer validation, normal Release exclusion, signed Debug export,
-app/widget entitlement proof, enrollment/forget/renewal, RPC mutation/approval,
-physical install/launch and LAN/cellular/background/reconnect acceptance.
-No phone has been selected or touched. No service mutation or publication.
+- Fresh pinned preparation succeeded repeatedly, including a new
+  `/tmp/companion-squircle-reviewed` from the current adapter templates.
+  This proves cloning/application/rendering, not compilation.
+- First gated run: five then-current synthetic Python tests passed. The source
+  checker then failed with `NameError: adapter is not defined`; the runner
+  stopped. The checker was fixed and expanded to compare the complete rendered
+  patch, enrollment, injector and bundled notices. No current passing rerun is
+  claimed.
+- Current full-suite rerun is blocked **before start** by process-gate's occupied
+  local slot (OG xcodebuild). This custom job has no supported remote route.
+  No gate bypass, lock removal or cancellation of another owner's job occurred.
+- `git diff --check` passes. The installed T3 Nightly CLI's read-only
+  `auth session issue --help` confirms the documented scope/TTL/JSON flags.
+- Matching local app/widget development profiles and a local signing identity
+  are available, but no signing/build proof follows from their presence. Local
+  inputs are private/ignored; neither identity nor device/profile data is
+  recorded here.
+
+## Independent review ledger
+
+One focused cross-provider Fable source review identified:
+
+| ID | Severity | Resolution |
+| --- | --- | --- |
+| S1 | should | Personal XcodeGen metadata now goes to ignored `.squircle/generated` paths; normal App Group metadata uses the existing generated-Info build-setting pattern. A regression checks all four personal paths. |
+| S2 | should | Offline injector rejects absent/false personal Debug marker before framework building/signing. Rust fixtures cover rejection and explicit acceptance. |
+| N1 | nit | Prepared patch comparison now pins Git prefix, abbreviation, color and external-diff settings. |
+| N2 | nit | Dedicated single-App-Group profiles are documented as an intentional fail-closed constraint. |
+
+The alternate-namespace background-task regression also caught a mismatch:
+bundle replacement is now confined to product IDs and preserves the task ID
+registered by `App.swift`. A fresh focused source recheck is pending; passing
+review does not replace execution evidence.
+
+## Remaining checks and acceptance
+
+Run from a clean committed tree through process-gate on Midnight Pro/Pinguchy:
+
+1. `zsh developer/squircle/verify.sh /absolute/prepared-overlay`: config/export/
+   profile fixtures, complete adapter integrity, V2 SQL fixtures, compiled Swift
+   service-policy/dispatch fixtures, existing iOS tooling tests, shared Swift
+   protocol tests, pinned Rust library/injector tests and injector compilation.
+2. Integrate the pinned source-built renderer with its original receipt using
+   the existing guide; run the personal Debug export recipe in `README.md`.
+   Verify Swift 6 overlay compilation, actual Info markers, signatures, matching
+   host/widget App Groups and unchanged entitlements after injection/export,
+   notices, Mach-O load command and absence of embedded credentials.
+3. Regenerate the normal project and build Release separately. Inspect that
+   actual app with `check-release.py`. An unsigned device-SDK build is separate
+   from a signed archive, phone install and release/distribution proof.
+4. After Sarah explicitly selects a phone and authorizes installation, use T3
+   device tools for agent-driven interactions. Import private enrollment,
+   Connect/Forget/renew, validate exact chat destination, questions/approvals,
+   known-run interruption, attachments, background and reconnect. Use harmless
+   content and never replay an uncertain mutation blindly. Ed signs/enrolls on
+   his own behalf. LAN and cellular/remote connectivity need separate proof.
+
+No simulator, physical-phone, remote/cellular or runtime acceptance is claimed.
+No public push/PR exists. Public content, phone installation, delivery and any
+shared-service/network action require their own explicit approval.

@@ -20,8 +20,10 @@ changed. No phone, service, provider, hook, delivery or release change was made.
   stopped. The checker was fixed and expanded to compare the complete rendered
   patch, enrollment, injector and bundled notices. No current passing rerun is
   claimed.
-- Current full-suite rerun is blocked **before start** by process-gate's occupied
-  local slot (OG xcodebuild). This custom job has no supported remote route.
+- Current full-suite rerun was blocked **before start** by process-gate's occupied
+  local slot, initially attributed to OG xcodebuild, later owner unknown. This
+  custom job has no supported remote route. The owned admission wrapper alone
+  was terminated (exit 143); no test child started and no automation remains.
   No gate bypass, lock removal or cancellation of another owner's job occurred.
 - `git diff --check` passes. The installed T3 Nightly CLI's read-only
   `auth session issue --help` confirms the documented scope/TTL/JSON flags.
@@ -77,3 +79,15 @@ Run from a clean committed tree through process-gate on Midnight Pro/Pinguchy:
 No simulator, physical-phone, remote/cellular or runtime acceptance is claimed.
 No public push/PR exists. Public content, phone installation, delivery and any
 shared-service/network action require their own explicit approval.
+
+## Publication assessment
+
+Merge risk: high. Personal sessions can perform more operations than this
+client displays, and signing and runtime acceptance have not run. Recovery:
+Forget enrollment, revoke its Mac session and install an approved normal build.
+A source revert cannot retract messages or answers already sent.
+
+The two focused source-review rounds used `claude-fable-5-1` at medium effort.
+Both confirmed no shared-service/provider mutation. The second approved source
+through `6b4bb42`; subsequent changes are enrollment/evidence docs and stronger
+artifact/Git-format checks. No native/runtime approval is implied.
